@@ -1,0 +1,2580 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظم‌یار | داشبورد هوشمند پیگیری عادت‌ها و مأموریت‌های دانیال</title>
+    
+    <!-- فونت وزیرمتن -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100..900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- آیکون‌های Lucide -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- کتابخانه جشن (Confetti) -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Vazirmatn', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Vazirmatn', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* اسکرول‌بار سفارشی */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(156, 163, 175, 0.3);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(156, 163, 175, 0.5);
+        }
+
+        /* انیمیشن تیک خوردن */
+        @keyframes pop {
+            0% { transform: scale(0.8); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        .animate-pop {
+            animation: pop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* ترنزیشن‌های نرم */
+        .habit-row {
+            transition: all 0.2s ease-in-out;
+        }
+        .habit-row:hover {
+            transform: translateY(-2px);
+        }
+
+        /* تب‌های صفحات */
+        .page-section {
+            display: none;
+            animation: fadeInPage 0.25s ease-out;
+        }
+        .page-section.active {
+            display: block;
+        }
+        @keyframes fadeInPage {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 min-h-screen transition-colors duration-300 selection:bg-indigo-500 selection:text-white pb-20">
+
+    <!-- نوار بالایی (Header) -->
+    <header class="sticky top-0 z-30 backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-800/80 transition-colors">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="h-20 flex items-center justify-between gap-4">
+                
+                <!-- لوگو و عنوان -->
+                <div class="flex items-center gap-3">
+                    <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30">
+                        <i data-lucide="Flame" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-black tracking-tight bg-gradient-to-r from-indigo-600 to-violet-500 dark:from-indigo-400 dark:to-violet-300 bg-clip-text text-transparent">
+                            نظم‌یار | دانیال
+                        </h1>
+                        <p id="current-date-display" class="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                            در حال بارگذاری تاریخ...
+                        </p>
+                    </div>
+                </div>
+
+                <!-- منوی ناوبری صفحات (دسکتاپ) -->
+                <nav class="hidden md:flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/90 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/50">
+                    <button onclick="switchMainTab('habits')" id="tab-btn-habits" class="main-tab-btn flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition">
+                        <i data-lucide="calendar-check-2" class="w-4 h-4"></i>
+                        <span>پیگیری عادت‌ها</span>
+                    </button>
+                    <button onclick="switchMainTab('workspace')" id="tab-btn-workspace" class="main-tab-btn flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition">
+                        <i data-lucide="check-square" class="w-4 h-4"></i>
+                        <span>میز کار و مأموریت‌ها</span>
+                        <span id="nav-tasks-badge" class="px-1.5 py-0.2 rounded-md text-[10px] bg-indigo-500/20 text-indigo-600 dark:text-indigo-300">۰</span>
+                    </button>
+                    <button onclick="switchMainTab('planner')" id="tab-btn-planner" class="main-tab-btn flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition">
+                        <i data-lucide="sparkles" class="w-4 h-4"></i>
+                        <span>دستیار برنامه‌ریز</span>
+                    </button>
+                    <button onclick="switchMainTab('ideas')" id="tab-btn-ideas" class="main-tab-btn flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition">
+                        <i data-lucide="lightbulb" class="w-4 h-4"></i>
+                        <span>بانک ایده‌ها</span>
+                        <span id="nav-ideas-badge" class="px-1.5 py-0.2 rounded-md text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">۰</span>
+                    </button>
+                </nav>
+
+                <!-- دکمه‌های عملیاتی هدر -->
+                <div class="flex items-center gap-2 sm:gap-3">
+                    <button onclick="toggleSound()" id="sound-btn" title="افکت صوتی" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+                        <i data-lucide="volume-2" class="w-5 h-5"></i>
+                    </button>
+
+                    <button onclick="toggleTheme()" id="theme-btn" title="تغییر پوسته" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+                        <i data-lucide="sun" class="w-5 h-5 hidden dark:block text-amber-400"></i>
+                        <i data-lucide="moon" class="w-5 h-5 block dark:hidden text-slate-700"></i>
+                    </button>
+
+                    <button onclick="openHabitModal()" id="header-add-habit-btn" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2.5 rounded-xl font-semibold text-sm shadow-lg shadow-indigo-600/25 transition">
+                        <i data-lucide="plus" class="w-5 h-5"></i>
+                        <span class="hidden sm:inline">عادت جدید</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- منوی ناوبری صفحات (موبایل) -->
+            <div class="flex md:hidden items-center gap-1.5 overflow-x-auto pb-3 no-scrollbar">
+                <button onclick="switchMainTab('habits')" id="mob-tab-btn-habits" class="mob-tab-btn flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition">
+                    <i data-lucide="calendar-check-2" class="w-4 h-4"></i>
+                    <span>عادت‌ها</span>
+                </button>
+                <button onclick="switchMainTab('workspace')" id="mob-tab-btn-workspace" class="mob-tab-btn flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition">
+                    <i data-lucide="check-square" class="w-4 h-4"></i>
+                    <span>میز کار</span>
+                </button>
+                <button onclick="switchMainTab('planner')" id="mob-tab-btn-planner" class="mob-tab-btn flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition">
+                    <i data-lucide="sparkles" class="w-4 h-4"></i>
+                    <span>برنامه‌ریز</span>
+                </button>
+                <button onclick="switchMainTab('ideas')" id="mob-tab-btn-ideas" class="mob-tab-btn flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition">
+                    <i data-lucide="lightbulb" class="w-4 h-4"></i>
+                    <span>بانک ایده‌ها</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- محتوای اصلی -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+
+        <!-- ========================================================================= -->
+        <!-- صفحه ۱: پیگیری عادت‌ها (داشبورد اصلی نظم‌یار با تمام امکانات) -->
+        <!-- ========================================================================= -->
+        <div id="page-habits" class="page-section active space-y-6">
+
+            <!-- کارت‌های خلاصه وضعیت (KPIs) -->
+            <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- پیشرفت امروز -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">تکمیل شده امروز</span>
+                        <div class="flex items-baseline gap-2">
+                            <h2 id="stat-today-count" class="text-2xl font-black text-slate-800 dark:text-white">۰ از ۰</h2>
+                            <span id="stat-today-percent" class="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">۰٪</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 dark:text-slate-500">هدف روزانه خود را کامل کنید</p>
+                    </div>
+                    <!-- نمودار دایره‌ای کوچک -->
+                    <div class="relative w-14 h-14 flex items-center justify-center">
+                        <svg class="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                            <path class="text-slate-100 dark:text-slate-800" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3.8"/>
+                            <path id="stat-today-ring" class="text-emerald-500 transition-all duration-700 ease-out" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linecap="round"/>
+                        </svg>
+                        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500 absolute"></i>
+                    </div>
+                </div>
+
+                <!-- بالاترین زنجیره فعلی -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">بهترین زنجیره فعلی</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <h2 id="stat-current-streak" class="text-2xl font-black text-slate-800 dark:text-white">۰</h2>
+                            <span class="text-xs font-semibold text-amber-500">روز متوالی</span>
+                        </div>
+                        <p id="stat-current-streak-habit" class="text-[11px] text-slate-400 dark:text-slate-500 truncate max-w-[160px]">—</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                        <i data-lucide="flame" class="w-6 h-6"></i>
+                    </div>
+                </div>
+
+                <!-- رکورد کل زنجیره‌ها -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">رکورد بلندترین زنجیره</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <h2 id="stat-best-streak" class="text-2xl font-black text-slate-800 dark:text-white">۰</h2>
+                            <span class="text-xs font-semibold text-indigo-500">روز</span>
+                        </div>
+                        <p id="stat-best-streak-habit" class="text-[11px] text-slate-400 dark:text-slate-500 truncate max-w-[160px]">—</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                        <i data-lucide="trophy" class="w-6 h-6"></i>
+                    </div>
+                </div>
+
+                <!-- نرخ موفقیت هفتگی -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">عملکرد ۷ روز گذشته</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <h2 id="stat-weekly-rate" class="text-2xl font-black text-slate-800 dark:text-white">۰٪</h2>
+                            <span id="stat-weekly-total" class="text-xs text-slate-400">(۰ ثبت)</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 dark:text-slate-500">میانگین تحقق اهداف هفتگی</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-500 flex items-center justify-center">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </section>
+
+            <!-- بخش نمودار هفتگی و تفکیک دسته‌بندی -->
+            <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- نمودار میله‌ای روند هفتگی -->
+                <div class="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex flex-col justify-between">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-6">
+                        <div>
+                            <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                                <i data-lucide="activity" class="w-5 h-5 text-indigo-500"></i>
+                                نمودار پیوستگی و عملکرد هفتگی
+                            </h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">درصد تکمیل عادت‌ها در هر یک از روزهای دوره انتخابی</p>
+                        </div>
+                        <span id="chart-week-label" class="text-xs font-semibold px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                            هفته جاری
+                        </span>
+                    </div>
+
+                    <!-- محفظه بار چارت -->
+                    <div id="weekly-bar-chart" class="grid grid-cols-7 gap-2 sm:gap-4 items-end h-44 pt-6 px-2 border-b border-slate-100 dark:border-slate-800/80">
+                        <!-- توسط جاوااسکریپت پر می‌شود -->
+                    </div>
+
+                    <!-- راهنمای زیر نمودار -->
+                    <div class="flex items-center justify-between pt-4 text-xs text-slate-400">
+                        <div class="flex items-center gap-4">
+                            <span class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block"></span>
+                                تکمیل عالی (+۸۰٪)
+                            </span>
+                            <span class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-sm bg-indigo-500 inline-block"></span>
+                                متوسط
+                            </span>
+                        </div>
+                        <span id="motivational-quote" class="italic text-slate-500 dark:text-slate-400 hidden sm:inline">
+                            «قدم‌های کوچک روزانه، نتایج بزرگ می‌سازند.»
+                        </span>
+                    </div>
+                </div>
+
+                <!-- تفکیک دسته‌بندی‌ها و پیشرفت کلی -->
+                <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2 mb-1">
+                            <i data-lucide="pie-chart" class="w-5 h-5 text-violet-500"></i>
+                            توزیع و پیشرفت دسته‌بندی‌ها
+                        </h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">نرخ موفقیت هفتگی به تفکیک هر حوزه</p>
+                        
+                        <div id="category-breakdown-list" class="space-y-4">
+                            <!-- توسط جاوااسکریپت پر می‌شود -->
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                        <span class="text-slate-400">مجموع عادت‌های فعال:</span>
+                        <span id="total-active-habits" class="font-bold text-slate-700 dark:text-slate-200">۰ عادت</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- بخش فیلترها و کنترل تقویم هفتگی -->
+            <section class="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-5">
+                
+                <!-- نوار ابزار: فیلتر دسته‌بندی، جستجو و جابجایی هفته -->
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                    
+                    <!-- دکمه‌های فیلتر دسته‌بندی -->
+                    <div id="category-filters" class="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
+                        <!-- توسط جاوااسکریپت پر می‌شود -->
+                    </div>
+
+                    <!-- کنترل‌های جستجو و بازه زمانی -->
+                    <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                        <!-- جستجو -->
+                        <div class="relative flex-1 sm:flex-initial">
+                            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                            <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="جستجوی عادت..." 
+                                class="w-full sm:w-48 pr-9 pl-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/90 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                        </div>
+
+                        <!-- ناوبری هفته -->
+                        <div class="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+                            <button onclick="changeWeek(-1)" title="هفته قبل" class="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition">
+                                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="resetToCurrentWeek()" id="week-Offset-btn" class="px-3 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-indigo-500 transition">
+                                امروز
+                            </button>
+                            <button onclick="changeWeek(1)" id="next-week-btn" title="هفته بعد" class="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition disabled:opacity-30 disabled:pointer-events-none">
+                                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- جدول / لیست عادت‌ها و ماتریس ۷ روزه -->
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[760px] text-right border-collapse">
+                        <thead>
+                            <tr id="table-days-header" class="border-b border-slate-100 dark:border-slate-800/80 text-xs text-slate-400 font-medium">
+                                <!-- ستون‌های هدر جدول توسط جاوااسکریپت ساخته می‌شوند -->
+                            </tr>
+                        </thead>
+                        <tbody id="habits-table-body" class="divide-y divide-slate-100 dark:divide-slate-800/60">
+                            <!-- ردیف عادت‌ها توسط جاوااسکریپت ساخته می‌شوند -->
+                        </tbody>
+                    </table>
+
+                    <!-- حالت خالی (Empty State) -->
+                    <div id="empty-state" class="hidden py-12 text-center space-y-3">
+                        <div class="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400">
+                            <i data-lucide="calendar-plus" class="w-8 h-8"></i>
+                        </div>
+                        <div class="space-y-1">
+                            <h4 class="text-base font-bold text-slate-700 dark:text-slate-200">هیچ عادتی در این بخش یافت نشد!</h4>
+                            <p class="text-xs text-slate-400 max-w-sm mx-auto">برای شروع مسیر رشد فردی، اولین عادت روزانه خود را اضافه کنید یا فیلتر دسته‌بندی را تغییر دهید.</p>
+                        </div>
+                        <button onclick="openHabitModal()" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition">
+                            <i data-lucide="plus" class="w-4 h-4"></i>
+                            افزودن عادت جدید
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ========================================================================= -->
+        <!-- صفحه ۲: میز کار و مأموریت‌ها (اولویت‌بندی، خط خوردن کارهای انجام شده، انتقال به فردا و نمودار پیشرفت) -->
+        <!-- ========================================================================= -->
+        <div id="page-workspace" class="page-section space-y-6">
+            
+            <!-- کارت‌های KPI میز کار -->
+            <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- درصد پیشرفت امروز -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">پیشرفت مأموریت‌های امروز</span>
+                        <div class="flex items-baseline gap-2">
+                            <h2 id="ws-stat-today-count" class="text-2xl font-black text-slate-800 dark:text-white">۰ از ۰</h2>
+                            <span id="ws-stat-today-percent" class="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">۰٪</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 dark:text-slate-500">بر اساس اولویت‌های ثبت‌شده</p>
+                    </div>
+                    <div class="relative w-14 h-14 flex items-center justify-center">
+                        <svg class="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                            <path class="text-slate-100 dark:text-slate-800" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3.8"/>
+                            <path id="ws-stat-today-ring" class="text-indigo-500 transition-all duration-700 ease-out" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linecap="round"/>
+                        </svg>
+                        <i data-lucide="target" class="w-5 h-5 text-indigo-500 absolute"></i>
+                    </div>
+                </div>
+
+                <!-- اولویت شماره ۱ امروز (The One Thing) -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1 min-w-0 pr-1">
+                        <span class="text-xs font-medium text-rose-500 flex items-center gap-1">
+                            <i data-lucide="crown" class="w-3.5 h-3.5"></i>
+                            اولویت شماره ۱ (مهم‌ترین کار)
+                        </span>
+                        <h2 id="ws-stat-one-thing" class="text-sm font-black text-slate-800 dark:text-white truncate">ثبت نشده</h2>
+                        <p id="ws-stat-one-thing-status" class="text-[11px] text-slate-400 dark:text-slate-500">تمرکز اصلی روز</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0">
+                        <i data-lucide="zap" class="w-6 h-6"></i>
+                    </div>
+                </div>
+
+                <!-- مجموع سهمیه زمانی امروز -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">سهمیه زمانی امروز</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <h2 id="ws-stat-time-budget" class="text-2xl font-black text-slate-800 dark:text-white">۰</h2>
+                            <span class="text-xs font-semibold text-amber-500">دقیقه</span>
+                        </div>
+                        <p id="ws-stat-time-done" class="text-[11px] text-slate-400 dark:text-slate-500">۰ دقیقه انجام شده</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                        <i data-lucide="clock" class="w-6 h-6"></i>
+                    </div>
+                </div>
+
+                <!-- نرخ موفقیت کل مأموریت‌ها -->
+                <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">درصد موفقیت کل کارها</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <h2 id="ws-stat-overall-rate" class="text-2xl font-black text-emerald-500">۰٪</h2>
+                            <span id="ws-stat-overall-count" class="text-xs text-slate-400">(۰ از ۰)</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 dark:text-slate-500">برآیند کل مأموریت‌ها</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                        <i data-lucide="award" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </section>
+
+            <!-- بخش لیست مأموریت‌ها + نمودار پیشرفت ۷ روزه کارها -->
+            <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- ستون اصلی: لیست کارها و کنترل‌های انتقال به فردا -->
+                <div class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-5">
+                    
+                    <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                            <h3 class="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
+                                <i data-lucide="list-Ordered" class="w-5 h-5 text-indigo-500"></i>
+                                لیست اولویت‌بندی مأموریت‌ها
+                            </h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">کارهای انجام‌شده حذف نمی‌شوند؛ خط می‌خورند تا حس پیشرفتت کامل حفظ شود.</p>
+                        </div>
+
+                        <!-- دکمه‌های عملیاتی میز کار -->
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button onclick="moveAllPendingToTomorrow()" title="انتقال تمام کارهای ناتمام امروز به فردا" class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition">
+                                <i data-lucide="calendar-arrow-up" class="w-4 h-4"></i>
+                                <span>انتقال ناتمام‌ها به فردا</span>
+                            </button>
+                            <button onclick="applyTomorrowTasksToToday()" title="آوردن برنامه فردا به لیست امروز" class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 transition">
+                                <i data-lucide="arrow-down-to-dot" class="w-4 h-4"></i>
+                                <span>شروع برنامه فردا از همین الان</span>
+                            </button>
+                            <button onclick="openTaskModal()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20 transition">
+                                <i data-lucide="plus" class="w-4 h-4"></i>
+                                <span>کار جدید</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- فیلتر روز در میز کار -->
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                            <button onclick="setWorkspaceFilter('all')" id="ws-filter-all" class="px-3 py-1.5 rounded-lg text-xs font-bold transition">همه (امروز و فردا)</button>
+                            <button onclick="setWorkspaceFilter('today')" id="ws-filter-today" class="px-3 py-1.5 rounded-lg text-xs font-bold transition">فقط امروز</button>
+                            <button onclick="setWorkspaceFilter('tomorrow')" id="ws-filter-tomorrow" class="px-3 py-1.5 rounded-lg text-xs font-bold transition">برنامه فردا</button>
+                        </div>
+
+                        <button onclick="switchMainTab('planner')" class="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                            <span>چیدن برنامه با دستیار هوشمند</span>
+                        </button>
+                    </div>
+
+                    <!-- کانتینر کارت‌های مأموریت -->
+                    <div id="ws-tasks-list" class="space-y-3">
+                        <!-- توسط جاوااسکریپت پر می‌شود -->
+                    </div>
+
+                    <!-- حالت خالی میز کار -->
+                    <div id="ws-empty-state" class="hidden py-12 text-center space-y-3">
+                        <div class="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400">
+                            <i data-lucide="check-square" class="w-8 h-8"></i>
+                        </div>
+                        <div class="space-y-1">
+                            <h4 class="text-base font-bold text-slate-700 dark:text-slate-200">هیچ مأموریتی در این بخش ثبت نشده!</h4>
+                            <p class="text-xs text-slate-400 max-w-sm mx-auto">با استفاده از «دستیار برنامه‌ریز» اولویت‌های خودت رو بچین یا مستقیم کار جدید اضافه کن.</p>
+                        </div>
+                        <div class="flex items-center justify-center gap-2 pt-1">
+                            <button onclick="switchMainTab('planner')" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition">
+                                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                                رفتن به دستیار برنامه‌ریز
+                            </button>
+                            <button onclick="openTaskModal()" class="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition">
+                                <i data-lucide="plus" class="w-4 h-4"></i>
+                                ثبت دستی
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ستون کناری: نمودار پیشرفت مأموریت‌ها و بلوک‌های زمانی منعطف دانیال -->
+                <div class="space-y-6">
+                    <!-- نمودار ۷ روزه درصد موفقیت کارها -->
+                    <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2 mb-1">
+                                <i data-lucide="trending-up" class="w-5 h-5 text-emerald-500"></i>
+                                نمودار پیشرفت و موفقیت روزانه
+                            </h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">درصد تحقق مأموریت‌ها در ۷ روز اخیر</p>
+                        </div>
+
+                        <div id="ws-tasks-bar-chart" class="grid grid-cols-7 gap-2 items-end h-40 pt-6 px-1 border-b border-slate-100 dark:border-slate-800">
+                            <!-- توسط جاوااسکریپت پر می‌شود -->
+                        </div>
+
+                        <div class="pt-3 flex items-center justify-between text-[11px] text-slate-400">
+                            <span>نرخ موفقیت امروز:</span>
+                            <span id="ws-chart-today-badge" class="font-bold text-indigo-500">۰٪</span>
+                        </div>
+                    </div>
+
+                    <!-- راهنمای بلوک‌های زمانی منعطف دانیال (بدون ساعت خشک) -->
+                    <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-4">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                                <i data-lucide="layers" class="w-4 h-4 text-violet-500"></i>
+                                قطب‌نمای بلوک‌های روزانه دانیال
+                            </h3>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-500/10 text-violet-500">منعطف</span>
+                        </div>
+                        <div class="space-y-2.5 text-xs">
+                            <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50">
+                                <div class="font-bold text-slate-700 dark:text-slate-200">۱. فرود و شارژ (حدود ۳ تا ۴ عصر)</div>
+                                <p class="text-[11px] text-slate-400 mt-0.5">ناهار + نهایتاً ۴۰ دقیقه چرت عصرگاهی برای ریست مغز</p>
+                            </div>
+                            <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50">
+                                <div class="font-bold text-slate-700 dark:text-slate-200">۲. سنگر مدرسه و تکالیف (حدود ۴ تا ۷ عصر)</div>
+                                <p class="text-[11px] text-slate-400 mt-0.5">پومودوروی پینگ‌پنگی (۴۵ دقیقه درس + استراحت و چایی)</p>
+                            </div>
+                            <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50">
+                                <div class="font-bold text-slate-700 dark:text-slate-200">۳. شلیک ایتا و پروژه/کلاس (۷ تا ۹:۳۰ شب)</div>
+                                <p class="text-[11px] text-slate-400 mt-0.5">ارسال طرح ایتا + کدنویسی HTML/CSS و CRM (یا کلاس Power BI)</p>
+                            </div>
+                            <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50">
+                                <div class="font-bold text-slate-700 dark:text-slate-200">۴. تفریح خالص و خلبان بقا (۹:۳۰ تا ۱۲ شب)</div>
+                                <p class="text-[11px] text-slate-400 mt-0.5">استراحت بدون عذاب وجدان + حمام/بهداشت + چیدن اولویت فردا</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </div>
+
+        <!-- ========================================================================= -->
+        <!-- صفحه ۳: دستیار برنامه‌ریز (ویزارد تعاملی اولویت ۱ تا آخر + توضیحات + زمان) -->
+        <!-- ========================================================================= -->
+        <div id="page-planner" class="page-section">
+            <div class="max-w-3xl mx-auto bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[74vh] min-h-[540px]">
+                
+                <!-- هدر چت برنامه‌ریز -->
+                <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
+                    <div class="flex items-center gap-3">
+                        <div class="w-11 h-11 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                            <i data-lucide="bot" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-black text-slate-800 dark:text-white">دستیار هوشمند اولویت‌بندی (روش Ivy Lee & The One Thing)</h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">کارها رو از اولویت ۱ تا آخر به همراه توضیحات و سهمیه زمانیت می‌چینه</p>
+                        </div>
+                    </div>
+                    <button onclick="resetPlannerWizard()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 text-xs font-bold transition">
+                        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                        <span>شروع مجدد</span>
+                    </button>
+                </div>
+
+                <!-- پیام‌های چت -->
+                <div id="planner-chat-box" class="flex-1 overflow-y-auto p-6 space-y-4">
+                    <!-- توسط جاوااسکریپت پر می‌شود -->
+                </div>
+
+                <!-- دکمه‌های انتخاب سریع ویزارد -->
+                <div id="planner-quick-actions" class="hidden px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
+                    <!-- توسط جاوااسکریپت پر می‌شود -->
+                </div>
+
+                <!-- فرم ورودی چت -->
+                <form id="planner-chat-form" onsubmit="handlePlannerSubmit(event)" class="p-4 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                    <input type="text" id="planner-chat-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off"
+                        class="flex-1 px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                    <button type="submit" id="planner-send-btn" class="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition">
+                        <span>ارسال</span>
+                        <i data-lucide="send" class="w-4 h-4"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- ========================================================================= -->
+        <!-- صفحه ۴: بانک ایده‌ها (پارکینگ ایده‌ها با دسته‌بندی کامل و تبدیل به مأموریت) -->
+        <!-- ========================================================================= -->
+        <div id="page-ideas" class="page-section space-y-6">
+            
+            <!-- بخش ثبت سریع ایده جدید -->
+            <section class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
+                            <i data-lucide="lightbulb" class="w-5 h-5 text-amber-500"></i>
+                            پارکینگ ایده‌های دانیال (تخلیه بار شناختی مغز)
+                        </h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">هر ایده، پروژه یا آموزشی که به ذهنت می‌رسه رو با دسته‌بندی اینجا پارک کن تا ذهنت موقع کار و استراحت درگیرش نمونه.</p>
+                    </div>
+                </div>
+
+                <form onsubmit="addNewIdea(event)" class="grid grid-cols-1 md:grid-cols-12 gap-3 pt-2">
+                    <div class="md:col-span-5">
+                        <input type="text" id="idea-title-input" required placeholder="عنوان ایده یا پروژه (مثلاً: ساخت داشبورد معاملات با Power BI)" 
+                            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                    </div>
+                    <div class="md:col-span-4">
+                        <input type="text" id="idea-note-input" placeholder="توضیح کوتاه یا لینک/منبع (اختیاری)" 
+                            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                    </div>
+                    <div class="md:col-span-2">
+                        <select id="idea-category-select" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                            <option value="project">پروژه و کدنویسی 💻</option>
+                            <option value="learning">آموزش و مهارت 📚</option>
+                            <option value="business">مغازه و ایتا 💼</option>
+                            <option value="personal">شخصی و تفریح 🎸</option>
+                        </select>
+                    </div>
+                    <div class="md:col-span-1">
+                        <button type="submit" class="w-full h-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-indigo-600/25 transition">
+                            <i data-lucide="plus" class="w-4 h-4"></i>
+                            <span>ثبت</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- فیلتر دسته‌بندی ایده‌ها و لیست کارت‌ها -->
+            <section class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-5">
+                <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                    <div id="idea-category-filters" class="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                        <!-- توسط جاوااسکریپت پر می‌شود -->
+                    </div>
+                </div>
+
+                <div id="ideas-grid-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <!-- توسط جاوااسکریپت پر می‌شود -->
+                </div>
+            </section>
+        </div>
+
+    </main>
+
+    <!-- مودال افزودن / ویرایش عادت (کد اصلی نظم‌یار) -->
+    <div id="habit-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 relative overflow-hidden">
+            
+            <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <h3 id="modal-title" class="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
+                    <i data-lucide="sparkles" class="w-5 h-5 text-indigo-500"></i>
+                    <span>ایجاد عادت جدید</span>
+                </h3>
+                <button onclick="closeHabitModal()" class="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <form id="habit-form" onsubmit="saveHabit(event)" class="space-y-4">
+                <input type="hidden" id="habit-id-input">
+
+                <!-- عنوان عادت -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">عنوان عادت *</label>
+                    <input type="text" id="habit-title-input" required placeholder="مثلاً: مطالعه ۲۰ صفحه کتاب" 
+                        class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                </div>
+
+                <!-- انتخاب دسته‌بندی و هدف هفتگی -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">دسته‌بندی</label>
+                        <select id="habit-category-input" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                            <option value="health">سلامتی و بهداشت</option>
+                            <option value="learning">مطالعه و یادگیری</option>
+                            <option value="work">کار و بهره‌وری</option>
+                            <option value="mindfulness">آرامش و نظم شخصی</option>
+                            <option value="finance">مدیریت مالی</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">هدف در هفته</label>
+                        <select id="habit-goal-input" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                            <option value="7">هر روز (۷ روز)</option>
+                            <option value="6">۶ روز در هفته</option>
+                            <option value="5">۵ روز در هفته</option>
+                            <option value="4">۴ روز در هفته</option>
+                            <option value="3">۳ روز در هفته</option>
+                            <option value="2">۲ روز در هفته</option>
+                            <option value="1">۱ روز در هفته</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- انتخاب آیکون/ایموجی -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">انتخاب نماد</label>
+                    <div id="emoji-picker" class="grid grid-cols-8 gap-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80">
+                        <!-- توسط جاوااسکریپت پر می‌شود -->
+                    </div>
+                </div>
+
+                <!-- انتخاب رنگ -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">رنگ شاخص</label>
+                    <div id="color-picker" class="flex items-center gap-2.5 pt-1">
+                        <!-- توسط جاوااسکریپت پر می‌شود -->
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                    <button type="button" onclick="closeHabitModal()" class="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                        انصراف
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/25 transition">
+                        ذخیره عادت
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- مودال افزودن / ویرایش کار در میز کار -->
+    <div id="task-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <h3 id="task-modal-title" class="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
+                    <i data-lucide="check-square" class="w-5 h-5 text-indigo-500"></i>
+                    <span>ثبت مأموریت جدید</span>
+                </h3>
+                <button onclick="closeTaskModal()" class="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <form onsubmit="saveTaskFromModal(event)" class="space-y-4">
+                <input type="hidden" id="task-id-input">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">عنوان کار *</label>
+                    <input type="text" id="task-title-input" required placeholder="مثلاً: دیدن ۴۵ دقیقه دوره CSS یا طراحی بنر ایتا"
+                        class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">توضیحات و جزئیات (اختیاری)</label>
+                    <textarea id="task-desc-input" rows="2" placeholder="مثلاً: تمرین فلکس‌باکس و پیاده‌سازی روی فرم CRM مغازه..."
+                        class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"></textarea>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">شماره اولویت</label>
+                        <input type="number" id="task-priority-input" min="1" max="20" value="1" required
+                            class="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">زمان (دقیقه)</label>
+                        <input type="number" id="task-duration-input" min="5" max="600" value="45" required
+                            class="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">روز هدف</label>
+                        <select id="task-day-input" class="w-full px-2.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white">
+                            <option value="today">امروز</option>
+                            <option value="tomorrow">فردا</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                    <button type="button" onclick="closeTaskModal()" class="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                        انصراف
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/25 transition">
+                        ذخیره مأموریت
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- مودال تایید حذف -->
+    <div id="delete-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
+            <div class="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto">
+                <i data-lucide="trash-2" class="w-7 h-7"></i>
+            </div>
+            <div class="space-y-1">
+                <h3 class="text-base font-black text-slate-800 dark:text-white">حذف عادت</h3>
+                <p id="delete-modal-desc" class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    آیا از حذف این عادت و تمام سوابق ثبت‌شده آن اطمینان دارید؟
+                </p>
+            </div>
+            <div class="flex items-center justify-center gap-2 pt-2">
+                <button onclick="closeDeleteModal()" class="flex-1 py-2.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition">
+                    لغو
+                </button>
+                <button id="confirm-delete-btn" class="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/25 transition">
+                    بله، حذف شود
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- اعلان (Toast) -->
+    <div id="toast-container" class="fixed bottom-5 left-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <script>
+        /**************************************************************
+         * پیکربندی، داده‌های اولیه و متغیرهای سراسری
+         **************************************************************/
+        const CATEGORIES = {
+            all: { label: 'همه عادت‌ها', icon: 'layers', color: '#6366f1' },
+            health: { label: 'سلامتی و بهداشت', icon: 'heart-pulse', color: '#10b981' },
+            learning: { label: 'مطالعه و یادگیری', icon: 'book-open', color: '#3b82f6' },
+            work: { label: 'کار و بهره‌وری', icon: 'briefcase', color: '#8b5cf6' },
+            mindfulness: { label: 'ذهن‌آگاهی و نظم', icon: 'sparkles', color: '#f59e0b' },
+            finance: { label: 'مدیریت مالی', icon: 'wallet', color: '#ec4899' }
+        };
+
+        const IDEA_CATEGORIES = {
+            all: { label: 'همه ایده‌ها', color: '#6366f1' },
+            project: { label: 'پروژه و کدنویسی 💻', color: '#8b5cf6' },
+            learning: { label: 'آموزش و مهارت 📚', color: '#3b82f6' },
+            business: { label: 'مغازه و ایتا 💼', color: '#10b981' },
+            personal: { label: 'شخصی و تفریح 🎸', color: '#f59e0b' }
+        };
+
+        const EMOJIS = ['🚿', '📚', '💻', '🎯', '🧹', '💧', '🎨', '💰', '🎸', '✍️', '🦷', '📵', '🏋️‍♂️', '🧠', '🍵', '✨'];
+        
+        const COLORS = [
+            { name: 'indigo', hex: '#6366f1' },
+            { name: 'emerald', hex: '#10b981' },
+            { name: 'rose', hex: '#f43f5e' },
+            { name: 'amber', hex: '#f59e0b' },
+            { name: 'sky', hex: '#0ea5e9' },
+            { name: 'violet', hex: '#8b5cf6' },
+            { name: 'pink', hex: '#ec4899' },
+            { name: 'teal', hex: '#14b8a6' }
+        ];
+
+        let state = {
+            activeMainTab: 'habits',
+            habits: [],
+            tasks: [],
+            ideas: [],
+            selectedCategory: 'all',
+            selectedIdeaCategory: 'all',
+            workspaceFilter: 'all',
+            searchQuery: '',
+            weekOffset: 0,
+            soundEnabled: true,
+            selectedEmoji: '🚿',
+            selectedColor: '#6366f1',
+            habitToDelete: null
+        };
+
+        /**************************************************************
+         * توابع کمکی تاریخ و اعداد فارسی
+         **************************************************************/
+        const toPersianNum = (num) => {
+            if (num === null || num === undefined) return '';
+            const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+            return String(num).replace(/\d/g, x => persianDigits[x]);
+        };
+
+        const escapeHtml = (unsafe) => {
+            return (unsafe || '').toString()
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        };
+
+        const getDateKey = (date) => {
+            const d = new Date(date);
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const addDays = (date, days) => {
+            const result = new Date(date);
+            result.setDate(result.getDate() + days);
+            return result;
+        };
+
+        const getTodayKey = () => getDateKey(new Date());
+        const getTomorrowKey = () => getDateKey(addDays(new Date(), 1));
+
+        const getWeekDays = (offset = 0) => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const dayOfWeek = today.getDay();
+            const diffToSaturday = (dayOfWeek + 1) % 7; 
+            const startOfCurrentWeek = addDays(today, -diffToSaturday + (offset * 7));
+
+            const days = [];
+            for (let i = 0; i < 7; i++) {
+                const d = addDays(startOfCurrentWeek, i);
+                days.push({
+                    date: d,
+                    key: getDateKey(d),
+                    weekdayName: new Intl.DateTimeFormat('fa-IR', { weekday: 'short' }).format(d),
+                    weekdayFull: new Intl.DateTimeFormat('fa-IR', { weekday: 'long' }).format(d),
+                    dayNumber: new Intl.DateTimeFormat('fa-IR', { day: 'numeric' }).format(d),
+                    monthName: new Intl.DateTimeFormat('fa-IR', { month: 'short' }).format(d),
+                    isToday: getDateKey(d) === getDateKey(today),
+                    isFuture: d > today
+                });
+            }
+            return days;
+        };
+
+        /**************************************************************
+         * افکت صوتی با Web Audio API
+         **************************************************************/
+        const playSound = (type = 'check') => {
+            if (!state.soundEnabled) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                if (type === 'check') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(520, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.15);
+                } else if (type === 'uncheck') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(400, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(260, ctx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.12);
+                }
+            } catch (e) {}
+        };
+
+        /**************************************************************
+         * محاسبه زنجیره (Streak) فعلی و بهترین رکورد
+         **************************************************************/
+        const calculateStreaks = (completedDatesDict) => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayKey = getDateKey(today);
+            const yesterdayKey = getDateKey(addDays(today, -1));
+
+            let currentStreak = 0;
+            let checkDate = completedDatesDict[todayKey] ? today : (completedDatesDict[yesterdayKey] ? addDays(today, -1) : null);
+
+            if (checkDate) {
+                while (completedDatesDict[getDateKey(checkDate)]) {
+                    currentStreak++;
+                    checkDate = addDays(checkDate, -1);
+                }
+            }
+
+            const sortedKeys = Object.keys(completedDatesDict)
+                .filter(k => completedDatesDict[k])
+                .sort();
+
+            let bestStreak = 0;
+            let tempStreak = 0;
+            let prevDate = null;
+
+            for (const key of sortedKeys) {
+                const [y, m, d] = key.split('-').map(Number);
+                const curDate = new Date(y, m - 1, d);
+                if (!prevDate) {
+                    tempStreak = 1;
+                } else {
+                    const diffDays = Math.round((curDate - prevDate) / (1000 * 60 * 60 * 24));
+                    if (diffDays === 1) {
+                        tempStreak++;
+                    } else if (diffDays > 1) {
+                        tempStreak = 1;
+                    }
+                }
+                if (tempStreak > bestStreak) bestStreak = tempStreak;
+                prevDate = curDate;
+            }
+
+            return {
+                current: currentStreak,
+                best: Math.max(bestStreak, currentStreak)
+            };
+        };
+
+        /**************************************************************
+         * داده‌های پیش‌فرض شخصی‌سازی شده برای دانیال + ذخیره‌سازی
+         **************************************************************/
+        const initDefaultHabits = () => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const makeHistory = (daysPattern) => {
+                const map = {};
+                daysPattern.forEach(offset => {
+                    map[getDateKey(addDays(today, offset))] = true;
+                });
+                return map;
+            };
+
+            return [
+                {
+                    id: 'h1',
+                    title: 'حمام، روتین پوست و بهداشت شخصی (خلبان خودکار)',
+                    category: 'health',
+                    emoji: '🚿',
+                    color: '#0ea5e9',
+                    weeklyGoal: 4,
+                    completedDates: makeHistory([0, -2, -4, -6, -8])
+                },
+                {
+                    id: 'h2',
+                    title: 'آماده‌سازی و ارسال محتوای کانال ایتا (۱ روز جلوتر)',
+                    category: 'work',
+                    emoji: '🎨',
+                    color: '#8b5cf6',
+                    weeklyGoal: 7,
+                    completedDates: makeHistory([0, -1, -2, -3, -4, -5, -6])
+                },
+                {
+                    id: 'h3',
+                    title: 'اسپرینت کدنویسی فرانت‌اند (HTML/CSS) و پروژه CRM',
+                    category: 'learning',
+                    emoji: '💻',
+                    color: '#6366f1',
+                    weeklyGoal: 5,
+                    completedDates: makeHistory([0, -1, -3, -4, -6])
+                },
+                {
+                    id: 'h4',
+                    title: 'بستن پرونده تکالیف و درس‌های هنرستان',
+                    category: 'learning',
+                    emoji: '📚',
+                    color: '#10b981',
+                    weeklyGoal: 5,
+                    completedDates: makeHistory([0, -1, -2, -4, -5])
+                },
+                {
+                    id: 'h5',
+                    title: 'مرتب کردن اتاق و جمع کردن کیف فردا قبل از خواب',
+                    category: 'mindfulness',
+                    emoji: '🧹',
+                    color: '#f59e0b',
+                    weeklyGoal: 7,
+                    completedDates: makeHistory([0, -1, -2, -3, -5, -6])
+                },
+                {
+                    id: 'h6',
+                    title: 'چیدن اولویت‌های فردا (The One Thing) در ۱۱:۳۰ شب',
+                    category: 'work',
+                    emoji: '🎯',
+                    color: '#ec4899',
+                    weeklyGoal: 7,
+                    completedDates: makeHistory([0, -1, -2, -3, -4])
+                }
+            ];
+        };
+
+        const initDefaultTasks = () => {
+            const todayKey = getTodayKey();
+            return [
+                {
+                    id: 't1',
+                    title: 'طراحی عکس با هوش مصنوعی و ارسال متن کانال ایتا',
+                    description: 'گرفتن چند رفرنس برای تخت خواب و ارسال در ساعت ۷ شب برای تایید به موقع',
+                    priority: 1,
+                    duration: 60,
+                    targetDate: todayKey,
+                    completed: false
+                },
+                {
+                    id: 't2',
+                    title: 'تکالیف مدرسه و تمرین فتوشاپ پایه یازدهم',
+                    description: 'بخش‌های عملی کلاس امروز به صورت پینگ‌پنگی (۴۵ دقیقه کار + استراحت)',
+                    priority: 2,
+                    duration: 90,
+                    targetDate: todayKey,
+                    completed: false
+                },
+                {
+                    id: 't3',
+                    title: 'مشاهده دوره HTML/CSS و پیاده‌سازی بخش اول CRM مغازه',
+                    description: 'تمرکز روی ساختار فرم مشتریان بدون کمال‌گرایی افراطی',
+                    priority: 3,
+                    duration: 60,
+                    targetDate: todayKey,
+                    completed: false
+                }
+            ];
+        };
+
+        const initDefaultIdeas = () => {
+            return [
+                {
+                    id: 'id1',
+                    title: 'ساخت داشبورد معاملات، سود و ضرر با Power BI',
+                    note: 'بعد از اتمام دوره فعلی یکشنبه‌ها و سه‌شنبه‌ها استارت بخوره',
+                    category: 'project',
+                    createdAt: 'پارک‌شده برای ماه بعد'
+                },
+                {
+                    id: 'id2',
+                    title: 'شروع یادگیری زبان پایتون (مکمل هوش مصنوعی و دیتا)',
+                    note: 'پس از تکمیل دوره ۷ ساعته HTML و ۱۳ ساعته CSS',
+                    category: 'learning',
+                    createdAt: 'پارک‌شده در بانک ایده'
+                },
+                {
+                    id: 'id3',
+                    title: 'ثبت‌نام کلاس گیتار',
+                    note: 'وقتی تایم سه‌شنبه‌های کلاس Power BI آزاد شد',
+                    category: 'personal',
+                    createdAt: 'پارک‌شده در بانک ایده'
+                },
+                {
+                    id: 'id4',
+                    title: 'سیستم اتوماسیون پیام‌های مشتریان در اپ CRM مغازه',
+                    note: 'نسخه ۲ پروژه نرم‌افزار مغازه',
+                    category: 'business',
+                    createdAt: 'پارک‌شده در بانک ایده'
+                }
+            ];
+        };
+
+        const loadState = () => {
+            try {
+                const savedHabits = localStorage.getItem('nazmyar_habits_v1');
+                state.habits = savedHabits ? JSON.parse(savedHabits) : initDefaultHabits();
+
+                const savedTasks = localStorage.getItem('nazmyar_danial_tasks_v1');
+                state.tasks = savedTasks ? JSON.parse(savedTasks) : initDefaultTasks();
+
+                const savedIdeas = localStorage.getItem('nazmyar_danial_ideas_v1');
+                state.ideas = savedIdeas ? JSON.parse(savedIdeas) : initDefaultIdeas();
+
+                saveState();
+            } catch (e) {
+                state.habits = initDefaultHabits();
+                state.tasks = initDefaultTasks();
+                state.ideas = initDefaultIdeas();
+            }
+        };
+
+        const saveState = () => {
+            try {
+                localStorage.setItem('nazmyar_habits_v1', JSON.stringify(state.habits));
+                localStorage.setItem('nazmyar_danial_tasks_v1', JSON.stringify(state.tasks));
+                localStorage.setItem('nazmyar_danial_ideas_v1', JSON.stringify(state.ideas));
+            } catch (e) {
+                console.error('خطا در ذخیره اطلاعات:', e);
+            }
+        };
+
+        /**************************************************************
+         * مدیریت جابجایی بین صفحات (Tabs)
+         **************************************************************/
+        const switchMainTab = (tabName) => {
+            state.activeMainTab = tabName;
+            document.querySelectorAll('.page-section').forEach(sec => sec.classList.remove('active'));
+            const activeSec = document.getElementById(`page-${tabName}`);
+            if (activeSec) activeSec.classList.add('active');
+
+            // استایل دکمه‌های دسکتاپ و موبایل
+            ['habits', 'workspace', 'planner', 'ideas'].forEach(t => {
+                const dBtn = document.getElementById(`tab-btn-${t}`);
+                const mBtn = document.getElementById(`mob-tab-btn-${t}`);
+                const isAct = t === tabName;
+
+                if (dBtn) {
+                    dBtn.className = `main-tab-btn flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+                        isAct
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700/60'
+                    }`;
+                }
+                if (mBtn) {
+                    mBtn.className = `mob-tab-btn flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                        isAct
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                    }`;
+                }
+            });
+
+            renderAll();
+        };
+
+        /**************************************************************
+         * رندر کردن بخش‌های اصلی عادت‌ها (نظم‌یار)
+         **************************************************************/
+        const renderHeaderDate = () => {
+            const now = new Date();
+            const formatter = new Intl.DateTimeFormat('fa-IR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+            });
+            document.getElementById('current-date-display').textContent = `امروز، ${formatter.format(now)}`;
+        };
+
+        const renderKPIs = () => {
+            const todayKey = getDateKey(new Date());
+            const totalHabits = state.habits.length;
+            const completedToday = state.habits.filter(h => h.completedDates[todayKey]).length;
+            const todayPercent = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
+
+            document.getElementById('stat-today-count').textContent = `${toPersianNum(completedToday)} از ${toPersianNum(totalHabits)}`;
+            document.getElementById('stat-today-percent').textContent = `${toPersianNum(todayPercent)}٪`;
+            document.getElementById('stat-today-ring').setAttribute('stroke-dasharray', `${todayPercent}, 100`);
+
+            let maxCurrent = 0;
+            let maxCurrentHabit = 'بدون زنجیره فعال';
+            let maxBest = 0;
+            let maxBestHabit = '—';
+
+            state.habits.forEach(h => {
+                const streaks = calculateStreaks(h.completedDates);
+                if (streaks.current > maxCurrent) {
+                    maxCurrent = streaks.current;
+                    maxCurrentHabit = `${h.emoji} ${h.title}`;
+                }
+                if (streaks.best > maxBest) {
+                    maxBest = streaks.best;
+                    maxBestHabit = `${h.emoji} ${h.title}`;
+                }
+            });
+
+            document.getElementById('stat-current-streak').textContent = toPersianNum(maxCurrent);
+            document.getElementById('stat-current-streak-habit').textContent = maxCurrentHabit;
+
+            document.getElementById('stat-best-streak').textContent = toPersianNum(maxBest);
+            document.getElementById('stat-best-streak-habit').textContent = maxBestHabit;
+
+            const weekDays = getWeekDays(state.weekOffset);
+            let totalPossible = 0;
+            let totalDoneInWeek = 0;
+
+            state.habits.forEach(h => {
+                weekDays.forEach(d => {
+                    if (!d.isFuture) {
+                        totalPossible++;
+                        if (h.completedDates[d.key]) totalDoneInWeek++;
+                    }
+                });
+            });
+
+            const weeklyRate = totalPossible > 0 ? Math.round((totalDoneInWeek / totalPossible) * 100) : 0;
+            document.getElementById('stat-weekly-rate').textContent = `${toPersianNum(weeklyRate)}٪`;
+            document.getElementById('stat-weekly-total').textContent = `(${toPersianNum(totalDoneInWeek)} ثبت موفق)`;
+        };
+
+        const renderWeeklyChart = () => {
+            const container = document.getElementById('weekly-bar-chart');
+            const weekDays = getWeekDays(state.weekOffset);
+            const totalHabits = state.habits.length;
+
+            const firstDay = weekDays[0];
+            const lastDay = weekDays[6];
+            const labelEl = document.getElementById('chart-week-label');
+            if (state.weekOffset === 0) {
+                labelEl.textContent = `هفته جاری (${firstDay.dayNumber} ${firstDay.monthName} تا ${lastDay.dayNumber} ${lastDay.monthName})`;
+            } else {
+                labelEl.textContent = `${firstDay.dayNumber} ${firstDay.monthName} تا ${lastDay.dayNumber} ${lastDay.monthName}`;
+            }
+
+            container.innerHTML = weekDays.map(day => {
+                const doneCount = state.habits.filter(h => h.completedDates[day.key]).length;
+                const percent = totalHabits > 0 ? Math.round((doneCount / totalHabits) * 100) : 0;
+                
+                let barColorClass = 'bg-indigo-500 dark:bg-indigo-500';
+                if (percent >= 80) {
+                    barColorClass = 'bg-emerald-500 dark:bg-emerald-500 shadow-lg shadow-emerald-500/20';
+                } else if (percent === 0) {
+                    barColorClass = 'bg-slate-200 dark:bg-slate-800';
+                }
+
+                const heightPercent = Math.max(percent, 8);
+
+                return `
+                    <div class="flex flex-col items-center justify-end h-full group relative">
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-7 bg-slate-800 text-white text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap pointer-events-none z-10">
+                            ${toPersianNum(doneCount)} از ${toPersianNum(totalHabits)} (${toPersianNum(percent)}٪)
+                        </div>
+                        
+                        <span class="text-[11px] font-bold mb-1.5 ${day.isToday ? 'text-indigo-500 dark:text-indigo-400' : 'text-slate-400'}">
+                            ${toPersianNum(percent)}٪
+                        </span>
+
+                        <div class="w-full max-w-[38px] h-28 bg-slate-100 dark:bg-slate-800/70 rounded-xl p-1 flex items-end overflow-hidden">
+                            <div class="w-full rounded-lg transition-all duration-500 ease-out ${barColorClass}" 
+                                 style="height: ${day.isFuture ? '0%' : heightPercent + '%'}"></div>
+                        </div>
+
+                        <div class="mt-2 text-center">
+                            <span class="block text-xs font-bold ${day.isToday ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-300'}">
+                                ${day.weekdayName}
+                            </span>
+                            <span class="block text-[10px] text-slate-400">
+                                ${day.dayNumber} ${day.monthName}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        };
+
+        const renderCategoryBreakdown = () => {
+            const container = document.getElementById('category-breakdown-list');
+            const weekDays = getWeekDays(state.weekOffset).filter(d => !d.isFuture);
+            const activeDaysCount = Math.max(weekDays.length, 1);
+
+            document.getElementById('total-active-habits').textContent = `${toPersianNum(state.habits.length)} عادت`;
+
+            const categoryKeys = Object.keys(CATEGORIES).filter(k => k !== 'all');
+            
+            container.innerHTML = categoryKeys.map(catKey => {
+                const catInfo = CATEGORIES[catKey];
+                const catHabits = state.habits.filter(h => h.category === catKey);
+                const count = catHabits.length;
+
+                let done = 0;
+                const totalPossible = count * activeDaysCount;
+                catHabits.forEach(h => {
+                    weekDays.forEach(d => {
+                        if (h.completedDates[d.key]) done++;
+                    });
+                });
+
+                const rate = totalPossible > 0 ? Math.round((done / totalPossible) * 100) : 0;
+
+                return `
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${catInfo.color}"></span>
+                                ${catInfo.label}
+                                <span class="text-[11px] font-normal text-slate-400">(${toPersianNum(count)})</span>
+                            </span>
+                            <span class="font-bold text-slate-600 dark:text-slate-300">${toPersianNum(rate)}٪</span>
+                        </div>
+                        <div class="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full transition-all duration-500" 
+                                 style="width: ${rate}%; background-color: ${catInfo.color}"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        };
+
+        const renderCategoryFilters = () => {
+            const container = document.getElementById('category-filters');
+            container.innerHTML = Object.entries(CATEGORIES).map(([key, cat]) => {
+                const isActive = state.selectedCategory === key;
+                const count = key === 'all' 
+                    ? state.habits.length 
+                    : state.habits.filter(h => h.category === key).length;
+
+                return `
+                    <button onclick="selectCategory('${key}')" 
+                        class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                            isActive 
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' 
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }">
+                        <span>${cat.label}</span>
+                        <span class="px-1.5 py-0.2 rounded-md text-[10px] ${
+                            isActive ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                        }">${toPersianNum(count)}</span>
+                    </button>
+                `;
+            }).join('');
+        };
+
+        const renderHabitsTable = () => {
+            const weekDays = getWeekDays(state.weekOffset);
+            const theadRow = document.getElementById('table-days-header');
+            const tbody = document.getElementById('habits-table-body');
+            const emptyState = document.getElementById('empty-state');
+
+            document.getElementById('next-week-btn').disabled = state.weekOffset >= 0;
+
+            theadRow.innerHTML = `
+                <th class="py-3 pl-4 w-72 text-right font-bold text-slate-600 dark:text-slate-300">عنوان عادت</th>
+                ${weekDays.map(d => `
+                    <th class="py-3 px-2 text-center">
+                        <div class="inline-flex flex-col items-center px-2.5 py-1 rounded-xl ${
+                            d.isToday ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-black ring-1 ring-indigo-500/30' : ''
+                        }">
+                            <span class="text-[11px]">${d.weekdayName}</span>
+                            <span class="text-xs font-bold mt-0.5">${d.dayNumber}</span>
+                        </div>
+                    </th>
+                `).join('')}
+                <th class="py-3 px-3 text-center">پیشرفت هفتگی</th>
+                <th class="py-3 px-3 text-center">زنجیره</th>
+                <th class="py-3 pr-2 text-left w-20">عملیات</th>
+            `;
+
+            const filteredHabits = state.habits.filter(h => {
+                const matchesCat = state.selectedCategory === 'all' || h.category === state.selectedCategory;
+                const matchesSearch = h.title.toLowerCase().includes(state.searchQuery.trim().toLowerCase());
+                return matchesCat && matchesSearch;
+            });
+
+            if (filteredHabits.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            tbody.innerHTML = filteredHabits.map(habit => {
+                const catInfo = CATEGORIES[habit.category] || CATEGORIES.all;
+                const streaks = calculateStreaks(habit.completedDates);
+                const weekDoneCount = weekDays.filter(d => habit.completedDates[d.key]).length;
+                const goal = habit.weeklyGoal || 7;
+                const goalPercent = Math.min(Math.round((weekDoneCount / goal) * 100), 100);
+
+                return `
+                    <tr class="habit-row group hover:bg-slate-50/90 dark:hover:bg-slate-800/40">
+                        <td class="py-4 pl-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-2xl flex items-center justify-center text-lg shrink-0 shadow-sm" 
+                                     style="background-color: ${habit.color}18; border: 1px solid ${habit.color}35">
+                                    ${habit.emoji}
+                                </div>
+                                <div class="min-w-0">
+                                    <h4 class="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">${escapeHtml(habit.title)}</h4>
+                                    <div class="flex items-center gap-2 mt-0.5">
+                                        <span class="text-[11px] font-medium px-2 py-0.5 rounded-md" 
+                                              style="background-color: ${catInfo.color}15; color: ${catInfo.color}">
+                                            ${catInfo.label}
+                                        </span>
+                                        <span class="text-[10px] text-slate-400">
+                                            هدف: ${toPersianNum(goal)} روز در هفته
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+
+                        ${weekDays.map(d => {
+                            const isChecked = !!habit.completedDates[d.key];
+                            return `
+                                <td class="py-4 px-2 text-center">
+                                    <button onclick="toggleHabitDay('${habit.id}', '${d.key}', this)" 
+                                        ${d.isFuture ? 'disabled title="روزهای آینده قابل ثبت نیستند"' : `title="${d.weekdayFull} ${d.dayNumber} ${d.monthName}"`}
+                                        class="w-9 h-9 rounded-xl mx-auto flex items-center justify-center transition-all duration-200 ${
+                                            d.isFuture 
+                                            ? 'opacity-25 cursor-not-allowed bg-slate-100 dark:bg-slate-800/50 border border-dashed border-slate-300 dark:border-slate-700' 
+                                            : isChecked 
+                                                ? 'text-white shadow-md scale-100 hover:opacity-90' 
+                                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-transparent hover:text-slate-400'
+                                        }"
+                                        style="${isChecked ? `background-color: ${habit.color}; box-shadow: 0 4px 12px -2px ${habit.color}66;` : ''}">
+                                        <i data-lucide="check" class="w-5 h-5 stroke-[3]"></i>
+                                    </button>
+                                </td>
+                            `;
+                        }).join('')}
+
+                        <td class="py-4 px-3">
+                            <div class="w-28 mx-auto space-y-1">
+                                <div class="flex items-center justify-between text-[11px]">
+                                    <span class="font-bold text-slate-700 dark:text-slate-200">${toPersianNum(weekDoneCount)}/${toPersianNum(goal)}</span>
+                                    <span class="text-slate-400">${toPersianNum(goalPercent)}٪</span>
+                                </div>
+                                <div class="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-500" 
+                                         style="width: ${goalPercent}%; background-color: ${habit.color}"></div>
+                                </div>
+                            </div>
+                        </td>
+
+                        <td class="py-4 px-3 text-center">
+                            <div class="inline-flex flex-col items-center">
+                                <div class="flex items-center gap-1 font-black text-xs ${streaks.current > 0 ? 'text-amber-500' : 'text-slate-400'}">
+                                    <i data-lucide="flame" class="w-4 h-4 ${streaks.current > 0 ? 'fill-amber-500/20' : ''}"></i>
+                                    <span>${toPersianNum(streaks.current)} روز</span>
+                                </div>
+                                <span class="text-[10px] text-slate-400">رکورد: ${toPersianNum(streaks.best)}</span>
+                            </div>
+                        </td>
+
+                        <td class="py-4 pr-2 text-left">
+                            <div class="flex items-center justify-end gap-1 opacity-80 group-hover:opacity-100 transition">
+                                <button onclick="openHabitModal('${habit.id}')" title="ویرایش" class="p-2 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition">
+                                    <i data-lucide="edit-3" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="openDeleteModal('${habit.id}')" title="حذف" class="p-2 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        };
+
+        /**************************************************************
+         * رندر کردن صفحه ۲: میز کار و مأموریت‌ها (Workspace)
+         **************************************************************/
+        const renderWorkspace = () => {
+            const todayKey = getTodayKey();
+            const tomorrowKey = getTomorrowKey();
+
+            // شمارنده بج منو
+            const pendingTodayCount = state.tasks.filter(t => t.targetDate <= todayKey && !t.completed).length;
+            document.getElementById('nav-tasks-badge').textContent = toPersianNum(pendingTodayCount);
+
+            // فیلتر دکمه‌های میز کار
+            ['all', 'today', 'tomorrow'].forEach(f => {
+                const btn = document.getElementById(`ws-filter-${f}`);
+                if (btn) {
+                    const active = state.workspaceFilter === f;
+                    btn.className = `px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        active ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400'
+                    }`;
+                }
+            });
+
+            // محاسبه KPIهای امروز میز کار
+            const todayTasks = state.tasks.filter(t => t.targetDate <= todayKey);
+            const todayDone = todayTasks.filter(t => t.completed);
+            const todayPct = todayTasks.length > 0 ? Math.round((todayDone.length / todayTasks.length) * 100) : 0;
+
+            document.getElementById('ws-stat-today-count').textContent = `${toPersianNum(todayDone.length)} از ${toPersianNum(todayTasks.length)}`;
+            document.getElementById('ws-stat-today-percent').textContent = `${toPersianNum(todayPct)}٪`;
+            document.getElementById('ws-stat-today-ring').setAttribute('stroke-dasharray', `${todayPct}, 100`);
+            document.getElementById('ws-chart-today-badge').textContent = `${toPersianNum(todayPct)}٪`;
+
+            // اولویت شماره ۱ امروز
+            const sortedToday = [...todayTasks].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+            const oneThing = sortedToday[0];
+            if (oneThing) {
+                document.getElementById('ws-stat-one-thing').textContent = oneThing.title;
+                document.getElementById('ws-stat-one-thing-status').textContent = oneThing.completed ? 'تکمیل شده ✅' : `سهمیه: ${toPersianNum(oneThing.duration)} دقیقه`;
+            } else {
+                document.getElementById('ws-stat-one-thing').textContent = 'ثبت نشده';
+                document.getElementById('ws-stat-one-thing-status').textContent = 'تمرکز اصلی روز';
+            }
+
+            // مجموع زمان امروز
+            const totalMin = todayTasks.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
+            const doneMin = todayDone.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
+            document.getElementById('ws-stat-time-budget').textContent = toPersianNum(totalMin);
+            document.getElementById('ws-stat-time-done').textContent = `${toPersianNum(doneMin)} دقیقه انجام شده`;
+
+            // نرخ موفقیت کل
+            const allDoneCount = state.tasks.filter(t => t.completed).length;
+            const overallRate = state.tasks.length > 0 ? Math.round((allDoneCount / state.tasks.length) * 100) : 0;
+            document.getElementById('ws-stat-overall-rate').textContent = `${toPersianNum(overallRate)}٪`;
+            document.getElementById('ws-stat-overall-count').textContent = `(${toPersianNum(allDoneCount)} از ${toPersianNum(state.tasks.length)})`;
+
+            // فیلتر لیست نمایشی
+            let displayTasks = state.tasks.filter(t => {
+                if (state.workspaceFilter === 'today') return t.targetDate <= todayKey;
+                if (state.workspaceFilter === 'tomorrow') return t.targetDate === tomorrowKey;
+                return t.targetDate <= tomorrowKey;
+            });
+
+            // مرتب‌سازی: اول بر اساس شماره اولویت ۱ تا آخر (کارهای خط‌خورده هم سر جای خودشون یا پایین‌تر می‌مانند و حذف نمی‌شوند)
+            displayTasks.sort((a, b) => {
+                if (a.targetDate !== b.targetDate) return a.targetDate.localeCompare(b.targetDate);
+                return (a.priority || 99) - (b.priority || 99);
+            });
+
+            const listEl = document.getElementById('ws-tasks-list');
+            const emptyEl = document.getElementById('ws-empty-state');
+
+            if (displayTasks.length === 0) {
+                listEl.innerHTML = '';
+                emptyEl.classList.remove('hidden');
+            } else {
+                emptyEl.classList.add('hidden');
+                listEl.innerHTML = displayTasks.map(task => {
+                    const isTomorrow = task.targetDate === tomorrowKey;
+                    const isOverdue = task.targetDate < todayKey && !task.completed;
+                    const isP1 = Number(task.priority) === 1;
+
+                    return `
+                        <div class="group p-4 rounded-2xl border transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                            task.completed 
+                            ? 'bg-slate-50/70 dark:bg-slate-800/30 border-slate-200/60 dark:border-slate-800/60 opacity-75' 
+                            : isP1 
+                                ? 'bg-white dark:bg-slate-900 border-indigo-500/40 shadow-sm ring-1 ring-indigo-500/15' 
+                                : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+                        }">
+                            <div class="flex items-start gap-3.5 min-w-0 flex-1">
+                                <button onclick="toggleTaskComplete('${task.id}', this)" 
+                                    class="mt-0.5 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                                        task.completed 
+                                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25' 
+                                        : 'bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-transparent hover:border-indigo-500'
+                                    }">
+                                    <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+                                </button>
+
+                                <div class="min-w-0 flex-1 space-y-1">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <!-- برچسب دقیق شماره اولویت برای تمام کارها -->
+                                        <span class="text-[11px] font-black px-2.5 py-0.5 rounded-lg ${
+                                            isP1 
+                                            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20' 
+                                            : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                                        }">
+                                            ${isP1 ? '🔥 اولویت ۱ (مهم‌ترین کار)' : `اولویت ${toPersianNum(task.priority || 1)}`}
+                                        </span>
+
+                                        ${isTomorrow ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-500">برنامه فردا</span>` : `<span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">امروز</span>`}
+                                        ${isOverdue ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500">مانده از قبل</span>` : ''}
+                                        
+                                        <span class="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                                            <i data-lucide="clock" class="w-3 h-3"></i>
+                                            ${toPersianNum(task.duration)} دقیقه
+                                        </span>
+                                    </div>
+
+                                    <!-- عنوان کار که در صورت انجام شدن خط می‌خورد ولی حذف نمی‌شود -->
+                                    <h4 class="text-sm font-bold transition-all ${
+                                        task.completed 
+                                        ? 'line-through text-slate-400 dark:text-slate-500 decoration-2 decoration-emerald-500/70' 
+                                        : 'text-slate-800 dark:text-slate-100'
+                                    }">
+                                        ${escapeHtml(task.title)}
+                                    </h4>
+
+                                    ${task.description && task.description !== '-' ? `
+                                        <p class="text-xs leading-relaxed ${
+                                            task.completed ? 'line-through text-slate-400/70 dark:text-slate-500/70' : 'text-slate-500 dark:text-slate-400'
+                                        }">
+                                            ${escapeHtml(task.description)}
+                                        </p>
+                                    ` : ''}
+                                </div>
+                            </div>
+
+                            <!-- دکمه‌های عملیاتی هر کار (انتقال به فردا/امروز، ویرایش، حذف) -->
+                            <div class="flex items-center justify-end gap-1 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+                                ${!isTomorrow ? `
+                                    <button onclick="moveTaskDay('${task.id}', 'tomorrow')" title="انتقال این کار به فردا" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/15 text-slate-600 dark:text-slate-300 hover:text-amber-500 flex items-center gap-1 transition">
+                                        <i data-lucide="calendar-plus" class="w-3.5 h-3.5"></i>
+                                        <span>فردا</span>
+                                    </button>
+                                ` : `
+                                    <button onclick="moveTaskDay('${task.id}', 'today')" title="آوردن به لیست امروز" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500/15 text-slate-600 dark:text-slate-300 hover:text-emerald-500 flex items-center gap-1 transition">
+                                        <i data-lucide="check-circle" class="w-3.5 h-3.5"></i>
+                                        <span>امروز</span>
+                                    </button>
+                                `}
+                                <button onclick="openTaskModal('${task.id}')" title="ویرایش کار" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition">
+                                    <i data-lucide="edit-3" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="deleteTask('${task.id}')" title="حذف کار" class="p-2 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            renderWorkspaceChart();
+        };
+
+        const renderWorkspaceChart = () => {
+            const container = document.getElementById('ws-tasks-bar-chart');
+            if (!container) return;
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const days = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = addDays(today, -i);
+                days.push({
+                    key: getDateKey(d),
+                    weekdayName: new Intl.DateTimeFormat('fa-IR', { weekday: 'short' }).format(d),
+                    isToday: i === 0
+                });
+            }
+
+            container.innerHTML = days.map(day => {
+                const dayTasks = state.tasks.filter(t => t.targetDate === day.key);
+                const doneCount = dayTasks.filter(t => t.completed).length;
+                const pct = dayTasks.length > 0 ? Math.round((doneCount / dayTasks.length) * 100) : 0;
+                const heightPct = Math.max(pct, 8);
+
+                let colorClass = 'bg-indigo-500';
+                if (pct >= 80) colorClass = 'bg-emerald-500';
+                else if (pct === 0) colorClass = 'bg-slate-200 dark:bg-slate-800';
+
+                return `
+                    <div class="flex flex-col items-center justify-end h-full">
+                        <span class="text-[10px] font-bold mb-1 ${day.isToday ? 'text-indigo-500' : 'text-slate-400'}">${toPersianNum(pct)}٪</span>
+                        <div class="w-full max-w-[28px] h-24 bg-slate-100 dark:bg-slate-800/70 rounded-lg p-1 flex items-end">
+                            <div class="w-full rounded-md transition-all duration-500 ${colorClass}" style="height: ${heightPct}%"></div>
+                        </div>
+                        <span class="mt-1.5 text-[10px] font-bold ${day.isToday ? 'text-indigo-500' : 'text-slate-400'}">${day.weekdayName}</span>
+                    </div>
+                `;
+            }).join('');
+        };
+
+        /**************************************************************
+         * عملیات‌های میز کار (تیک زدن، انتقال به فردا، ویرایش)
+         **************************************************************/
+        const toggleTaskComplete = (taskId, btnEl) => {
+            const task = state.tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            task.completed = !task.completed;
+            if (task.completed) {
+                playSound('check');
+                if (btnEl) btnEl.classList.add('animate-pop');
+                showToast(`مأموریت «${task.title}» خط خورد! دمت گرم فرمانده 🎯`, 'success');
+
+                const todayKey = getTodayKey();
+                const todayTasks = state.tasks.filter(t => t.targetDate <= todayKey);
+                if (todayTasks.length > 0 && todayTasks.every(t => t.completed) && typeof confetti === 'function') {
+                    confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+                }
+            } else {
+                playSound('uncheck');
+            }
+
+            saveState();
+            renderAll();
+        };
+
+        const moveTaskDay = (taskId, target) => {
+            const task = state.tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            task.targetDate = target === 'tomorrow' ? getTomorrowKey() : getTodayKey();
+            saveState();
+            renderAll();
+            showToast(target === 'tomorrow' ? 'کار به برنامه فردا منتقل شد.' : 'کار به لیست امروز منتقل شد.');
+        };
+
+        const moveAllPendingToTomorrow = () => {
+            const todayKey = getTodayKey();
+            const tomorrowKey = getTomorrowKey();
+            let count = 0;
+
+            state.tasks.forEach(t => {
+                if (t.targetDate <= todayKey && !t.completed) {
+                    t.targetDate = tomorrowKey;
+                    count++;
+                }
+            });
+
+            if (count === 0) {
+                showToast('همه کارهای امروزت انجام شده یا کاری برای انتقال نیست!');
+                return;
+            }
+
+            saveState();
+            renderAll();
+            showToast(`${toPersianNum(count)} کار ناتمام بدون عذاب وجدان به فردا منتقل شد.`);
+        };
+
+        const applyTomorrowTasksToToday = () => {
+            const todayKey = getTodayKey();
+            const tomorrowKey = getTomorrowKey();
+            let count = 0;
+
+            state.tasks.forEach(t => {
+                if (t.targetDate === tomorrowKey) {
+                    t.targetDate = todayKey;
+                    count++;
+                }
+            });
+
+            if (count === 0) {
+                showToast('در حال حاضر کاری در لیست فردا ثبت نشده است.');
+                return;
+            }
+
+            saveState();
+            renderAll();
+            showToast(`${toPersianNum(count)} مأموریت فردا به لیست امروز منتقل شد.`);
+        };
+
+        const setWorkspaceFilter = (filterVal) => {
+            state.workspaceFilter = filterVal;
+            renderWorkspace();
+            lucide.createIcons();
+        };
+
+        const openTaskModal = (taskId = null) => {
+            const modal = document.getElementById('task-modal');
+            const idInput = document.getElementById('task-id-input');
+            const titleInput = document.getElementById('task-title-input');
+            const descInput = document.getElementById('task-desc-input');
+            const prioInput = document.getElementById('task-priority-input');
+            const durInput = document.getElementById('task-duration-input');
+            const dayInput = document.getElementById('task-day-input');
+            const modalTitle = document.getElementById('task-modal-title').querySelector('span');
+
+            if (taskId) {
+                const task = state.tasks.find(t => t.id === taskId);
+                if (!task) return;
+                modalTitle.textContent = 'ویرایش مأموریت';
+                idInput.value = task.id;
+                titleInput.value = task.title;
+                descInput.value = task.description || '';
+                prioInput.value = task.priority || 1;
+                durInput.value = task.duration || 45;
+                dayInput.value = task.targetDate === getTomorrowKey() ? 'tomorrow' : 'today';
+            } else {
+                modalTitle.textContent = 'ثبت مأموریت جدید';
+                idInput.value = '';
+                titleInput.value = '';
+                descInput.value = '';
+                const todayCount = state.tasks.filter(t => t.targetDate === getTodayKey()).length;
+                prioInput.value = todayCount + 1;
+                durInput.value = 45;
+                dayInput.value = 'today';
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => titleInput.focus(), 100);
+        };
+
+        const closeTaskModal = () => {
+            const modal = document.getElementById('task-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        const saveTaskFromModal = (e) => {
+            e.preventDefault();
+            const id = document.getElementById('task-id-input').value;
+            const title = document.getElementById('task-title-input').value.trim();
+            const description = document.getElementById('task-desc-input').value.trim();
+            const priority = parseInt(document.getElementById('task-priority-input').value, 10) || 1;
+            const duration = parseInt(document.getElementById('task-duration-input').value, 10) || 45;
+            const dayChoice = document.getElementById('task-day-input').value;
+            const targetDate = dayChoice === 'tomorrow' ? getTomorrowKey() : getTodayKey();
+
+            if (!title) return;
+
+            if (id) {
+                const idx = state.tasks.findIndex(t => t.id === id);
+                if (idx !== -1) {
+                    state.tasks[idx] = { ...state.tasks[idx], title, description, priority, duration, targetDate };
+                    showToast('مأموریت ویرایش شد.');
+                }
+            } else {
+                state.tasks.push({
+                    id: 't_' + Date.now(),
+                    title,
+                    description,
+                    priority,
+                    duration,
+                    targetDate,
+                    completed: false
+                });
+                showToast(`مأموریت با «اولویت ${toPersianNum(priority)}» اضافه شد.`);
+            }
+
+            saveState();
+            closeTaskModal();
+            renderAll();
+        };
+
+        const deleteTask = (taskId) => {
+            state.tasks = state.tasks.filter(t => t.id !== taskId);
+            saveState();
+            renderAll();
+            showToast('مأموریت حذف شد.');
+        };
+
+        /**************************************************************
+         * صفحه ۳: دستیار برنامه‌ریز هوشمند (ویزارد اولویت ۱ تا آخر)
+         **************************************************************/
+        let wizard = {
+            step: 'ASK_TITLE', // ASK_TITLE -> ASK_DESC -> ASK_TIME -> ASK_MORE
+            priorityCounter: 1,
+            draftTask: {},
+            collectedTasks: []
+        };
+
+        const appendPlannerMessage = (htmlText, isBot = true) => {
+            const box = document.getElementById('planner-chat-box');
+            if (!box) return;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex items-start gap-3 ${isBot ? '' : 'flex-row-reverse'}`;
+
+            const avatar = isBot
+                ? `<div class="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-600/20"><i data-lucide="bot" class="w-5 h-5"></i></div>`
+                : `<div class="w-9 h-9 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0 font-bold text-xs">دانیال</div>`;
+
+            const bubble = document.createElement('div');
+            bubble.className = `max-w-[82%] px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+                isBot
+                ? 'bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 rounded-tr-none'
+                : 'bg-indigo-600 text-white font-semibold rounded-tl-none shadow-md shadow-indigo-600/20'
+            }`;
+            bubble.innerHTML = htmlText;
+
+            wrapper.innerHTML = avatar;
+            wrapper.appendChild(bubble);
+            box.appendChild(wrapper);
+            box.scrollTop = box.scrollHeight;
+            lucide.createIcons();
+        };
+
+        const setPlannerQuickActions = (buttons = []) => {
+            const container = document.getElementById('planner-quick-actions');
+            if (!buttons.length) {
+                container.classList.add('hidden');
+                container.innerHTML = '';
+                return;
+            }
+            container.classList.remove('hidden');
+            container.innerHTML = buttons.map((b, idx) => `
+                <button type="button" onclick="plannerActionClick(${idx})" 
+                    class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                        b.primary 
+                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20' 
+                        : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-indigo-500'
+                    }">
+                    ${b.label}
+                </button>
+            `).join('');
+            window._currentPlannerActions = buttons;
+        };
+
+        window.plannerActionClick = (idx) => {
+            const action = window._currentPlannerActions && window._currentPlannerActions[idx];
+            if (action && typeof action.onClick === 'function') {
+                action.onClick();
+            }
+        };
+
+        const resetPlannerWizard = () => {
+            wizard = {
+                step: 'ASK_TITLE',
+                priorityCounter: 1,
+                draftTask: {},
+                collectedTasks: []
+            };
+            const box = document.getElementById('planner-chat-box');
+            if (box) box.innerHTML = '';
+            setPlannerQuickActions([]);
+
+            const input = document.getElementById('planner-chat-input');
+            if (input) {
+                input.disabled = false;
+                input.type = 'text';
+                input.placeholder = 'عنوان اولویت شماره ۱ را بنویسید...';
+            }
+
+            appendPlannerMessage(
+                `سلام دانیال جان! 👋 بیا با متد علمی <b>The One Thing</b> مغزت رو از هرج‌ومرج و عذاب وجدان نجات بدیم.<br><br>` +
+                `تصور کن <b>فقط یک کار</b> رو می‌تونستی انجام بدی که بیشترین اثر رو روی درس یا پروژه‌هات داره؛ اون کار چیه؟ (می‌شه <b>اولویت ۱</b> تو)`,
+                true
+            );
+        };
+
+        const handlePlannerSubmit = (e) => {
+            e.preventDefault();
+            const input = document.getElementById('planner-chat-input');
+            const val = input.value.trim();
+            if (!val && wizard.step !== 'ASK_DESC') return;
+
+            if (val) appendPlannerMessage(escapeHtml(val), false);
+            input.value = '';
+
+            if (wizard.step === 'ASK_TITLE') {
+                wizard.draftTask = {
+                    title: val,
+                    priority: wizard.priorityCounter
+                };
+                wizard.step = 'ASK_DESC';
+                input.placeholder = 'توضیح کار را بنویسید (یا دکمه بدون توضیح را بزنید)...';
+
+                appendPlannerMessage(
+                    `عالیه! ثبت شد به عنوان <b>اولویت ${toPersianNum(wizard.priorityCounter)}</b>.<br>` +
+                    `حالا اگه توضیح یا جزئیاتی برای «<b>${escapeHtml(val)}</b>» داری بنویس تا موقع انجامش دقیق بدونی چیکار کنی:`,
+                    true
+                );
+
+                setPlannerQuickActions([
+                    {
+                        label: 'رد شدن (بدون توضیح)',
+                        primary: false,
+                        onClick: () => {
+                            appendPlannerMessage('بدون توضیح', false);
+                            proceedToTimeStep('-');
+                        }
+                    }
+                ]);
+            } else if (wizard.step === 'ASK_DESC') {
+                proceedToTimeStep(val || '-');
+            } else if (wizard.step === 'ASK_TIME') {
+                const num = parseInt(val, 10);
+                if (isNaN(num) || num <= 0) {
+                    appendPlannerMessage('دانیال جان، لطفاً زمان رو به صورت عدد (دقیقه) وارد کن؛ مثلاً 45 یا 60:', true);
+                    return;
+                }
+                finishCurrentDraftTask(num);
+            }
+        };
+
+        const proceedToTimeStep = (descText) => {
+            wizard.draftTask.description = descText;
+            wizard.step = 'ASK_TIME';
+            const input = document.getElementById('planner-chat-input');
+            input.placeholder = 'سهمیه زمان به دقیقه (مثلاً 45)...';
+
+            appendPlannerMessage(
+                `حله! برای <b>اولویت ${toPersianNum(wizard.priorityCounter)}</b> (${escapeHtml(wizard.draftTask.title)}) چقدر سهمیه زمانی (به دقیقه) در نظر بگیریم؟`,
+                true
+            );
+
+            setPlannerQuickActions([
+                { label: '۳۰ دقیقه', onClick: () => { appendPlannerMessage('۳۰ دقیقه', false); finishCurrentDraftTask(30); } },
+                { label: '۴۵ دقیقه', onClick: () => { appendPlannerMessage('۴۵ دقیقه', false); finishCurrentDraftTask(45); } },
+                { label: '۶۰ دقیقه', onClick: () => { appendPlannerMessage('۶۰ دقیقه', false); finishCurrentDraftTask(60); } },
+                { label: '۹۰ دقیقه', onClick: () => { appendPlannerMessage('۹۰ دقیقه', false); finishCurrentDraftTask(90); } }
+            ]);
+        };
+
+        const finishCurrentDraftTask = (durationMin) => {
+            wizard.draftTask.duration = durationMin;
+            wizard.collectedTasks.push({ ...wizard.draftTask });
+
+            appendPlannerMessage(
+                `✅ <b>اولویت ${toPersianNum(wizard.draftTask.priority)}: ${escapeHtml(wizard.draftTask.title)}</b> (${toPersianNum(durationMin)} دقیقه) آماده شد.<br>` +
+                `آیا کار دیگه‌ای هم هست که بخوای به عنوان <b>اولویت ${toPersianNum(wizard.priorityCounter + 1)}</b> اضافه کنی؟`,
+                true
+            );
+
+            wizard.step = 'ASK_MORE';
+            const input = document.getElementById('planner-chat-input');
+            input.placeholder = 'از دکمه‌های زیر انتخاب کن...';
+
+            setPlannerQuickActions([
+                {
+                    label: `➕ بله، ثبت اولویت ${toPersianNum(wizard.priorityCounter + 1)}`,
+                    primary: false,
+                    onClick: () => {
+                        wizard.priorityCounter++;
+                        wizard.step = 'ASK_TITLE';
+                        setPlannerQuickActions([]);
+                        input.placeholder = `عنوان اولویت ${toPersianNum(wizard.priorityCounter)} را بنویسید...`;
+                        input.focus();
+                        appendPlannerMessage(`خب دانیال جان، اگر بعد از کارهای قبلی فقط بتونی یک کار دیگه انجام بدی، <b>اولویت ${toPersianNum(wizard.priorityCounter)}</b> تو چیه؟`, true);
+                    }
+                },
+                {
+                    label: '🚀 ذخیره برای امروز (نمایش فوری در میز کار)',
+                    primary: true,
+                    onClick: () => finalizeWizardPlan('today')
+                },
+                {
+                    label: '🌙 ذخیره برای برنامه فردا',
+                    primary: true,
+                    onClick: () => finalizeWizardPlan('tomorrow')
+                }
+            ]);
+        };
+
+        const finalizeWizardPlan = (targetDay) => {
+            const dateKey = targetDay === 'tomorrow' ? getTomorrowKey() : getTodayKey();
+            wizard.collectedTasks.forEach(item => {
+                state.tasks.push({
+                    id: 't_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+                    title: item.title,
+                    description: item.description,
+                    priority: item.priority,
+                    duration: item.duration,
+                    targetDate: dateKey,
+                    completed: false
+                });
+            });
+
+            saveState();
+            setPlannerQuickActions([
+                {
+                    label: 'مشاهده در میز کار و شروع تیک زدن 🎯',
+                    primary: true,
+                    onClick: () => {
+                        state.workspaceFilter = 'all';
+                        switchMainTab('workspace');
+                    }
+                },
+                {
+                    label: 'چیدن یک برنامه جدید',
+                    primary: false,
+                    onClick: () => resetPlannerWizard()
+                }
+            ]);
+
+            const totalTime = wizard.collectedTasks.reduce((acc, c) => acc + c.duration, 0);
+            const listHtml = wizard.collectedTasks.map(t => 
+                `<li class="flex items-center justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">` +
+                `<span><b>اولویت ${toPersianNum(t.priority)}:</b> ${escapeHtml(t.title)} ${t.description && t.description !== '-' ? `<span class="text-slate-400 text-xs">(${escapeHtml(t.description)})</span>` : ''}</span>` +
+                `<span class="font-bold text-indigo-500">${toPersianNum(t.duration)} دقیقه</span>` +
+                `</li>`
+            ).join('');
+
+            appendPlannerMessage(
+                `🎉 <b>برنامه تو با موفقیت برای «${targetDay === 'tomorrow' ? 'فردا' : 'امروز'}» تدوین و ذخیره شد!</b><br>` +
+                `مجموع سهمیه زمانی: <b>${toPersianNum(totalTime)} دقیقه</b><br>` +
+                `<ul class="mt-2 space-y-1">${listHtml}</ul>` +
+                `<p class="mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-bold">حالا می‌تونی بری توی تب «میز کار و مأموریت‌ها» و هر کدوم رو انجام دادی تیک بزنی تا خط بخوره!</p>`,
+                true
+            );
+
+            playSound('check');
+            showToast('برنامه با موفقیت در میز کار ثبت شد!', 'success');
+            renderAll();
+        };
+
+        /**************************************************************
+         * صفحه ۴: بانک ایده‌ها (پارکینگ ایده‌ها با دسته‌بندی)
+         **************************************************************/
+        const renderIdeasPage = () => {
+            document.getElementById('nav-ideas-badge').textContent = toPersianNum(state.ideas.length);
+
+            const filterContainer = document.getElementById('idea-category-filters');
+            if (filterContainer) {
+                filterContainer.innerHTML = Object.entries(IDEA_CATEGORIES).map(([key, info]) => {
+                    const active = state.selectedIdeaCategory === key;
+                    const count = key === 'all' ? state.ideas.length : state.ideas.filter(i => i.category === key).length;
+                    return `
+                        <button onclick="selectIdeaCategory('${key}')" 
+                            class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                                active 
+                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' 
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                            }">
+                            <span>${info.label}</span>
+                            <span class="px-1.5 py-0.2 rounded-md text-[10px] ${active ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700'}">${toPersianNum(count)}</span>
+                        </button>
+                    `;
+                }).join('');
+            }
+
+            const grid = document.getElementById('ideas-grid-container');
+            if (!grid) return;
+
+            const filtered = state.ideas.filter(i => state.selectedIdeaCategory === 'all' || i.category === state.selectedIdeaCategory);
+
+            if (filtered.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-span-full py-10 text-center text-xs text-slate-400">
+                        هیچ ایده‌ای در این دسته‌بندی ثبت نشده است.
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = filtered.map(idea => {
+                const cat = IDEA_CATEGORIES[idea.category] || IDEA_CATEGORIES.project;
+                return `
+                    <div class="p-5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex flex-col justify-between gap-4 hover:-translate-y-0.5 transition">
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-lg" style="background-color: ${cat.color}18; color: ${cat.color}">
+                                    ${cat.label}
+                                </span>
+                                <span class="text-[10px] text-slate-400">${escapeHtml(idea.createdAt || '')}</span>
+                            </div>
+                            <h4 class="text-sm font-black text-slate-800 dark:text-white leading-snug">${escapeHtml(idea.title)}</h4>
+                            ${idea.note ? `<p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">${escapeHtml(idea.note)}</p>` : ''}
+                        </div>
+
+                        <div class="flex items-center justify-between pt-3 border-t border-slate-200/60 dark:border-slate-700/50">
+                            <button onclick="convertIdeaToTask('${idea.id}')" class="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
+                                <i data-lucide="arrow-up-right" class="w-3.5 h-3.5"></i>
+                                <span>تبدیل به مأموریت میز کار</span>
+                            </button>
+                            <button onclick="deleteIdea('${idea.id}')" title="حذف ایده" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        };
+
+        const addNewIdea = (e) => {
+            e.preventDefault();
+            const titleEl = document.getElementById('idea-title-input');
+            const noteEl = document.getElementById('idea-note-input');
+            const catEl = document.getElementById('idea-category-select');
+
+            const title = titleEl.value.trim();
+            if (!title) return;
+
+            state.ideas.unshift({
+                id: 'id_' + Date.now(),
+                title,
+                note: noteEl.value.trim(),
+                category: catEl.value,
+                createdAt: new Intl.DateTimeFormat('fa-IR', { month: 'short', day: 'numeric' }).format(new Date())
+            });
+
+            titleEl.value = '';
+            noteEl.value = '';
+            saveState();
+            renderAll();
+            showToast('ایده در پارکینگ ذخیره شد تا ذهنت آزاد بمونه 💡');
+        };
+
+        const selectIdeaCategory = (catKey) => {
+            state.selectedIdeaCategory = catKey;
+            renderIdeasPage();
+            lucide.createIcons();
+        };
+
+        const convertIdeaToTask = (ideaId) => {
+            const idea = state.ideas.find(i => i.id === ideaId);
+            if (!idea) return;
+
+            const todayCount = state.tasks.filter(t => t.targetDate === getTodayKey()).length;
+            state.tasks.push({
+                id: 't_' + Date.now(),
+                title: idea.title,
+                description: idea.note || 'منتقل شده از بانک ایده‌ها',
+                priority: todayCount + 1,
+                duration: 45,
+                targetDate: getTodayKey(),
+                completed: false
+            });
+
+            saveState();
+            renderAll();
+            showToast(`«${idea.title}» با اولویت ${toPersianNum(todayCount + 1)} به میز کار اضافه شد!`, 'success');
+        };
+
+        const deleteIdea = (ideaId) => {
+            state.ideas = state.ideas.filter(i => i.id !== ideaId);
+            saveState();
+            renderAll();
+            showToast('ایده از بانک حذف شد.');
+        };
+
+        /**************************************************************
+         * رندر کامل تمام بخش‌های اپلیکیشن
+         **************************************************************/
+        const renderAll = () => {
+            renderHeaderDate();
+            renderKPIs();
+            renderWeeklyChart();
+            renderCategoryBreakdown();
+            renderCategoryFilters();
+            renderHabitsTable();
+            renderWorkspace();
+            renderIdeasPage();
+            lucide.createIcons();
+        };
+
+        /**************************************************************
+         * تعاملات اصلی عادت‌ها (ثبت عادت، فیلتر، افزودن، ویرایش، حذف)
+         **************************************************************/
+        const toggleHabitDay = (habitId, dateKey, btnEl) => {
+            const habit = state.habits.find(h => h.id === habitId);
+            if (!habit) return;
+
+            const isNowChecked = !habit.completedDates[dateKey];
+            if (isNowChecked) {
+                habit.completedDates[dateKey] = true;
+                playSound('check');
+                if (btnEl) btnEl.classList.add('animate-pop');
+            } else {
+                delete habit.completedDates[dateKey];
+                playSound('uncheck');
+            }
+
+            saveState();
+            renderAll();
+
+            const todayKey = getDateKey(new Date());
+            if (dateKey === todayKey && isNowChecked) {
+                const allDoneToday = state.habits.length > 0 && state.habits.every(h => h.completedDates[todayKey]);
+                if (allDoneToday && typeof confetti === 'function') {
+                    confetti({
+                        particleCount: 75,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                    showToast('تبریک! تمام عادت‌های امروز را با موفقیت تکمیل کردید 🎉', 'success');
+                }
+            }
+        };
+
+        const selectCategory = (catKey) => {
+            state.selectedCategory = catKey;
+            renderCategoryFilters();
+            renderHabitsTable();
+            lucide.createIcons();
+        };
+
+        const handleSearch = (val) => {
+            state.searchQuery = val;
+            renderHabitsTable();
+            lucide.createIcons();
+        };
+
+        const changeWeek = (delta) => {
+            const nextOffset = state.weekOffset + delta;
+            if (nextOffset > 0) return;
+            state.weekOffset = nextOffset;
+            renderAll();
+        };
+
+        const resetToCurrentWeek = () => {
+            state.weekOffset = 0;
+            renderAll();
+        };
+
+        /**************************************************************
+         * مدیریت مودال افزودن / ویرایش عادت
+         **************************************************************/
+        const renderModalPickers = () => {
+            const emojiContainer = document.getElementById('emoji-picker');
+            emojiContainer.innerHTML = EMOJIS.map(emoji => `
+                <button type="button" onclick="selectEmoji('${emoji}')" 
+                    class="h-9 rounded-lg flex items-center justify-center text-lg transition ${
+                        state.selectedEmoji === emoji 
+                        ? 'bg-indigo-600/15 ring-2 ring-indigo-500 scale-105' 
+                        : 'hover:bg-slate-200/70 dark:hover:bg-slate-700'
+                    }">
+                    ${emoji}
+                </button>
+            `).join('');
+
+            const colorContainer = document.getElementById('color-picker');
+            colorContainer.innerHTML = COLORS.map(c => `
+                <button type="button" onclick="selectColor('${c.hex}')" 
+                    class="w-7 h-7 rounded-full transition-transform ${
+                        state.selectedColor === c.hex ? 'scale-125 ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-900' : 'opacity-75 hover:opacity-100'
+                    }"
+                    style="background-color: ${c.hex}">
+                </button>
+            `).join('');
+        };
+
+        const selectEmoji = (emoji) => {
+            state.selectedEmoji = emoji;
+            renderModalPickers();
+        };
+
+        const selectColor = (hex) => {
+            state.selectedColor = hex;
+            renderModalPickers();
+        };
+
+        const openHabitModal = (habitId = null) => {
+            const modal = document.getElementById('habit-modal');
+            const titleEl = document.getElementById('modal-title').querySelector('span');
+            const idInput = document.getElementById('habit-id-input');
+            const titleInput = document.getElementById('habit-title-input');
+            const catInput = document.getElementById('habit-category-input');
+            const goalInput = document.getElementById('habit-goal-input');
+
+            if (habitId) {
+                const habit = state.habits.find(h => h.id === habitId);
+                if (!habit) return;
+                titleEl.textContent = 'ویرایش عادت';
+                idInput.value = habit.id;
+                titleInput.value = habit.title;
+                catInput.value = habit.category;
+                goalInput.value = habit.weeklyGoal || 7;
+                state.selectedEmoji = habit.emoji;
+                state.selectedColor = habit.color;
+            } else {
+                titleEl.textContent = 'ایجاد عادت جدید';
+                idInput.value = '';
+                titleInput.value = '';
+                catInput.value = state.selectedCategory !== 'all' ? state.selectedCategory : 'health';
+                goalInput.value = '7';
+                state.selectedEmoji = EMOJIS[0];
+                state.selectedColor = COLORS[0].hex;
+            }
+
+            renderModalPickers();
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => titleInput.focus(), 100);
+        };
+
+        const closeHabitModal = () => {
+            const modal = document.getElementById('habit-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        const saveHabit = (e) => {
+            e.preventDefault();
+            const id = document.getElementById('habit-id-input').value;
+            const title = document.getElementById('habit-title-input').value.trim();
+            const category = document.getElementById('habit-category-input').value;
+            const weeklyGoal = parseInt(document.getElementById('habit-goal-input').value, 10) || 7;
+
+            if (!title) return;
+
+            if (id) {
+                const index = state.habits.findIndex(h => h.id === id);
+                if (index !== -1) {
+                    state.habits[index] = {
+                        ...state.habits[index],
+                        title,
+                        category,
+                        weeklyGoal,
+                        emoji: state.selectedEmoji,
+                        color: state.selectedColor
+                    };
+                    showToast('تغییرات عادت با موفقیت ذخیره شد.');
+                }
+            } else {
+                const newHabit = {
+                    id: 'h_' + Date.now(),
+                    title,
+                    category,
+                    weeklyGoal,
+                    emoji: state.selectedEmoji,
+                    color: state.selectedColor,
+                    completedDates: {}
+                };
+                state.habits.unshift(newHabit);
+                showToast('عادت جدید به لیست اضافه شد.');
+            }
+
+            saveState();
+            closeHabitModal();
+            renderAll();
+        };
+
+        /**************************************************************
+         * مدیریت حذف عادت
+         **************************************************************/
+        const openDeleteModal = (habitId) => {
+            const habit = state.habits.find(h => h.id === habitId);
+            if (!habit) return;
+            state.habitToDelete = habitId;
+            document.getElementById('delete-modal-desc').textContent = 
+                `آیا از حذف عادت «${habit.title}» و تمام سوابق آن اطمینان دارید؟`;
+            const modal = document.getElementById('delete-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        const closeDeleteModal = () => {
+            state.habitToDelete = null;
+            const modal = document.getElementById('delete-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        document.getElementById('confirm-delete-btn').addEventListener('click', () => {
+            if (!state.habitToDelete) return;
+            state.habits = state.habits.filter(h => h.id !== state.habitToDelete);
+            saveState();
+            closeDeleteModal();
+            renderAll();
+            showToast('عادت مورد نظر حذف شد.');
+        });
+
+        /**************************************************************
+         * تنظیمات پوسته (تاریک/روشن)، صدا و اعلان‌ها
+         **************************************************************/
+        const toggleTheme = () => {
+            const html = document.documentElement;
+            html.classList.toggle('dark');
+            const isDark = html.classList.contains('dark');
+            localStorage.setItem('nazmyar_theme', isDark ? 'dark' : 'light');
+        };
+
+        const toggleSound = () => {
+            state.soundEnabled = !state.soundEnabled;
+            const btn = document.getElementById('sound-btn');
+            btn.innerHTML = `<i data-lucide="${state.soundEnabled ? 'volume-2' : 'volume-x'}" class="w-5 h-5"></i>`;
+            lucide.createIcons();
+            showToast(state.soundEnabled ? 'افکت صوتی فعال شد' : 'افکت صوتی غیرفعال شد');
+        };
+
+        const showToast = (message, type = 'info') => {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bgClass = type === 'success' 
+                ? 'bg-emerald-600 text-white' 
+                : 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900';
+
+            toast.className = `${bgClass} px-4 py-3 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 transition-all duration-300 pointer-events-auto`;
+            toast.innerHTML = `
+                <i data-lucide="${type === 'success' ? 'party-popper' : 'check-circle'}" class="w-4 h-4 shrink-0"></i>
+                <span>${message}</span>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(10px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        };
+
+        // راه‌اندازی اولیه برنامه
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('nazmyar_theme');
+            if (savedTheme === 'light') {
+                document.documentElement.classList.remove('dark');
+            }
+            loadState();
+            switchMainTab('habits');
+            resetPlannerWizard();
+        });
+    </script>
+</body>
+</html>
