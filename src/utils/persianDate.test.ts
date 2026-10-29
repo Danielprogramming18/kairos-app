@@ -7,6 +7,8 @@ import {
   addDays,
   getFullPersianYearCalendar,
   getPersianParts,
+  isJalaliLeapYear,
+  getJalaliMonthLength,
 } from './persianDate';
 
 test('toPersianNum converts English digits to Persian digits', () => {
@@ -50,4 +52,26 @@ test('getFullPersianYearCalendar generates all 12 months until end of year', () 
   assert.equal(months[6].days.length, 30);
   assert.equal(months[11].monthName, 'اسفند');
   assert.ok(months[11].days.length >= 29);
+});
+
+test('BUG-11, BUG-12, BUG-14: isJalaliLeapYear and getFullPersianYearCalendar handle leap years (1403, 1408) and normal years (1404, 1405) without drift', () => {
+  assert.equal(isJalaliLeapYear(1403), true);
+  assert.equal(getJalaliMonthLength(1403, 12), 30);
+
+  assert.equal(isJalaliLeapYear(1404), false);
+  assert.equal(getJalaliMonthLength(1404, 12), 29);
+
+  assert.equal(isJalaliLeapYear(1405), false);
+  assert.equal(getJalaliMonthLength(1405, 12), 29);
+
+  assert.equal(isJalaliLeapYear(1408), true);
+  assert.equal(getJalaliMonthLength(1408, 12), 30);
+
+  const cal1403 = getFullPersianYearCalendar(1403);
+  assert.equal(cal1403[0].jYear, 1403);
+  assert.equal(cal1403[11].days.length, 30); // Esfand 1403 is 30 days
+
+  const cal1404 = getFullPersianYearCalendar(1404);
+  assert.equal(cal1404[0].jYear, 1404);
+  assert.equal(cal1404[11].days.length, 29); // Esfand 1404 is 29 days
 });

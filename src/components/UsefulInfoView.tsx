@@ -65,6 +65,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<UsefulInfoCategory | 'all'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState<number>(50);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +140,9 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
       if (!a.pinned && b.pinned) return 1;
       return 0;
     });
+
+  const visibleItems = filteredItems.slice(0, visibleCount);
+  const hasMoreItems = filteredItems.length > visibleCount;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -297,108 +301,138 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredItems.map((item) => {
-            const meta = CATEGORY_META[item.category] || CATEGORY_META.work;
-            const CatIcon = meta.icon;
-            const isCopied = copiedId === item.id;
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {visibleItems.map((item) => {
+              const meta = CATEGORY_META[item.category] || CATEGORY_META.work;
+              const CatIcon = meta.icon;
+              const isCopied = copiedId === item.id;
 
-            return (
-              <div
-                key={item.id}
-                className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border transition-all flex flex-col justify-between gap-4 shadow-sm ${
-                  item.pinned
-                    ? 'border-amber-500/40 dark:border-amber-500/30 ring-1 ring-amber-500/10'
-                    : 'border-slate-200/70 dark:border-slate-800'
-                }`}
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${meta.colorClass}`}
-                      >
-                        <CatIcon className="w-3 h-3" />
-                        <span>{meta.label}</span>
-                      </span>
-                      {item.pinned && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                          <Pin className="w-3 h-3" />
-                          <span>سنجاق‌شده</span>
+              return (
+                <div
+                  key={item.id}
+                  className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border transition-all flex flex-col justify-between gap-4 shadow-sm ${
+                    item.pinned
+                      ? 'border-amber-500/40 dark:border-amber-500/30 ring-1 ring-amber-500/10'
+                      : 'border-slate-200/70 dark:border-slate-800'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${meta.colorClass}`}
+                        >
+                          <CatIcon className="w-3 h-3" />
+                          <span>{meta.label}</span>
                         </span>
+                        {item.pinned && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                            <Pin className="w-3 h-3" />
+                            <span>سنجاق‌شده</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateItem(item.id, { pinned: !item.pinned })}
+                          title={item.pinned ? 'برداشتن سنجاق' : 'سنجاق کردن به بالا'}
+                          className={`p-1.5 rounded-xl transition cursor-pointer ${
+                            item.pinned
+                              ? 'bg-amber-500/15 text-amber-500'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-amber-500'
+                          }`}
+                        >
+                          <Pin className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(item)}
+                          title="ویرایش"
+                          className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 transition cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteItem(item.id)}
+                          title="حذف"
+                          className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-rose-500 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white leading-snug">
+                      {item.title}
+                    </h3>
+
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 text-xs sm:text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed select-all">
+                      {item.content.split(/(https?:\/\/[^\s]+)/g).map((part, idx) =>
+                        /^https?:\/\/[^\s]+$/.test(part) ? (
+                          <a
+                            key={idx}
+                            href={part}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            dir="ltr"
+                            className="text-indigo-600 dark:text-indigo-400 underline break-all font-mono"
+                          >
+                            {part}
+                          </a>
+                        ) : (
+                          <React.Fragment key={idx}>{part}</React.Fragment>
+                        )
                       )}
                     </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => onUpdateItem(item.id, { pinned: !item.pinned })}
-                        title={item.pinned ? 'برداشتن سنجاق' : 'سنجاق کردن به بالا'}
-                        className={`p-1.5 rounded-xl transition cursor-pointer ${
-                          item.pinned
-                            ? 'bg-amber-500/15 text-amber-500'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-amber-500'
-                        }`}
-                      >
-                        <Pin className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStartEdit(item)}
-                        title="ویرایش"
-                        className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 transition cursor-pointer"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteItem(item.id)}
-                        title="حذف"
-                        className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-rose-500 transition cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
                   </div>
 
-                  <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white leading-snug">
-                    {item.title}
-                  </h3>
-
-                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 text-xs sm:text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed select-all">
-                    {item.content}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-400">
+                    <span>ثبت: {item.updatedAt || item.createdAt}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyContent(item.id, item.content)}
+                      className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                        isCopied
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100'
+                      }`}
+                    >
+                      {isCopied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>کپی شد!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>کپی سریع متن</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-400">
-                  <span>ثبت: {item.updatedAt || item.createdAt}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyContent(item.id, item.content)}
-                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
-                      isCopied
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100'
-                    }`}
-                  >
-                    {isCopied ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>کپی شد!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>کپی سریع متن</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          {hasMoreItems && (
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => prev + 50)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+              >
+                نمایش موارد بیشتر ({toPersianNum(filteredItems.length - visibleCount)} مورد دیگر)
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 };
+

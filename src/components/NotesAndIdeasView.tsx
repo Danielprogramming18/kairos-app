@@ -1,45 +1,76 @@
 import React, { useState } from 'react';
-import { Lightbulb, Plus, Trash2, ArrowUpRight, Search, Tag } from 'lucide-react';
-import { Idea, IdeaCategory } from '../types';
+import { Lightbulb, Plus, Trash2, ArrowUpRight, Search, Edit3, X, Check } from 'lucide-react';
+import { Idea, IdeaCategory, Task } from '../types';
 import { toPersianNum } from '../utils/persianDate';
 
 export const IDEA_CATEGORIES: Record<string, { label: string; color: string }> = {
   all: { label: 'همه ایده‌ها', color: '#6366f1' },
   project: { label: 'پروژه و کدنویسی 💻', color: '#8b5cf6' },
   learning: { label: 'آموزش و مهارت 📚', color: '#3b82f6' },
-  business: { label: 'مغازه و ایتا 💼', color: '#10b981' },
+  business: { label: 'کسب‌وکار و محتوا 💼', color: '#10b981' },
   personal: { label: 'شخصی و تفریح 🎸', color: '#f59e0b' },
 };
 
 interface NotesAndIdeasViewProps {
   ideas: Idea[];
+  tasks?: Task[];
   onAddIdea: (idea: Omit<Idea, 'id' | 'createdAt'>) => void;
+  onUpdateIdea?: (id: string, data: Partial<Idea>) => void;
   onConvertIdeaToTask: (ideaId: string) => void;
   onDeleteIdea: (ideaId: string) => void;
 }
 
 export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
   ideas,
+  tasks = [],
   onAddIdea,
+  onUpdateIdea,
   onConvertIdeaToTask,
   onDeleteIdea,
 }) => {
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<IdeaCategory>('project');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState<number>(50);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    onAddIdea({
-      title: title.trim(),
-      note: note.trim() || undefined,
-      category,
-    });
+
+    if (editingId && onUpdateIdea) {
+      onUpdateIdea(editingId, {
+        title: title.trim(),
+        note: note.trim() || undefined,
+        category,
+      });
+      setEditingId(null);
+    } else {
+      onAddIdea({
+        title: title.trim(),
+        note: note.trim() || undefined,
+        category,
+      });
+    }
     setTitle('');
     setNote('');
+  };
+
+  const handleStartEdit = (idea: Idea) => {
+    setEditingId(idea.id);
+    setTitle(idea.title);
+    setNote(idea.note || '');
+    setCategory(idea.category);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setTitle('');
+    setNote('');
+    setCategory('project');
   };
 
   const filteredIdeas = ideas.filter((item) => {
@@ -50,18 +81,33 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
     return matchesCat && matchesSearch;
   });
 
+  const visibleIdeas = filteredIdeas.slice(0, visibleCount);
+  const hasMoreIdeas = filteredIdeas.length > visibleCount;
+
   return (
     <div className="space-y-6">
-      {/* 1. Fast Add Idea Form */}
+      {/* 1. Fast Add / Edit Idea Form */}
       <section className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
-        <div>
-          <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
-            <Lightbulb className="w-5 h-5 text-amber-500" />
-            پارکینگ ایده‌های دانیال (تخلیه بار شناختی مغز)
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            هر ایده، پروژه یا آموزشی که به ذهنت می‌رسد را با دسته‌بندی اینجا پارک کن تا ذهنت موقع کار و استراحت درگیرش نماند.
-          </p>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
+              <Lightbulb className="w-5 h-5 text-amber-500" />
+              <span>بانک ایده‌ها (تخلیه بار شناختی ذهن)</span>
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              هر ایده، پروژه یا آموزشی که به ذهنت می‌رسد را با دسته‌بندی اینجا ثبت کن تا ذهنت هنگام تمرکز درگیرش نماند.
+            </p>
+          </div>
+          {editingId && (
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>انصراف از ویرایش</span>
+            </button>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-2">
@@ -71,7 +117,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="عنوان ایده یا پروژه (مثلاً: ساخت داشبورد معاملات با Power BI)"
+              placeholder="عنوان ایده یا پروژه..."
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             />
           </div>
@@ -88,21 +134,22 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as IdeaCategory)}
+              aria-label="دسته‌بندی ایده"
               className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             >
               <option value="project">پروژه و کدنویسی 💻</option>
               <option value="learning">آموزش و مهارت 📚</option>
-              <option value="business">مغازه و ایتا 💼</option>
+              <option value="business">کسب‌وکار و محتوا 💼</option>
               <option value="personal">شخصی و تفریح 🎸</option>
             </select>
           </div>
           <div className="md:col-span-1">
             <button
               type="submit"
-              className="w-full h-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-indigo-600/25 transition"
+              className="w-full h-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-indigo-600/25 transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>ثبت</span>
+              <span>{editingId ? 'ذخیره' : 'ثبت'}</span>
             </button>
           </div>
         </form>
@@ -122,7 +169,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
                 <button
                   key={key}
                   onClick={() => setSelectedCategory(key)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
                     active
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
@@ -155,8 +202,12 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
 
         {/* Ideas Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredIdeas.map((idea) => {
+          {visibleIdeas.map((idea) => {
             const cat = IDEA_CATEGORIES[idea.category] || IDEA_CATEGORIES.project;
+            const alreadyConverted = tasks.some(
+              (t) => t.title.trim() === idea.title.trim()
+            );
+
             return (
               <div
                 key={idea.id}
@@ -187,19 +238,47 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-200/60 dark:border-slate-700/50">
                   <button
+                    type="button"
                     onClick={() => onConvertIdeaToTask(idea.id)}
-                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                    className={`text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                      alreadyConverted
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-indigo-600 dark:text-indigo-400 hover:underline'
+                    }`}
                   >
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                    <span>تبدیل به مأموریت میز کار</span>
+                    {alreadyConverted ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>در لیست کارها موجود است</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                        <span>تبدیل به مأموریت میز کار</span>
+                      </>
+                    )}
                   </button>
-                  <button
-                    onClick={() => onDeleteIdea(idea.id)}
-                    title="حذف ایده"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {onUpdateIdea && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(idea)}
+                        title="ویرایش ایده"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-500 hover:bg-indigo-500/10 transition cursor-pointer"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteIdea(idea.id)}
+                      title="حذف ایده"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -211,6 +290,18 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
             </div>
           )}
         </div>
+
+        {hasMoreIdeas && (
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={() => setVisibleCount((prev) => prev + 50)}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+            >
+              نمایش موارد بیشتر ({toPersianNum(filteredIdeas.length - visibleCount)} مورد دیگر)
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

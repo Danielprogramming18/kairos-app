@@ -25,15 +25,17 @@ export function generateLocalCoachResponse(
   const doneToday = todayTasks.filter((t) => t.completed);
   const habitsDone = habits.filter((h) => h.completedDates[todayKey]).length;
 
-  // 1. Task breakdown request
+  // 1. Task breakdown request (BUG-26: prioritized explicit breakdown keywords)
   if (
     q.includes('تقسیم') ||
     q.includes('خرد') ||
     q.includes('مراحل کوچک') ||
-    q.includes('CRM') ||
-    q.includes('پروژه')
+    q.includes('چند مرحله') ||
+    q.includes('CRM')
   ) {
-    const projectMatch = q.replace(/لطفاً|پروژه بزرگ|رو به چند مرحله.*|تقسیم کن|خرد کن/g, '').trim();
+    const projectMatch = q
+      .replace(/لطفاً|پروژه بزرگ|پروژه|رو به چند مرحله.*|تقسیم کن|خرد کن/g, '')
+      .trim();
     const topic = projectMatch.length > 3 && projectMatch.length < 55 ? projectMatch : 'پروژه اصلی امروز';
 
     return {
@@ -66,9 +68,10 @@ export function generateLocalCoachResponse(
     q.includes('اهمال') ||
     q.includes('تنبلی') ||
     q.includes('بی‌انرژی') ||
+    q.includes('بی انرژی') ||
     q.includes('حوصله') ||
-    q.includes('شروع') ||
-    q.includes('خسته')
+    q.includes('خسته') ||
+    q.includes('انگیزه')
   ) {
     const topTaskTitle = pendingToday[0]?.title || 'مهم‌ترین کار امروزت';
     return {
@@ -84,13 +87,13 @@ export function generateLocalCoachResponse(
     };
   }
 
-  // 3. Daily schedule optimization
+  // 3. Daily schedule optimization (BUG-26: match explicit schedule phrases instead of bare "ساعت" or "امروز")
   if (
     q.includes('برنامه') ||
     q.includes('چینش') ||
-    q.includes('امروز') ||
     q.includes('زمان‌بندی') ||
-    q.includes('ساعت')
+    q.includes('زمان بندی') ||
+    q.includes('اولویت‌بندی')
   ) {
     const totalPendingMin = pendingToday.reduce((acc, t) => acc + (Number(t.duration) || 45), 0);
     const listText =

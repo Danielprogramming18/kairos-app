@@ -62,34 +62,65 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     }
   }, [taskToEdit, isOpen, defaultDateKey, todayKey]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+
+    // Validate date, time, priority, and duration (BUG-33)
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : todayKey;
+    const trimmedReminder = reminderTime.trim();
+    const validReminder = /^([01]\d|2[0-3]):([0-5]\d)$/.test(trimmedReminder)
+      ? trimmedReminder
+      : undefined;
+    const validPriority = Math.max(1, Math.min(20, Math.round(Number(priority) || 1)));
+    const validDuration = Math.max(5, Math.min(600, Math.round(Number(duration) || 45)));
+
     onSave({
       id: taskToEdit?.id,
       title: title.trim(),
       description: description.trim() || undefined,
-      priority,
-      duration,
-      targetDate,
-      reminderTime: reminderTime.trim() || undefined,
+      priority: validPriority,
+      duration: validDuration,
+      targetDate: validDate,
+      reminderTime: validReminder,
       category: 'work',
     });
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="task-modal-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
+    >
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-          <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
+          <h3
+            id="task-modal-title"
+            className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"
+          >
             <CheckSquare className="w-5 h-5 text-indigo-500" />
             <span>{taskToEdit ? 'ویرایش مأموریت' : 'ثبت مأموریت جدید'}</span>
           </h3>
           <button
             type="button"
+            aria-label="بستن پنجره"
             onClick={onClose}
             className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
           >

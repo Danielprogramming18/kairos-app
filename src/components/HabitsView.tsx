@@ -62,7 +62,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
   let maxBestHabitTitle = '—';
 
   habits.forEach((h) => {
-    const s = calculateStreaks(h.completedDates);
+    const s = calculateStreaks(h.completedDates, new Date(), h.weeklyGoal);
     if (s.current > maxCurrentStreak) {
       maxCurrentStreak = s.current;
       maxCurrentHabitTitle = `${h.emoji} ${h.title}`;
@@ -84,7 +84,9 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
     });
   });
   const weeklyRate =
-    totalPossibleWeek > 0 ? Math.round((totalDoneWeek / totalPossibleWeek) * 100) : 0;
+    totalPossibleWeek > 0
+      ? Math.min(100, Math.round((totalDoneWeek / totalPossibleWeek) * 100))
+      : 0;
 
   // Filter habits
   const filteredHabits = habits.filter((h) => {
@@ -306,7 +308,10 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                       if (h.completedDates[d.key]) done++;
                     });
                   });
-                  const rate = totalPossible > 0 ? Math.round((done / totalPossible) * 100) : 0;
+                  const rate =
+                    totalPossible > 0
+                      ? Math.min(100, Math.round((done / totalPossible) * 100))
+                      : 0;
 
                   return (
                     <div key={catKey} className="space-y-1.5">
@@ -451,7 +456,11 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
               {filteredHabits.map((habit) => {
                 const catInfo = HABIT_CATEGORIES[habit.category] || HABIT_CATEGORIES.all;
-                const streaks = calculateStreaks(habit.completedDates);
+                const streaks = calculateStreaks(
+                  habit.completedDates,
+                  new Date(),
+                  habit.weeklyGoal
+                );
                 const weekDoneCount = weekDays.filter((d) => habit.completedDates[d.key]).length;
                 const goal = habit.weeklyGoal || 7;
                 const goalPercent = Math.min(Math.round((weekDoneCount / goal) * 100), 100);

@@ -11,7 +11,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { Task, Habit, ChatMessage } from '../types';
-import { toPersianNum, getTodayKey, getTomorrowKey } from '../utils/persianDate';
+import { toPersianNum, toEnglishNum, getTodayKey, getTomorrowKey } from '../utils/persianDate';
 import { generateLocalCoachResponse } from '../utils/localCoach';
 
 interface AIAssistantViewProps {
@@ -42,19 +42,26 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Ivy Lee Wizard State
+  // Ivy Lee Wizard State (BUG-13: initialize priorityCounter from existing today tasks)
+  const computeNextPriority = () => {
+    const todayKey = getTodayKey();
+    const todayTasks = tasks.filter((t) => t.targetDate === todayKey && !t.completed);
+    const maxExisting = todayTasks.reduce((max, t) => Math.max(max, Number(t.priority) || 0), 0);
+    return Math.min(20, Math.max(1, maxExisting + 1));
+  };
+
   const [wizardStep, setWizardStep] = useState<'ASK_TITLE' | 'ASK_DESC' | 'ASK_TIME' | 'ASK_MORE'>('ASK_TITLE');
-  const [priorityCounter, setPriorityCounter] = useState(1);
-  const [draftTask, setDraftTask] = useState<{ title: string; description?: string; priority: number; duration?: number }>({
+  const [priorityCounter, setPriorityCounter] = useState<number>(() => computeNextPriority());
+  const [draftTask, setDraftTask] = useState<{ title: string; description?: string; priority: number; duration?: number }>(() => ({
     title: '',
-    priority: 1,
-  });
+    priority: computeNextPriority(),
+  }));
   const [collectedTasks, setCollectedTasks] = useState<Array<{ title: string; description?: string; priority: number; duration: number }>>([]);
   const [wizardChat, setWizardChat] = useState<Array<{ sender: 'bot' | 'user'; text: string }>>([
     {
       sender: 'bot',
       text:
-        'سلام دانیال جان! 👋 بیا با متد علمی The One Thing مغزت رو از هرج‌ومرج و عذاب وجدان نجات بدیم.\n\nتصور کن فقط یک کار رو می‌تونستی امروز انجام بدی که بیشترین اثر رو داره؛ اون کار چیه؟ (می‌شه اولویت ۱ تو)',
+        'سلام دانیال جان! 👋 بیا با متد علمی The One Thing مغزت رو از هرج‌ومرج و عذاب وجدان نجات بدیم.\n\nتصور کن فقط یک کار رو می‌تونستی امروز انجام بدی که بیشترین اثر رو داره؛ اون کار چیه؟ (می‌شه اولویت بعدی تو)',
     },
   ]);
   const [wizardInput, setWizardInput] = useState('');
@@ -121,7 +128,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
     } else if (wizardStep === 'ASK_DESC') {
       proceedToTimeStep(val || '-');
     } else if (wizardStep === 'ASK_TIME') {
-      const num = parseInt(val, 10);
+      const num = parseInt(toEnglishNum(val), 10);
       if (isNaN(num) || num <= 0) {
         setWizardChat((prev) => [
           ...prev,

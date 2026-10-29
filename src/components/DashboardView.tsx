@@ -44,18 +44,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [nlpInput, setNlpInput] = useState('');
   const [isSubmittingNlp, setIsSubmittingNlp] = useState(false);
 
-  // Compute metrics
-  const todayTasks = tasks.filter((t) => t.targetDate <= todayKey);
+  // Compute metrics (BUG-07: exclude already-completed tasks from past days so today's progress is accurate)
   const overdueTasks = tasks.filter((t) => t.targetDate < todayKey && !t.completed);
+  const todayTasks = tasks.filter(
+    (t) => t.targetDate === todayKey || (t.targetDate < todayKey && !t.completed)
+  );
   const todayCompletedTasks = todayTasks.filter((t) => t.completed);
   const tasksPercent =
-    todayTasks.length > 0 ? Math.round((todayCompletedTasks.length / todayTasks.length) * 100) : 0;
+    todayTasks.length > 0
+      ? Math.min(100, Math.round((todayCompletedTasks.length / todayTasks.length) * 100))
+      : 0;
 
   // Habits metrics
   const totalHabits = habits.length;
   const completedHabitsToday = habits.filter((h) => h.completedDates[todayKey]).length;
   const habitsPercent =
-    totalHabits > 0 ? Math.round((completedHabitsToday / totalHabits) * 100) : 0;
+    totalHabits > 0 ? Math.min(100, Math.round((completedHabitsToday / totalHabits) * 100)) : 0;
 
   // Find priority 1 task (The One Thing)
   const pendingTodaySorted = [...todayTasks]
@@ -66,7 +70,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Best streak
   let maxStreak = 0;
   habits.forEach((h) => {
-    const s = calculateStreaks(h.completedDates);
+    const s = calculateStreaks(h.completedDates, new Date(), h.weeklyGoal);
     if (s.current > maxStreak) maxStreak = s.current;
   });
 
@@ -419,7 +423,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="space-y-2">
               {habits.slice(0, 6).map((habit) => {
                 const isDone = !!habit.completedDates[todayKey];
-                const streaks = calculateStreaks(habit.completedDates);
+                const streaks = calculateStreaks(
+                  habit.completedDates,
+                  new Date(),
+                  habit.weeklyGoal
+                );
                 return (
                   <div
                     key={habit.id}

@@ -1,0 +1,57 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  computeActualElapsedMinutes,
+  computeRemainingSeconds,
+  createInitialTimerState,
+  pauseTimer,
+  startTimer,
+  transitionTimerPhase,
+} from './pomodoroEngine';
+
+test('BUG-15: computeRemainingSeconds uses targetEndEpochMs without background drift', () => {
+  const t0 = 1_700_000_000_000;
+  const initial = createInitialTimerState(25); // 1500 seconds
+  const running = startTimer(initial, t0);
+
+  assert.equal(running.isRunning, true);
+  assert.equal(running.targetEndEpochMs, t0 + 1500 * 1000);
+
+  // Simulate browser tab backgrounded for 10 minutes (600,000 ms) without any interval ticks
+  const tAfter10Min = t0 + 600_000;
+  assert.equal(computeRemainingSeconds(running, tAfter10Min), 900);
+
+  // Pause after 10 minutes -> preserves 900 seconds remaining
+  const paused = pauseTimer(running, tAfter10Min);
+  assert.equal(paused.isRunning, false);
+  assert.equal(paused.remainingSecondsWhenPaused, 900);
+  assert.equal(computeRemainingSeconds(paused, tAfter10Min + 500_000), 900);
+});
+
+test('BUG-17: computeActualElapsedMinutes logs real elapsed minutes instead of full preset on manual stop', () => {
+  const t0 = 1_700_000_000_000;
+  const running = startTimer(createInitialTimerState(45), t0);
+
+  // After 10 seconds -> 0 minutes (below 30s threshold)
+  assert.equal(computeActualElapsedMinutes(running, t0 + 10_000), 0);
+
+  // After 12 minutes -> 12 minutes (not 45!)
+  assert.equal(computeActualElapsedMinutes(running, t0 + 12 * 60_000), 12);
+});
+
+test('BUG-19: transitionTimerPhase enters long_break (20m) after 4 completed work cycles', () => {
+  let state = createInitialTimerState(25);
+  for (let cycle = 1; cycle <= 3; cycle++) {
+    state = transitionTimerPhase(state, true, 4);
+    assert.equal(state.phase, 'short_break');
+    assert.equal(state.completedWorkCycles, cycle);
+    state = transitionTimerPhase(state, false, 4);
+    assert.equal(state.phase, 'work');
+  }
+
+  // 4th completed work session -> long_break (20m = 1200s)
+  state = transitionTimerPhase(state, true, 4);
+  assert.equal(state.phase, 'long_break');
+  assert.equal(state.completedWorkCycles, 4);
+  assert.equal(state.durationSeconds, 20 * 60);
+});

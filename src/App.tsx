@@ -18,7 +18,8 @@ import { AIAssistantView } from './components/AIAssistantView';
 import { FocusTimerView } from './components/FocusTimerView';
 import { NotesAndIdeasView } from './components/NotesAndIdeasView';
 import { AnalyticsView } from './components/AnalyticsView';
-import { BackupAndSyncView } from './components/BackupAndSyncView';
+import { BackupAndSyncView, DeletedTrashItem } from './components/BackupAndSyncView';
+import { GlobalMiniTimer } from './components/GlobalMiniTimer';
 import { HabitModal } from './components/HabitModal';
 import { TaskModal } from './components/TaskModal';
 import { DeleteModal } from './components/DeleteModal';
@@ -47,10 +48,90 @@ import {
   pushGitHubDataFile,
   GITHUB_LAST_SHA_STORAGE_KEY,
 } from './utils/githubSync';
+import {
+  usePlatform,
+  domainEntityToTask,
+  taskToDomainEntity,
+  domainEntityToHabit,
+  habitToDomainEntity,
+  ideaToDomainNote,
+  usefulInfoToDomainNote,
+  focusSessionToDomainEntity,
+} from './app/PlatformContext';
+import { createEntityId } from './domain/models';
+
+const HASH_TO_TAB: Record<string, NavTabId> = {
+  '#/today': 'dashboard',
+  '#/dashboard': 'dashboard',
+  '#/tasks': 'workspace',
+  '#/workspace': 'workspace',
+  '#/calendar': 'calendar',
+  '#/habits': 'habits',
+  '#/focus': 'deep_focus',
+  '#/deep_focus': 'deep_focus',
+  '#/pomodoro': 'pomodoro',
+  '#/notes': 'useful_info',
+  '#/useful_info': 'useful_info',
+  '#/ideas': 'ideas',
+  '#/planner': 'planner',
+  '#/insights': 'analytics',
+  '#/analytics': 'analytics',
+  '#/settings': 'sync',
+  '#/sync': 'sync',
+  '#/trash': 'sync',
+};
+
+const TAB_TO_HASH: Record<NavTabId, string> = {
+  dashboard: '#/today',
+  workspace: '#/tasks',
+  calendar: '#/calendar',
+  habits: '#/habits',
+  deep_focus: '#/focus',
+  pomodoro: '#/pomodoro',
+  useful_info: '#/notes',
+  ideas: '#/ideas',
+  planner: '#/planner',
+  analytics: '#/insights',
+  sync: '#/settings',
+};
 
 export default function App() {
-  // 1. Persistent UI State
-  const [activeTab, setActiveTab] = useState<NavTabId>('dashboard');
+  const { container, ready: platformReady, bridgeError } = usePlatform();
+
+  // 1. Persistent UI State with Hash Route Support
+  const [activeTab, setActiveTabState] = useState<NavTabId>(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const mapped = HASH_TO_TAB[window.location.hash];
+      if (mapped) return mapped;
+    }
+    return 'dashboard';
+  });
+
+  const setActiveTab = useCallback((tab: NavTabId) => {
+    setActiveTabState(tab);
+    if (typeof window !== 'undefined') {
+      const targetHash = TAB_TO_HASH[tab] || '#/today';
+      if (window.location.hash !== targetHash) {
+        window.history.pushState(null, '', targetHash);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const mapped = HASH_TO_TAB[window.location.hash];
+      if (mapped) {
+        setActiveTabState(mapped);
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('popstate', onHashChange);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('popstate', onHashChange);
+    };
+  }, []);
+
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getTodayKey());
   const [isDark, setIsDark] = useState<boolean>(true);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -68,7 +149,7 @@ export default function App() {
     time: string;
   } | null>(null);
 
-  // 2. Persistent Core Data (Preserving all existing localStorage keys)
+  // 2. Persistent Core Data (Preserving all existing localStorage keys + IndexedDB repository)
   const [habits, setHabits] = useState<Habit[]>(() => {
     try {
       const saved = localStorage.getItem('nazmyar_habits_v1');
@@ -82,12 +163,7 @@ export default function App() {
     try {
       const saved = localStorage.getItem('nazmyar_danial_tasks_v1');
       if (saved) {
-        const parsed: Task[] = JSON.parse(saved);
-        return parsed.map((t) => {
-          if (t.id === 't1' && !t.reminderTime) return { ...t, reminderTime: '19:00' };
-          if (t.id === 't2' && !t.reminderTime) return { ...t, reminderTime: '16:30' };
-          return t;
-        });
+        return JSON.parse(saved) as Task[];
       }
       return getInitialTasks();
     } catch {
@@ -122,8 +198,60 @@ export default function App() {
     }
   });
 
-  // 3. GitHub REST API Sync State
-  const [githubConfig, setGithubConfig] = useState<GitHubSyncConfig>(() => loadGitHubConfig());
+  // Hydrate & Synchronize with Clean Architecture PlatformContainer (IndexedDB / Native Bridge)
+  const hasHydratedFromRepoRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!platformReady || bridgeError || hasHydratedFromRepoRef.current) return;
+    hasHydratedFromRepoRef.current = true;
+
+    (async () => {
+      try {
+        const [repoTasks, repoHabits, repoNotes, repoFocus] = await Promise.all([
+          container.tasks.listTasks(),
+          container.habits.listHabits(),
+          container.notes.listNotes(),
+          container.focus.listFocusSessions(),
+        ]);
+
+        if (repoTasks.length > 0) {
+          setTasks(repoTasks.map(domainEntityToTask));
+        } else if (tasks.length > 0) {
+          await container.tasks.upsertTasksBatch(tasks.map(taskToDomainEntity));
+        }
+
+        if (repoHabits.length > 0) {
+          setHabits(repoHabits.map(domainEntityToHabit));
+        } else if (habits.length > 0) {
+          for (const h of habits) {
+            await container.habits.upsertHabit(habitToDomainEntity(h));
+          }
+        }
+
+        if (repoNotes.length === 0 && (ideas.length > 0 || usefulInfos.length > 0)) {
+          for (const idea of ideas) {
+            await container.notes.upsertNote(ideaToDomainNote(idea));
+          }
+          for (const info of usefulInfos) {
+            await container.notes.upsertNote(usefulInfoToDomainNote(info));
+          }
+        }
+
+        if (repoFocus.length === 0 && focusSessions.length > 0) {
+          for (const fs of focusSessions) {
+            await container.focus.logFocusSession(focusSessionToDomainEntity(fs));
+          }
+        }
+      } catch {
+        // Keep local state intact if repository hydration encounters an error
+      }
+    })();
+  }, [platformReady, bridgeError, container]);
+
+  // 3. Legacy GitHub REST API Sync State (Offline-First Policy: automatic background network calls disabled)
+  const [githubConfig, setGithubConfig] = useState<GitHubSyncConfig>(() => {
+    const loaded = loadGitHubConfig();
+    return { ...loaded, autoSync: false };
+  });
   const [lastKnownSha, setLastKnownSha] = useState<string | null>(() => {
     try {
       return localStorage.getItem(GITHUB_LAST_SHA_STORAGE_KEY);
@@ -136,7 +264,6 @@ export default function App() {
   const [githubSyncError, setGithubSyncError] = useState<string | null>(null);
 
   const isApplyingRemoteRef = useRef<boolean>(false);
-  const hasInitialPullRunRef = useRef<boolean>(false);
   const latestDataRef = useRef({
     habits,
     tasks,
@@ -176,47 +303,81 @@ export default function App() {
 
   const [activeFocusTaskId, setActiveFocusTaskId] = useState<string | undefined>(undefined);
 
-  // Toast notifications
-  const [toasts, setToasts] = useState<Array<{ id: string; text: string; type: 'info' | 'success' }>>([]);
+  // Toast notifications (BUG-41: timer cleanup on unmount; BUG-44: Undo action support)
+  const [toasts, setToasts] = useState<
+    Array<{ id: string; text: string; type: 'info' | 'success'; onUndo?: () => void }>
+  >([]);
+  const toastTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
-  const showToast = useCallback((text: string, type: 'info' | 'success' = 'info') => {
-    const id = 'toast_' + Date.now() + Math.random().toString(36).substring(2, 5);
-    setToasts((prev) => [...prev, { id, text, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+  useEffect(() => {
+    const timers = toastTimersRef.current;
+    return () => {
+      timers.forEach((timerId) => clearTimeout(timerId));
+      timers.clear();
+    };
   }, []);
 
-  // Sync to localStorage
+  const showToast = useCallback(
+    (text: string, type: 'info' | 'success' = 'info', onUndo?: () => void) => {
+      const id = createEntityId('toast');
+      setToasts((prev) => [...prev, { id, text, type, onUndo }]);
+      const durationMs = onUndo ? 6000 : 3200;
+      const timerId = setTimeout(() => {
+        toastTimersRef.current.delete(timerId);
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, durationMs);
+      toastTimersRef.current.add(timerId);
+    },
+    []
+  );
+
+  // Safe localStorage persistence helper (BUG-34: explicit quota warning instead of silent failure)
+  const quotaWarnedRef = useRef<boolean>(false);
+  const safeSetLocalStorage = useCallback(
+    (key: string, value: string) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        if (!quotaWarnedRef.current) {
+          quotaWarnedRef.current = true;
+          showToast(
+            'حافظهٔ مرورگر (LocalStorage) پر شده است؛ داده‌ها در پایگاه‌دادهٔ محلی IndexedDB نگهداری می‌شوند.',
+            'info'
+          );
+        }
+      }
+    },
+    [showToast]
+  );
+
+  // Sync to localStorage & IndexedDB Repository
   useEffect(() => {
-    try {
-      localStorage.setItem('nazmyar_habits_v1', JSON.stringify(habits));
-    } catch {}
-  }, [habits]);
+    safeSetLocalStorage('nazmyar_habits_v1', JSON.stringify(habits));
+    if (platformReady && !bridgeError && hasHydratedFromRepoRef.current) {
+      habits.forEach((h) => {
+        container.habits.upsertHabit(habitToDomainEntity(h)).catch(() => {});
+      });
+    }
+  }, [habits, safeSetLocalStorage, platformReady, bridgeError, container]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('nazmyar_danial_tasks_v1', JSON.stringify(tasks));
-    } catch {}
-  }, [tasks]);
+    safeSetLocalStorage('nazmyar_danial_tasks_v1', JSON.stringify(tasks));
+    if (platformReady && !bridgeError && hasHydratedFromRepoRef.current) {
+      container.tasks.upsertTasksBatch(tasks.map(taskToDomainEntity)).catch(() => {});
+    }
+  }, [tasks, safeSetLocalStorage, platformReady, bridgeError, container]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('nazmyar_danial_ideas_v1', JSON.stringify(ideas));
-    } catch {}
-  }, [ideas]);
+    safeSetLocalStorage('nazmyar_danial_ideas_v1', JSON.stringify(ideas));
+  }, [ideas, safeSetLocalStorage]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('nazmyar_focus_sessions_v1', JSON.stringify(focusSessions));
-    } catch {}
-  }, [focusSessions]);
+    safeSetLocalStorage('nazmyar_focus_sessions_v1', JSON.stringify(focusSessions));
+  }, [focusSessions, safeSetLocalStorage]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('nazmyar_useful_info_v1', JSON.stringify(usefulInfos));
-    } catch {}
-  }, [usefulInfos]);
+    safeSetLocalStorage('nazmyar_useful_info_v1', JSON.stringify(usefulInfos));
+  }, [usefulInfos, safeSetLocalStorage]);
 
   const updateStoredSha = useCallback((sha: string | null) => {
     setLastKnownSha(sha);
@@ -229,7 +390,7 @@ export default function App() {
     } catch {}
   }, []);
 
-  // ================= GITHUB REST API SYNC LOGIC =================
+  // ================= MANUAL GITHUB REST API SYNC (ONLY WHEN EXPLICITLY INVOKED) =================
   const handlePullFromGitHub = useCallback(
     async (silent = false) => {
       if (!isGitHubConfigValid(githubConfig)) return;
@@ -239,7 +400,6 @@ export default function App() {
       try {
         const res = await fetchGitHubDataFile(githubConfig);
         if (!res.exists || !res.fileData) {
-          // data.json does not exist in the private repo yet -> create it with current local data!
           const pushRes = await pushGitHubDataFile(
             githubConfig,
             latestDataRef.current,
@@ -259,15 +419,14 @@ export default function App() {
           return;
         }
 
-        // Only apply remote state if SHA changed or if this is a manual pull
         if (!silent || res.sha !== lastKnownSha) {
           isApplyingRemoteRef.current = true;
           const remoteData = res.fileData.data;
-          if (remoteData.habits) setHabits(remoteData.habits);
-          if (remoteData.tasks) setTasks(remoteData.tasks);
-          if (remoteData.ideas) setIdeas(remoteData.ideas);
-          if (remoteData.focusSessions) setFocusSessions(remoteData.focusSessions);
-          if (remoteData.usefulInfos) setUsefulInfos(remoteData.usefulInfos);
+          if (Array.isArray(remoteData.habits)) setHabits(remoteData.habits);
+          if (Array.isArray(remoteData.tasks)) setTasks(remoteData.tasks);
+          if (Array.isArray(remoteData.ideas)) setIdeas(remoteData.ideas);
+          if (Array.isArray(remoteData.focusSessions)) setFocusSessions(remoteData.focusSessions);
+          if (Array.isArray(remoteData.usefulInfos)) setUsefulInfos(remoteData.usefulInfos);
 
           updateStoredSha(res.sha);
           setLastSyncedAt(
@@ -292,7 +451,6 @@ export default function App() {
         if (!silent) showToast(msg);
       } finally {
         setIsGitHubSyncing(false);
-        hasInitialPullRunRef.current = true;
       }
     },
     [githubConfig, lastKnownSha, showToast, updateStoredSha]
@@ -347,51 +505,12 @@ export default function App() {
     [githubConfig, lastKnownSha, showToast, updateStoredSha]
   );
 
-  // Pull on app open + periodic poll every 45 seconds + when window regains focus
-  useEffect(() => {
-    if (!isGitHubConfigValid(githubConfig) || !githubConfig.autoSync) return;
-
-    handlePullFromGitHub(true);
-
-    const interval = setInterval(() => {
-      handlePullFromGitHub(true);
-    }, 45000);
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        handlePullFromGitHub(true);
-      }
-    };
-
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-    };
-  }, [githubConfig, handlePullFromGitHub]);
-
-  // Debounced auto-push to GitHub whenever local data changes
-  useEffect(() => {
-    if (!isGitHubConfigValid(githubConfig) || !githubConfig.autoSync) return;
-    if (!hasInitialPullRunRef.current || isApplyingRemoteRef.current) return;
-
-    const timer = setTimeout(() => {
-      handlePushToGitHub(true);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [habits, tasks, ideas, focusSessions, usefulInfos, githubConfig, handlePushToGitHub]);
-
   const handleSaveGitHubConfig = (newCfg: GitHubSyncConfig) => {
-    saveGitHubConfig(newCfg);
-    setGithubConfig(newCfg);
+    const safeCfg = { ...newCfg, autoSync: false };
+    saveGitHubConfig(safeCfg);
+    setGithubConfig(safeCfg);
     setGithubSyncError(null);
-    if (isGitHubConfigValid(newCfg)) {
-      showToast('تنظیمات گیت‌هاب ذخیره شد. در حال اتصال به مخزن...', 'success');
-    }
+    showToast('تنظیمات ذخیره شد (حالت آفلاین-محور فعال است).', 'success');
   };
 
   // Load Theme & Sound on mount
@@ -413,7 +532,7 @@ export default function App() {
     }
   }, []);
 
-  // Background Task Reminder Checker (runs every 15 seconds)
+  // Background Task Reminder Checker (runs every 15 seconds; BUG-40: catches up missed reminders from earlier today)
   useEffect(() => {
     const checkReminders = () => {
       const now = new Date();
@@ -423,11 +542,17 @@ export default function App() {
       const todayKey = getTodayKey();
 
       tasks.forEach((task) => {
+        const isDueToday =
+          task.targetDate === todayKey &&
+          !!task.reminderTime &&
+          task.reminderTime <= currentHHMM;
+        const isDueFromBefore =
+          task.targetDate < todayKey && task.reminderTime === currentHHMM;
+
         if (
           !task.completed &&
-          task.targetDate <= todayKey &&
-          task.reminderTime === currentHHMM &&
-          !task.reminded
+          !task.reminded &&
+          (isDueToday || isDueFromBefore)
         ) {
           setTasks((prev) =>
             prev.map((t) => (t.id === task.id ? { ...t, reminded: true } : t))
@@ -437,7 +562,7 @@ export default function App() {
           setActiveReminderAlert({
             taskId: task.id,
             title: task.title,
-            time: currentHHMM,
+            time: task.reminderTime || currentHHMM,
           });
 
           if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
@@ -455,6 +580,41 @@ export default function App() {
     const interval = setInterval(checkReminders, 15000);
     return () => clearInterval(interval);
   }, [tasks]);
+
+  // Global Keyboard Shortcuts (BUG-45: Alt+N new task, Alt+H new habit, Alt+F deep focus, Alt+D dashboard)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (!e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'n') {
+        e.preventDefault();
+        setTaskToEdit(null);
+        setIsTaskModalOpen(true);
+      } else if (key === 'h') {
+        e.preventDefault();
+        setHabitToEdit(null);
+        setIsHabitModalOpen(true);
+      } else if (key === 'f') {
+        e.preventDefault();
+        setActiveTab('deep_focus');
+      } else if (key === 'd') {
+        e.preventDefault();
+        setActiveTab('dashboard');
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   const handleRequestNotificationPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -789,12 +949,29 @@ export default function App() {
       }).format(new Date()),
     };
     setIdeas((prev) => [newIdea, ...prev]);
-    showToast('ایده در پارکینگ ایده‌ها ذخیره شد تا ذهنت آزاد بماند.');
+    showToast('ایده در بانک ایده‌ها ذخیره شد تا ذهنت آزاد بماند.');
+  };
+
+  const handleUpdateIdea = (id: string, data: Partial<Idea>) => {
+    setIdeas((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...data } : item))
+    );
+    showToast('ایده با موفقیت ویرایش شد.', 'success');
   };
 
   const handleConvertIdeaToTask = (ideaId: string) => {
     const idea = ideas.find((i) => i.id === ideaId);
     if (!idea) return;
+
+    // Prevent accidental duplicate conversion (BUG-29)
+    const alreadyExists = tasks.some(
+      (t) => t.title.trim() === idea.title.trim() && !t.completed
+    );
+    if (alreadyExists) {
+      showToast(`مأموریت «${idea.title}» هم‌اکنون در لیست کارهای فعال موجود است.`);
+      return;
+    }
+
     const todayKey = getTodayKey();
     const todayCount = tasks.filter((t) => t.targetDate === todayKey).length;
     handleAddTask({
@@ -806,6 +983,48 @@ export default function App() {
       category: 'work',
     });
     showToast(`«${idea.title}» با اولویت ${toPersianNum(todayCount + 1)} به میز کار اضافه شد!`, 'success');
+  };
+
+  // ================= RECYCLE BIN / TRASH STATE =================
+  const [deletedTrashItems, setDeletedTrashItems] = useState<DeletedTrashItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nazmyar_trash_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    safeSetLocalStorage('nazmyar_trash_v1', JSON.stringify(deletedTrashItems));
+  }, [deletedTrashItems, safeSetLocalStorage]);
+
+  const handleRestoreTrashItem = (item: DeletedTrashItem) => {
+    setDeletedTrashItems((prev) => prev.filter((x) => x.id !== item.id));
+    if (item.type === 'task' && item.payload) {
+      setTasks((prev) => [item.payload, ...prev.filter((t) => t.id !== item.id)]);
+      container.tasks.restoreTask(item.id).catch(() => {});
+    } else if (item.type === 'habit' && item.payload) {
+      setHabits((prev) => [item.payload, ...prev.filter((h) => h.id !== item.id)]);
+      container.habits.upsertHabit(habitToDomainEntity(item.payload)).catch(() => {});
+    } else if (item.type === 'idea' && item.payload) {
+      setIdeas((prev) => [item.payload, ...prev.filter((i) => i.id !== item.id)]);
+      container.notes.upsertNote(ideaToDomainNote(item.payload)).catch(() => {});
+    } else if (item.type === 'useful_info' && item.payload) {
+      setUsefulInfos((prev) => [item.payload, ...prev.filter((u) => u.id !== item.id)]);
+      container.notes.upsertNote(usefulInfoToDomainNote(item.payload)).catch(() => {});
+    }
+    showToast(`«${item.title}» از سطل زباله بازیابی شد!`, 'success');
+  };
+
+  const handlePermanentDeleteTrashItem = (id: string) => {
+    setDeletedTrashItems((prev) => prev.filter((x) => x.id !== id));
+    showToast('مورد انتخاب‌شده برای همیشه از سطل زباله پاک شد.');
+  };
+
+  const handleEmptyTrash = () => {
+    setDeletedTrashItems([]);
+    showToast('سطل زباله به طور کامل تخلیه شد.');
   };
 
   // ================= DELETE MODAL ACTIONS =================
@@ -824,18 +1043,105 @@ export default function App() {
 
   const handleConfirmDelete = () => {
     const { type, id } = deleteModalState;
+    const nowIso = new Date().toISOString();
+
     if (type === 'habit') {
+      const deletedHabit = habits.find((h) => h.id === id);
       setHabits((prev) => prev.filter((h) => h.id !== id));
-      showToast('عادت مورد نظر حذف شد.');
+      container.habits.softDeleteHabit(id).catch(() => {});
+      if (deletedHabit) {
+        setDeletedTrashItems((prev) => [
+          { id, type: 'habit', title: deletedHabit.title, deletedAt: nowIso, payload: deletedHabit },
+          ...prev.filter((x) => x.id !== id),
+        ]);
+      }
+      showToast(
+        'عادت به سطل زباله منتقل شد.',
+        'info',
+        deletedHabit
+          ? () => {
+              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedHabit.id));
+              setHabits((prev) => [deletedHabit, ...prev.filter((h) => h.id !== deletedHabit.id)]);
+              container.habits.upsertHabit(habitToDomainEntity(deletedHabit)).catch(() => {});
+              showToast('عادت حذف‌شده بازیابی شد!', 'success');
+            }
+          : undefined
+      );
     } else if (type === 'task') {
+      const deletedTask = tasks.find((t) => t.id === id);
       setTasks((prev) => prev.filter((t) => t.id !== id));
-      showToast('مأموریت حذف شد.');
+      container.tasks.softDeleteTask(id).catch(() => {});
+      if (deletedTask) {
+        setDeletedTrashItems((prev) => [
+          { id, type: 'task', title: deletedTask.title, deletedAt: nowIso, payload: deletedTask },
+          ...prev.filter((x) => x.id !== id),
+        ]);
+      }
+      showToast(
+        'مأموریت به سطل زباله منتقل شد.',
+        'info',
+        deletedTask
+          ? () => {
+              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedTask.id));
+              setTasks((prev) => [deletedTask, ...prev.filter((t) => t.id !== deletedTask.id)]);
+              container.tasks.restoreTask(deletedTask.id).catch(() => {});
+              showToast('مأموریت حذف‌شده بازیابی شد!', 'success');
+            }
+          : undefined
+      );
     } else if (type === 'idea') {
+      const deletedIdea = ideas.find((i) => i.id === id);
       setIdeas((prev) => prev.filter((i) => i.id !== id));
-      showToast('ایده از بانک ایده‌ها حذف شد.');
+      container.notes.softDeleteNote(id).catch(() => {});
+      if (deletedIdea) {
+        setDeletedTrashItems((prev) => [
+          { id, type: 'idea', title: deletedIdea.title, deletedAt: nowIso, payload: deletedIdea },
+          ...prev.filter((x) => x.id !== id),
+        ]);
+      }
+      showToast(
+        'ایده به سطل زباله منتقل شد.',
+        'info',
+        deletedIdea
+          ? () => {
+              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedIdea.id));
+              setIdeas((prev) => [deletedIdea, ...prev.filter((i) => i.id !== deletedIdea.id)]);
+              container.notes.upsertNote(ideaToDomainNote(deletedIdea)).catch(() => {});
+              showToast('ایدهٔ حذف‌شده بازیابی شد!', 'success');
+            }
+          : undefined
+      );
     } else if (type === 'useful_info') {
+      const deletedInfo = usefulInfos.find((u) => u.id === id);
       setUsefulInfos((prev) => prev.filter((u) => u.id !== id));
-      showToast('مورد از اطلاعات کاربردی حذف شد.');
+      container.notes.softDeleteNote(id).catch(() => {});
+      if (deletedInfo) {
+        setDeletedTrashItems((prev) => [
+          {
+            id,
+            type: 'useful_info',
+            title: deletedInfo.title,
+            deletedAt: nowIso,
+            payload: deletedInfo,
+          },
+          ...prev.filter((x) => x.id !== id),
+        ]);
+      }
+      showToast(
+        'مورد به سطل زباله منتقل شد.',
+        'info',
+        deletedInfo
+          ? () => {
+              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedInfo.id));
+              setUsefulInfos((prev) => [
+                deletedInfo,
+                ...prev.filter((u) => u.id !== deletedInfo.id),
+              ]);
+              container.notes.upsertNote(usefulInfoToDomainNote(deletedInfo)).catch(() => {});
+              showToast('اطلاعات حذف‌شده بازیابی شد!', 'success');
+            }
+          : undefined
+      );
     }
     setDeleteModalState((prev) => ({ ...prev, isOpen: false }));
   };
@@ -848,13 +1154,11 @@ export default function App() {
     focusSessions: FocusSession[];
     usefulInfos: UsefulInfoItem[];
   }) => {
-    setHabits(data.habits);
-    setTasks(data.tasks);
-    setIdeas(data.ideas);
-    setFocusSessions(data.focusSessions);
-    if (data.usefulInfos && data.usefulInfos.length > 0) {
-      setUsefulInfos(data.usefulInfos);
-    }
+    if (Array.isArray(data.habits)) setHabits(data.habits);
+    if (Array.isArray(data.tasks)) setTasks(data.tasks);
+    if (Array.isArray(data.ideas)) setIdeas(data.ideas);
+    if (Array.isArray(data.focusSessions)) setFocusSessions(data.focusSessions);
+    if (Array.isArray(data.usefulInfos)) setUsefulInfos(data.usefulInfos);
     showToast('اطلاعات با موفقیت بازیابی شدند!', 'success');
   };
 
@@ -862,7 +1166,7 @@ export default function App() {
   const pendingTasksCount = tasks.filter((t) => t.targetDate <= getTodayKey() && !t.completed).length;
 
   return (
-    <div className="min-h-screen pb-16 selection:bg-indigo-500 selection:text-white transition-colors duration-300">
+    <div className="min-h-screen pb-24 lg:pb-16 selection:bg-indigo-500 selection:text-white transition-colors duration-300">
       {/* Header */}
       <Header
         soundEnabled={soundEnabled}
@@ -884,6 +1188,18 @@ export default function App() {
             : undefined
         }
       />
+
+      {/* Explicit Native Bridge Diagnostic Banner (Never fail silently) */}
+      {bridgeError && (
+        <div
+          role="alert"
+          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3"
+        >
+          <div className="bg-rose-600 text-white rounded-2xl p-4 shadow-lg flex items-center justify-between gap-3">
+            <p className="text-xs sm:text-sm font-bold">{bridgeError}</p>
+          </div>
+        </div>
+      )}
 
       {/* In-App Active Reminder Alert Banner */}
       {activeReminderAlert && (
@@ -1082,7 +1398,9 @@ export default function App() {
         {activeTab === 'ideas' && (
           <NotesAndIdeasView
             ideas={ideas}
+            tasks={tasks}
             onAddIdea={handleAddIdea}
+            onUpdateIdea={handleUpdateIdea}
             onConvertIdeaToTask={handleConvertIdeaToTask}
             onDeleteIdea={(id) => {
               const i = ideas.find((x) => x.id === id);
@@ -1107,6 +1425,10 @@ export default function App() {
             focusSessions={focusSessions}
             usefulInfos={usefulInfos}
             onRestoreData={handleRestoreData}
+            deletedTrashItems={deletedTrashItems}
+            onRestoreTrashItem={handleRestoreTrashItem}
+            onPermanentDeleteTrashItem={handlePermanentDeleteTrashItem}
+            onEmptyTrash={handleEmptyTrash}
             githubConfig={githubConfig}
             onSaveGitHubConfig={handleSaveGitHubConfig}
             onPullFromGitHub={() => handlePullFromGitHub(false)}
@@ -1118,6 +1440,13 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Persistent Global Mini-Timer Player across tabs */}
+      <GlobalMiniTimer
+        tasks={tasks}
+        visible={activeTab !== 'pomodoro'}
+        onOpenFullTimer={() => setActiveTab('pomodoro')}
+      />
 
       {/* Modals */}
       <HabitModal
@@ -1146,23 +1475,40 @@ export default function App() {
             ? 'حذف اطلاعات کاربردی'
             : 'حذف ایده'
         }
-        description={`آیا از حذف «${deleteModalState.title}» اطمینان دارید؟`}
+        description={`آیا از انتقال «${deleteModalState.title}» به سطل زباله اطمینان دارید؟`}
         onClose={() => setDeleteModalState((prev) => ({ ...prev, isOpen: false }))}
         onConfirm={handleConfirmDelete}
       />
 
       {/* Toast Floating Notifications */}
-      <div className="fixed bottom-5 left-5 z-50 flex flex-col gap-2 pointer-events-none">
+      <div
+        role="status"
+        aria-live="polite"
+        className="fixed bottom-20 lg:bottom-5 left-5 z-50 flex flex-col gap-2 pointer-events-none"
+      >
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 pointer-events-auto transition-all duration-300 animate-fade-in ${
+            className={`px-4 py-3 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-3 pointer-events-auto transition-all duration-300 animate-fade-in ${
               toast.type === 'success'
                 ? 'bg-emerald-600 text-white shadow-emerald-600/25'
                 : 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-slate-900/30'
             }`}
           >
             <span>{toast.text}</span>
+            {toast.onUndo && (
+              <button
+                type="button"
+                onClick={() => {
+                  const undoFn = toast.onUndo;
+                  setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+                  if (undoFn) undoFn();
+                }}
+                className="px-2.5 py-1 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-black transition cursor-pointer shrink-0"
+              >
+                واگرد (Undo)
+              </button>
+            )}
           </div>
         ))}
       </div>

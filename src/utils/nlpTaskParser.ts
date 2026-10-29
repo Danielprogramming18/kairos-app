@@ -26,12 +26,16 @@ export const parseNaturalTaskInput = (
   let priority = 1; // default priority 1
   let reminderTime: string | undefined = undefined;
 
-  // 1. Detect Date relative to referenceDate
-  if (normalized.includes('پس‌فردا') || normalized.includes('پس فردا')) {
+  // 1. Detect Date relative to referenceDate (BUG-23: match only standalone tokens bounded by whitespace/punctuation)
+  const hasPasFarda = /(^|[\s،,؛:])(پس‌فردا|پس فردا)(?=$|[\s،,؛:])/.test(normalized);
+  const hasFarda = !hasPasFarda && /(^|[\s،,؛:])فردا(?=$|[\s،,؛:])/.test(normalized);
+  const hasEmrooz = /(^|[\s،,؛:])امروز(?=$|[\s،,؛:])/.test(normalized);
+
+  if (hasPasFarda) {
     targetDate = getDateKey(addDays(referenceDate, 2));
-  } else if (normalized.includes('فردا')) {
+  } else if (hasFarda) {
     targetDate = getDateKey(addDays(referenceDate, 1));
-  } else if (normalized.includes('امروز')) {
+  } else if (hasEmrooz) {
     targetDate = getDateKey(referenceDate);
   }
 
@@ -46,6 +50,9 @@ export const parseNaturalTaskInput = (
 
     if (period === 'عصر' || period === 'شب' || period === 'بعدازظهر' || period === 'بعد از ظهر') {
       if (hour < 12) hour += 12;
+    } else if (period === 'ظهر') {
+      // In Persian usage, "ساعت ۱ ظهر" through "ساعت ۴ ظهر" means 13:00..16:00, while "ساعت ۱۲ ظهر" is 12:00
+      if (hour >= 1 && hour < 12) hour += 12;
     } else if (period === 'صبح' && hour === 12) {
       hour = 0;
     }
@@ -62,38 +69,43 @@ export const parseNaturalTaskInput = (
   }
 
   // 4. Detect Duration (e.g. "۴۵ دقیقه", "1 ساعت", "نیم ساعت", "۹۰ دقیقه", "۱.۵ ساعت")
+  const decimalHourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*ساعت(?!\s*\d)/);
   if (normalized.includes('نیم ساعت')) {
     duration = 30;
-  } else if (normalized.includes('یک ساعت و نیم') || normalized.includes('1.5 ساعت')) {
+  } else if (normalized.includes('یک ساعت و نیم')) {
     duration = 90;
-  } else if (normalized.includes('دو ساعت') || normalized.includes('2 ساعت')) {
+  } else if (decimalHourMatch && (!timeMatch || normalized.includes('.'))) {
+    duration = Math.round(parseFloat(decimalHourMatch[1]) * 60);
+  } else if (normalized.includes('دو ساعت')) {
     duration = 120;
-  } else if (normalized.includes('یک ساعت') || normalized.includes('1 ساعت')) {
+  } else if (normalized.includes('یک ساعت')) {
     duration = 60;
   } else {
     const minMatch = normalized.match(/(\d+)\s*دقیقه/);
     if (minMatch) {
       duration = parseInt(minMatch[1], 10);
     } else {
-      const hourMatch = normalized.match(/(\d+)\s*ساعت(?!\s*\d)/);
-      if (hourMatch && !timeMatch) {
-        duration = parseInt(hourMatch[1], 10) * 60;
-      } else {
-        // Also check if there's a standalone "X ساعت" that isn't "ساعت X"
-        const durationHourMatch = normalized.match(/(\d+)\s+ساعت/);
-        if (durationHourMatch) {
-          duration = parseInt(durationHourMatch[1], 10) * 60;
-        }
+      const durationHourMatch = normalized.match(/(\d+(?:\.\d+)?)\s+ساعت/);
+      if (durationHourMatch) {
+        duration = Math.round(parseFloat(durationHourMatch[1]) * 60);
       }
     }
   }
 
-  // 5. Clean up title from extracted tokens
-  let cleanedTitle = input
-    .replace(/پس‌فردا|پس فردا|فردا|امروز/g, '')
-    .replace(/(?:ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{2})?(?:\s*(?:عصر|صبح|ظهر|شب|بعدازظهر|بعد از ظهر))?)/g, '')
+  // 5. Clean up title from extracted tokens (BUG-21: only strip reminder time when valid; BUG-23: boundary-safe relative date removal)
+  let cleanedTitle = input.replace(
+    /(^|[\s،,؛:])(پس‌فردا|پس فردا|فردا|امروز)(?=$|[\s،,؛:])/g,
+    '$1'
+  );
+  if (reminderTime !== undefined) {
+    cleanedTitle = cleanedTitle.replace(
+      /(?:ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{2})?(?:\s*(?:عصر|صبح|ظهر|شب|بعدازظهر|بعد از ظهر))?)/g,
+      ''
+    );
+  }
+  cleanedTitle = cleanedTitle
+    .replace(/(?:[\d۰-۹]+(?:[./٫][\d۰-۹]+)?\s*ساعت)/g, '')
     .replace(/(?:[\d۰-۹]+\s*دقیقه)/g, '')
-    .replace(/(?:[\d۰-۹]+\s*ساعت)/g, '')
     .replace(/نیم ساعت|یک ساعت و نیم|دو ساعت|یک ساعت/g, '')
     .replace(/(?:اولویت\s*[\d۰-۹]+|p[\d۰-۹]+)/gi, '')
     .replace(/،/g, ' ')

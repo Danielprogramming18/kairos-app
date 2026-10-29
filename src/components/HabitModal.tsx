@@ -60,6 +60,15 @@ export const HabitModal: React.FC<HabitModalProps> = ({
     }
   }, [habitToEdit, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -77,14 +86,27 @@ export const HabitModal: React.FC<HabitModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="habit-modal-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
+    >
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 relative">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-          <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
+          <h3
+            id="habit-modal-title"
+            className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"
+          >
             <Sparkles className="w-5 h-5 text-indigo-500" />
             <span>{habitToEdit ? 'ویرایش عادت' : 'ایجاد عادت جدید'}</span>
           </h3>
           <button
+            type="button"
+            aria-label="بستن پنجره"
             onClick={onClose}
             className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
           >

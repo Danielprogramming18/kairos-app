@@ -57,19 +57,25 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const hasCustomDate =
     !!selectedDateKey && selectedDateKey !== todayKey && selectedDateKey !== tomorrowKey;
 
-  const [filter, setFilter] = useState<'all' | 'today' | 'tomorrow' | 'custom'>(
+  const [filter, setFilter] = useState<'all' | 'today' | 'overdue' | 'tomorrow' | 'custom'>(
     hasCustomDate ? 'custom' : 'all'
   );
+  const [visibleCount, setVisibleCount] = useState<number>(50);
 
-  // Metrics
-  const todayTasks = tasks.filter((t) => t.targetDate <= todayKey);
+  // Metrics (BUG-07 & BUG-30)
+  const overdueTasks = tasks.filter((t) => t.targetDate < todayKey && !t.completed);
+  const todayTasks = tasks.filter(
+    (t) => t.targetDate === todayKey || (t.targetDate < todayKey && !t.completed)
+  );
   const todayDone = todayTasks.filter((t) => t.completed);
   const todayPercent =
-    todayTasks.length > 0 ? Math.round((todayDone.length / todayTasks.length) * 100) : 0;
+    todayTasks.length > 0
+      ? Math.min(100, Math.round((todayDone.length / todayTasks.length) * 100))
+      : 0;
 
   // The One Thing (Priority 1)
   const sortedToday = [...todayTasks].sort((a, b) => (a.priority || 99) - (b.priority || 99));
-  const oneThing = sortedToday[0];
+  const oneThing = sortedToday.find((t) => !t.completed) || sortedToday[0];
 
   // Time budget
   const totalMinutes = todayTasks.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
@@ -77,11 +83,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   // Overall success rate
   const allDoneCount = tasks.filter((t) => t.completed).length;
-  const overallRate = tasks.length > 0 ? Math.round((allDoneCount / tasks.length) * 100) : 0;
+  const overallRate =
+    tasks.length > 0 ? Math.min(100, Math.round((allDoneCount / tasks.length) * 100)) : 0;
 
   // Filter display tasks
   let displayTasks = tasks.filter((t) => {
-    if (filter === 'today') return t.targetDate <= todayKey;
+    if (filter === 'today') return t.targetDate === todayKey;
+    if (filter === 'overdue') return t.targetDate < todayKey && !t.completed;
     if (filter === 'tomorrow') return t.targetDate === tomorrowKey;
     if (filter === 'custom' && selectedDateKey) return t.targetDate === selectedDateKey;
     return true;
@@ -92,6 +100,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     if (a.targetDate !== b.targetDate) return a.targetDate.localeCompare(b.targetDate);
     return (a.priority || 99) - (b.priority || 99);
   });
+
+  const visibleTasks = displayTasks.slice(0, visibleCount);
+  const hasMoreTasks = displayTasks.length > visibleCount;
 
   // 7-day past history for missions
   const past7Days = [];
@@ -287,6 +298,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => setFilter('overdue')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                  filter === 'overdue'
+                    ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <span>عقب‌افتاده</span>
+                {overdueTasks.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px]">
+                    {toPersianNum(overdueTasks.length)}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => setFilter('tomorrow')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
                   filter === 'tomorrow'
@@ -323,7 +350,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
           {/* Tasks List */}
           <div className="space-y-3">
-            {displayTasks.map((task) => {
+            {visibleTasks.map((task) => {
               const isTomorrow = task.targetDate === tomorrowKey;
               const isToday = task.targetDate === todayKey;
               const isOverdue = task.targetDate < todayKey && !task.completed;
@@ -473,6 +500,18 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 </div>
               );
             })}
+
+            {hasMoreTasks && (
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((prev) => prev + 50)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                >
+                  نمایش موارد بیشتر ({toPersianNum(displayTasks.length - visibleCount)} مورد دیگر)
+                </button>
+              </div>
+            )}
 
             {displayTasks.length === 0 && (
               <div className="py-12 text-center space-y-3">

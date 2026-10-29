@@ -1,5 +1,5 @@
 /**
- * Persian numbers, Jalali calendar generator (full year), and date helper utilities
+ * Persian numbers, Jalali calendar generator (multi-year & leap-year aware), and date helper utilities
  */
 
 export const PERSIAN_MONTH_NAMES = [
@@ -167,6 +167,46 @@ export const getPersianParts = (date: Date): PersianDateParts => {
   };
 };
 
+/**
+ * Finds the exact Gregorian Date (at 00:00:00 local time) corresponding to 1 Farvardin of `targetJYear`.
+ * Works accurately across any year (e.g. 1350..1450) without cumulative drift (BUG-14).
+ */
+export const getStartOfPersianYear = (targetJYear: number): Date => {
+  const approxGregorianYear = targetJYear + 621;
+  let cursor = new Date(approxGregorianYear, 2, 17); // March 17
+  cursor.setHours(0, 0, 0, 0);
+
+  for (let i = 0; i < 15; i++) {
+    const p = getPersianParts(cursor);
+    if (p.jYear === targetJYear && p.jMonth === 1 && p.jDay === 1) {
+      return cursor;
+    }
+    cursor = addDays(cursor, 1);
+  }
+  return cursor;
+};
+
+/**
+ * Determines whether a Jalali year (`jYear`) is a leap year (30-day Esfand) (BUG-12).
+ * Uses exact astronomical/ICU calendar verification on the 366th day of the Jalali year.
+ */
+export const isJalaliLeapYear = (jYear: number): boolean => {
+  const startOfYear = getStartOfPersianYear(jYear);
+  const day366 = addDays(startOfYear, 365); // 0-indexed offset 365 is the 366th day of the year
+  const parts = getPersianParts(day366);
+  return parts.jYear === jYear && parts.jMonth === 12 && parts.jDay === 30;
+};
+
+/**
+ * Returns the exact number of days in a given Jalali month (1..12) of `jYear` (BUG-12).
+ */
+export const getJalaliMonthLength = (jYear: number, jMonth: number): number => {
+  if (jMonth >= 1 && jMonth <= 6) return 31;
+  if (jMonth >= 7 && jMonth <= 11) return 30;
+  if (jMonth === 12) return isJalaliLeapYear(jYear) ? 30 : 29;
+  return 30;
+};
+
 export interface CalendarDayCell {
   key: string; // 'YYYY-MM-DD'
   date: Date;
@@ -184,44 +224,35 @@ export interface CalendarMonthData {
   jYear: number;
   jMonth: number; // 1..12
   monthName: string;
+  isLeapYear: boolean;
   startWeekdayOffset: number; // 0..6 empty cells before day 1
   days: CalendarDayCell[];
 }
 
 /**
- * Generates all 12 months of the Persian year containing `referenceDate`.
- * Covers from 1 Farvardin to the end of Esfand of that Persian year.
+ * Generates all 12 months of the specified Persian year (`yearOrDate`).
+ * Accepts either a Jalali year number (e.g. 1403, 1404, 1405) or a reference `Date` (BUG-11, BUG-12, BUG-14).
  */
 export const getFullPersianYearCalendar = (
-  referenceDate: Date = new Date()
+  yearOrDate: Date | number = new Date(),
+  todayReference: Date = new Date()
 ): CalendarMonthData[] => {
-  const today = new Date(referenceDate);
+  const today = new Date(todayReference);
   today.setHours(0, 0, 0, 0);
   const todayKey = getDateKey(today);
 
-  const currentParts = getPersianParts(today);
-  const targetJYear = currentParts.jYear;
+  const targetJYear =
+    typeof yearOrDate === 'number' ? yearOrDate : getPersianParts(yearOrDate).jYear;
 
-  // Find approximate start of the Persian year (around March 20 of corresponding Gregorian year)
-  // Step back up to 370 days from today until we hit jYear === targetJYear && jMonth === 1 && jDay === 1
-  let cursor = new Date(today);
-  cursor.setDate(cursor.getDate() - 370);
-
-  // Move forward until we reach 1 Farvardin of targetJYear
-  for (let i = 0; i < 400; i++) {
-    const p = getPersianParts(cursor);
-    if (p.jYear === targetJYear && p.jMonth === 1 && p.jDay === 1) {
-      break;
-    }
-    cursor = addDays(cursor, 1);
-  }
+  let cursor = getStartOfPersianYear(targetJYear);
+  const leap = isJalaliLeapYear(targetJYear);
 
   const monthsMap = new Map<number, CalendarDayCell[]>();
   for (let m = 1; m <= 12; m++) {
     monthsMap.set(m, []);
   }
 
-  // Iterate through the entire Persian year (up to 366 days)
+  // Iterate through the entire Persian year (365 days in normal year, 366 in leap year)
   for (let i = 0; i < 367; i++) {
     const p = getPersianParts(cursor);
     if (p.jYear > targetJYear) break;
@@ -252,6 +283,7 @@ export const getFullPersianYearCalendar = (
       jYear: targetJYear,
       jMonth: m,
       monthName: PERSIAN_MONTH_NAMES[m - 1],
+      isLeapYear: leap,
       startWeekdayOffset,
       days,
     });
