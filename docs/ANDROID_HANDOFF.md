@@ -66,3 +66,10 @@ webView.post(() -> {
 
 ## ۴. رفتار ایمن در صورت عدم تطابق نسخهٔ پل
 اگر شیء `KairosAndroidBridge` تزریق شده باشد اما پاسخ ندهد یا نسخهٔ آن مغایر با `1.0.0` باشد، کایروس یک بنر هشدار صریح (`role="alert"`) نمایش می‌دهد و هرگز به صورت خاموش داده را دور نمی‌ریزد.
+
+---
+
+## ۵. فایل‌های آمادهٔ تحویل در مخزن (Ready-to-Use Handoff Files)
+- **کد کامل جاوای اندروید (هر دو حالت A و B):** فایل `/handoff/android/KairosAndroidBridge.java` شامل متد `configureWebViewForModeA(webView)` برای Sketchware و کلاس کامل `SQLiteOpenHelper` + `@JavascriptInterface` منطبق با پروتکل `1.0.0` است.
+- **ممیز خودکار بستهٔ آفلاین (`dist/`):** ماژول `/src/utils/offlineBundleVerifier.ts` و آزمون `/src/utils/offlineBundleVerifier.test.ts` به صورت خودکار بررسی می‌کنند که در `dist/index.html` هیچ مسیر مطلق `/assets/` یا لینک CDN خارجی وجود نداشته باشد و فونت‌های محلی `.woff2` باندل شده باشند.
+
