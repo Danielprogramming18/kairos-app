@@ -1,534 +1,568 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  Sparkles,
-  Zap,
-  Target,
-  Flame,
   CheckCircle2,
-  CalendarArrowUp,
+  Circle,
   Clock,
-  ArrowRight,
-  Send,
-  Timer,
-  AlertCircle,
+  Flame,
+  Plus,
+  Sparkles,
+  ArrowLeft,
+  Calendar,
+  Target,
+  Play,
+  Bell,
+  Flag,
 } from 'lucide-react';
-import { Task, Habit } from '../types';
-import { toPersianNum, getTodayKey, getTomorrowKey } from '../utils/persianDate';
-import { calculateStreaks } from '../utils/habitStreaks';
+import { Habit, Task, Idea, NavTabId } from '../types';
+import { toPersianNum, getTodayKey, formatDateKeyToPersian } from '../utils/persianDate';
 import { parseNaturalTaskInput } from '../utils/nlpTaskParser';
+import { calculateStreaks, computeDailyHabitProgress } from '../utils/habitStreaks';
 
 interface DashboardViewProps {
-  tasks: Task[];
   habits: Habit[];
-  onToggleTask: (taskId: string) => void;
+  tasks: Task[];
+  ideas: Idea[];
   onToggleHabitToday: (habitId: string) => void;
-  onAddTask: (task: Omit<Task, 'id' | 'completed'>) => void;
-  onMoveOverdueToToday: () => void;
-  onMoveOverdueToTomorrow: () => void;
-  onSwitchTab: (tab: any) => void;
+  onToggleTask: (taskId: string) => void;
+  onQuickAddTask: (taskData: {
+    title: string;
+    priority: number;
+    duration: number;
+    targetDate?: string;
+    reminderTime?: string;
+  }) => Promise<boolean> | void;
+  onNavigateTab: (tab: NavTabId) => void;
   onStartFocusOnTask: (taskId: string, taskTitle: string, duration: number) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
-  tasks,
   habits,
-  onToggleTask,
+  tasks,
   onToggleHabitToday,
-  onAddTask,
-  onMoveOverdueToToday,
-  onMoveOverdueToTomorrow,
-  onSwitchTab,
+  onToggleTask,
+  onQuickAddTask,
+  onNavigateTab,
   onStartFocusOnTask,
 }) => {
-  const todayKey = getTodayKey();
-  const [nlpInput, setNlpInput] = useState('');
-  const [isSubmittingNlp, setIsSubmittingNlp] = useState(false);
+  const [quickTaskInput, setQuickTaskInput] = useState('');
+  const [isSubmittingQuickTask, setIsSubmittingQuickTask] = useState(false);
 
-  // Compute metrics (BUG-07: exclude already-completed tasks from past days so today's progress is accurate)
-  const overdueTasks = tasks.filter((t) => t.targetDate < todayKey && !t.completed);
-  const todayTasks = tasks.filter(
-    (t) => t.targetDate === todayKey || (t.targetDate < todayKey && !t.completed)
-  );
-  const todayCompletedTasks = todayTasks.filter((t) => t.completed);
-  const tasksPercent =
-    todayTasks.length > 0
-      ? Math.min(100, Math.round((todayCompletedTasks.length / todayTasks.length) * 100))
+  const todayKey = getTodayKey();
+
+  // Live NLP preview for Quick Add Input with editable overrides (FIX-09, FIX-17)
+  const rawNlpPreview = useMemo(() => {
+    if (!quickTaskInput.trim()) return null;
+    return parseNaturalTaskInput(quickTaskInput);
+  }, [quickTaskInput]);
+
+  const [overrideTitle, setOverrideTitle] = useState('');
+  const [overrideDate, setOverrideDate] = useState(todayKey);
+  const [overrideDuration, setOverrideDuration] = useState(45);
+  const [overridePriority, setOverridePriority] = useState(1);
+  const [overrideReminder, setOverrideReminder] = useState('');
+
+  useEffect(() => {
+    if (!rawNlpPreview) {
+      setOverrideTitle('');
+      setOverrideDate(todayKey);
+      setOverrideDuration(45);
+      setOverridePriority(1);
+      setOverrideReminder('');
+      return;
+    }
+    setOverrideTitle(rawNlpPreview.title);
+    setOverrideDate(rawNlpPreview.targetDate || todayKey);
+    setOverrideDuration(rawNlpPreview.duration || 45);
+    setOverridePriority(rawNlpPreview.priority || 1);
+    setOverrideReminder(rawNlpPreview.reminderTime || '');
+  }, [rawNlpPreview, todayKey]);
+
+  // Strictly today's scheduled tasks + overdue tasks
+  const todayTasks = tasks
+    .filter((t) => t.targetDate === todayKey || (!t.completed && t.targetDate < todayKey))
+    .sort((a, b) => (a.priority || 99) - (b.priority || 99));
+
+  const pendingTasks = todayTasks.filter((t) => !t.completed);
+  const completedTasks = todayTasks.filter((t) => t.completed);
+
+  // Top 3 priorities for today
+  const topPriorities = pendingTasks.slice(0, 3);
+  const remainingTodayTasks = pendingTasks.slice(3);
+
+  // Unified habit progress for today respecting startDate and eligibility
+  const todayHabitStats = computeDailyHabitProgress(habits, todayKey, todayKey);
+  const habitsCompletedToday = todayHabitStats.doneCount;
+  const totalEligibleHabitsToday = todayHabitStats.eligibleCount;
+  const habitsProgress = todayHabitStats.ratePercent;
+
+  // Task progress percentage
+  const totalTodayCount = todayTasks.length;
+  const tasksProgress =
+    totalTodayCount > 0
+      ? Math.min(100, Math.round((completedTasks.length / totalTodayCount) * 100))
       : 0;
 
-  // Habits metrics
-  const totalHabits = habits.length;
-  const completedHabitsToday = habits.filter((h) => h.completedDates[todayKey]).length;
-  const habitsPercent =
-    totalHabits > 0 ? Math.min(100, Math.round((completedHabitsToday / totalHabits) * 100)) : 0;
+  const totalPendingMinutes = pendingTasks.reduce(
+    (acc, curr) => acc + (Number(curr.duration) || 45),
+    0
+  );
 
-  // Find priority 1 task (The One Thing)
-  const pendingTodaySorted = [...todayTasks]
-    .filter((t) => !t.completed)
-    .sort((a, b) => (a.priority || 99) - (b.priority || 99));
-  const topTask = pendingTodaySorted[0] || todayTasks[0];
-
-  // Best streak
-  let maxStreak = 0;
-  habits.forEach((h) => {
-    const s = calculateStreaks(h.completedDates, new Date(), h.weeklyGoal);
-    if (s.current > maxStreak) maxStreak = s.current;
-  });
-
-  // Time budget
-  const totalMinutes = todayTasks.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
-  const doneMinutes = todayCompletedTasks.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
-
-  const [useSmartExtract, setUseSmartExtract] = useState(true);
-  const liveParsed = nlpInput.trim() ? parseNaturalTaskInput(nlpInput) : null;
-
-  // Handle Natural Language submission (100% Local & Instant for GitHub Pages)
-  const handleNlpSubmit = (e: React.FormEvent) => {
+  const handleQuickAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = nlpInput.trim();
-    if (!trimmed) return;
+    if (!quickTaskInput.trim() || isSubmittingQuickTask) return;
 
-    setIsSubmittingNlp(true);
-    const localParsed = parseNaturalTaskInput(trimmed);
+    const finalTitle = (overrideTitle || rawNlpPreview?.title || quickTaskInput).trim();
+    if (!finalTitle) return;
 
-    onAddTask({
-      title: useSmartExtract ? localParsed.title : trimmed,
-      description: 'ثبت‌شده با پردازشگر زبان طبیعی کایروس',
-      priority: useSmartExtract ? localParsed.priority : 1,
-      duration: useSmartExtract ? localParsed.duration : 45,
-      targetDate: useSmartExtract ? localParsed.targetDate : todayKey,
-      reminderTime: useSmartExtract ? localParsed.reminderTime : undefined,
-      category: 'work',
-    });
-    setNlpInput('');
-    setIsSubmittingNlp(false);
+    setIsSubmittingQuickTask(true);
+    try {
+      const result = await onQuickAddTask({
+        title: finalTitle,
+        priority: Math.max(1, Math.min(20, Number(overridePriority) || 1)),
+        duration: Math.max(5, Math.min(480, Number(overrideDuration) || 45)),
+        targetDate: /^\d{4}-\d{2}-\d{2}$/.test(overrideDate) ? overrideDate : todayKey,
+        reminderTime: /^([01]\d|2[0-3]):([0-5]\d)$/.test(overrideReminder.trim())
+          ? overrideReminder.trim()
+          : undefined,
+      });
+      if (result !== false) {
+        setQuickTaskInput('');
+      }
+    } finally {
+      setIsSubmittingQuickTask(false);
+    }
   };
 
   return (
     <div className="space-y-6">
-      {/* 1. Quick NLP Input Bar */}
-      <section className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200/60 dark:border-indigo-500/30 shrink-0">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                ثبت سریع مأموریت با زبان طبیعی (NLP)
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                با هر جمله‌ای بنویس؛ سیستم زمان، اولویت و روز را پیش از ثبت به تو نشان می‌دهد.
-              </p>
-            </div>
+      {/* 1. Calm Overview Summary Row + Quick Task Capture */}
+      <section className="bg-surface-1 border border-token-subtle rounded-2xl p-5 sm:p-6 shadow-2xs space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base sm:text-lg font-bold text-token-primary">
+              نمای کلی امروز
+            </h2>
+            <p className="text-xs text-token-secondary">
+              {pendingTasks.length > 0
+                ? `${toPersianNum(pendingTasks.length)} کار در برنامهٔ امروز باقی مانده است (حدود ${toPersianNum(
+                    totalPendingMinutes
+                  )} دقیقه).`
+                : completedTasks.length > 0
+                ? 'تمام کارهای برنامه‌ریزی‌شدهٔ امروز تکمیل شده‌اند.'
+                : 'هنوز کاری برای امروز ثبت نشده است. اولین کار امروز را در کادر زیر بنویسید.'}
+            </p>
           </div>
-          <div className="hidden sm:flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-            <span>مثال: «فردا ساعت ۵ عصر، ۴۵ دقیقه HTML تمرین کنم اولویت ۱»</span>
+
+          {/* Compact KPI Pills */}
+          <div className="flex flex-wrap items-center gap-2.5 tabular-nums">
+            <div className="px-3.5 py-2 rounded-xl bg-surface-2 border border-token-subtle flex items-center gap-2.5">
+              <Target className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <div className="text-xs">
+                <span className="text-token-secondary ml-1.5">کارهای امروز:</span>
+                <span className="font-bold text-token-primary">
+                  {toPersianNum(completedTasks.length)} از {toPersianNum(totalTodayCount)}
+                </span>
+                <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold mr-1.5">
+                  ({toPersianNum(tasksProgress)}٪)
+                </span>
+              </div>
+            </div>
+
+            <div className="px-3.5 py-2 rounded-xl bg-surface-2 border border-token-subtle flex items-center gap-2.5">
+              <Flame className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="text-xs">
+                <span className="text-token-secondary ml-1.5">عادت‌های امروز:</span>
+                <span className="font-bold text-token-primary">
+                  {toPersianNum(habitsCompletedToday)} از {toPersianNum(totalEligibleHabitsToday)}
+                </span>
+                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mr-1.5">
+                  ({toPersianNum(habitsProgress)}٪)
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <form onSubmit={handleNlpSubmit} className="flex items-center gap-2">
-          <div className="relative flex-1">
+        {/* Smart NLP Quick Add Input */}
+        <form onSubmit={handleQuickAddSubmit} className="space-y-2">
+          <p className="text-[11px] text-token-secondary">
+            کارت را بنویس؛ زمان و تاریخ پیشنهادی را قبل از ثبت بررسی کن.
+          </p>
+          <div className="relative flex items-center">
             <input
               type="text"
-              value={nlpInput}
-              onChange={(e) => setNlpInput(e.target.value)}
-              placeholder="مثلاً: فردا ساعت ۵ عصر ۴۵ دقیقه تمرین فتوشاپ اولویت ۱..."
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              aria-label="ثبت سریع کار جدید"
+              value={quickTaskInput}
+              onChange={(e) => setQuickTaskInput(e.target.value)}
+              placeholder="مثلاً: فردا ساعت ۱۴:۳۰ ارسال گزارش پروژه ۳۰ دقیقه اولویت ۱..."
+              className="w-full pl-28 pr-4 py-3 rounded-xl bg-surface-2 border border-token-subtle text-xs sm:text-sm text-token-primary placeholder:text-token-muted focus:bg-surface-1 transition"
             />
-            {nlpInput && (
-              <div className="hidden sm:block absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-500/30">
-                اینتر بزنید ↵
-              </div>
-            )}
+            <button
+              type="submit"
+              disabled={!quickTaskInput.trim() || isSubmittingQuickTask}
+              className="absolute left-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{isSubmittingQuickTask ? 'در حال ثبت...' : 'ثبت کار'}</span>
+            </button>
           </div>
-          <button
-            type="submit"
-            disabled={isSubmittingNlp || !nlpInput.trim()}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center gap-2 transition shrink-0 cursor-pointer"
-          >
-            <span>{isSubmittingNlp ? 'پردازش...' : 'ثبت هوشمند'}</span>
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
 
-        {/* Live NLP Preview Chips before saving (FIX-09) */}
-        {liveParsed && (
-          <div
-            data-testid="dashboard-nlp-preview"
-            className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs"
-          >
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
-                پیش‌نمایش استخراج:
-              </span>
-              <span className="px-2.5 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold">
-                عنوان: {useSmartExtract ? liveParsed.title : nlpInput.trim()}
-              </span>
-              {useSmartExtract && (
-                <>
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold">
-                    تاریخ: {liveParsed.extractedDateLabel || 'امروز'}
+          {/* Editable NLP Extraction Preview Bar */}
+          {rawNlpPreview && (
+            <div
+              data-testid="dashboard-nlp-preview"
+              className="p-3 rounded-xl bg-surface-2 border border-token-subtle space-y-2.5 text-[11px]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>پیش‌نمایش قابل ویرایش پیش از ثبت:</span>
+                </span>
+                <span className="text-token-muted">
+                  تاریخ: {formatDateKeyToPersian(overrideDate)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                <div className="sm:col-span-5">
+                  <label className="block text-[10px] text-token-muted mb-0.5">عنوان کار</label>
+                  <input
+                    type="text"
+                    aria-label="ویرایش عنوان پیشنهادی"
+                    value={overrideTitle}
+                    onChange={(e) => setOverrideTitle(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-surface-1 border border-token-subtle text-xs font-semibold text-token-primary"
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-[10px] text-token-muted mb-0.5 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    <span>تاریخ</span>
+                  </label>
+                  <input
+                    type="date"
+                    aria-label="ویرایش تاریخ پیشنهادی"
+                    value={overrideDate}
+                    onChange={(e) => e.target.value && setOverrideDate(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-surface-1 border border-token-subtle text-xs text-token-primary tabular-nums"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] text-token-muted mb-0.5 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>مدت (دقیقه)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={480}
+                    aria-label="ویرایش مدت پیشنهادی"
+                    value={overrideDuration}
+                    onChange={(e) => setOverrideDuration(parseInt(e.target.value, 10) || 45)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-surface-1 border border-token-subtle text-xs text-token-primary tabular-nums"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] text-token-muted mb-0.5 flex items-center gap-1">
+                    <Flag className="w-3 h-3" />
+                    <span>اولویت</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    aria-label="ویرایش اولویت پیشنهادی"
+                    value={overridePriority}
+                    onChange={(e) => setOverridePriority(parseInt(e.target.value, 10) || 1)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-surface-1 border border-token-subtle text-xs text-token-primary tabular-nums"
+                  />
+                </div>
+              </div>
+
+              {overrideReminder && (
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="inline-flex items-center gap-1 text-violet-700 dark:text-violet-300 font-semibold">
+                    <Bell className="w-3 h-3" />
+                    ساعت یادآور:
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold tabular-nums">
-                    مدت: {toPersianNum(liveParsed.duration)} دقیقه
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold tabular-nums">
-                    اولویت {toPersianNum(liveParsed.priority)}
-                  </span>
-                  {liveParsed.reminderTime && (
-                    <span className="px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-700 dark:text-violet-300 font-bold tabular-nums">
-                      یادآور: {toPersianNum(liveParsed.reminderTime)}
-                    </span>
-                  )}
-                </>
+                  <input
+                    type="time"
+                    aria-label="ویرایش ساعت یادآور پیشنهادی"
+                    value={overrideReminder}
+                    onChange={(e) => setOverrideReminder(e.target.value)}
+                    className="px-2 py-1 rounded-md bg-surface-1 border border-token-subtle text-xs text-token-primary tabular-nums"
+                  />
+                </div>
               )}
             </div>
+          )}
+        </form>
+      </section>
 
+      {/* 2. Main 2-Column Workspace Grid: Today's Priorities (Right) + Today's Habits (Left) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Right Column (7 cols): Top 3 Priorities & Today's Queue */}
+        <div className="lg:col-span-7 bg-surface-1 border border-token-subtle rounded-2xl p-5 sm:p-6 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between border-b border-token-subtle pb-3.5">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-token-primary">
+                اولویت‌های اصلی امروز
+              </h3>
+              <p className="text-xs text-token-secondary mt-0.5">
+                تمرکز روی حداکثر ۳ کار مهم پیش از سراغ رفتن به کارهای فرعی
+              </p>
+            </div>
             <button
               type="button"
-              onClick={() => setUseSmartExtract((prev) => !prev)}
-              className="px-2.5 py-1 rounded-lg bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer"
+              onClick={() => onNavigateTab('workspace')}
+              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer shrink-0"
             >
-              {useSmartExtract ? 'ثبت به صورت متن خام بدون تجزیه' : 'فعال‌سازی تجزیه هوشمند'}
-            </button>
-          </div>
-        )}
-      </section>
-
-      {/* 2. Overdue Alert Banner if any */}
-      {overdueTasks.length > 0 && (
-        <section className="bg-amber-500/10 border border-amber-500/30 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="text-xs sm:text-sm font-bold text-amber-700 dark:text-amber-300 tabular-nums">
-                {toPersianNum(overdueTasks.length)} مأموریت از روزهای قبل باقی مانده است!
-              </h4>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                بدون عذاب وجدان می‌توانی آنها را به امروز یا فردا منتقل کنی تا ذهنت آرام بماند.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={onMoveOverdueToToday}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 transition cursor-pointer"
-            >
-              انتقال به امروز
-            </button>
-            <button
-              onClick={onMoveOverdueToTomorrow}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition cursor-pointer"
-            >
-              انتقال به فردا
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* 3. 4 Main KPI Cards */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Today's Missions Progress */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              پیشرفت مأموریت‌های امروز
-            </span>
-            <div className="flex items-baseline gap-2 tabular-nums">
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white">
-                {toPersianNum(todayCompletedTasks.length)} از {toPersianNum(todayTasks.length)}
-              </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                {toPersianNum(tasksPercent)}٪
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-              {toPersianNum(doneMinutes)} از {toPersianNum(totalMinutes)} دقیقه انجام شده
-            </p>
-          </div>
-          <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
-            <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-              <path
-                className="text-slate-100 dark:text-slate-800"
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3.8"
-              />
-              <path
-                className="text-indigo-600 dark:text-indigo-500 transition-all duration-500 ease-out"
-                strokeDasharray={`${tasksPercent}, 100`}
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3.8"
-                strokeLinecap="round"
-              />
-            </svg>
-            <Target className="w-5 h-5 text-indigo-600 dark:text-indigo-400 absolute" />
-          </div>
-        </div>
-
-        {/* Card 2: The One Thing (Priority 1) */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <div className="space-y-1 min-w-0 pr-1">
-            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-              <Zap className="w-3.5 h-3.5" />
-              اولویت ۱ (مهم‌ترین کار)
-            </span>
-            <h2 className="text-sm font-black text-slate-900 dark:text-white truncate">
-              {topTask ? topTask.title : 'هنوز ثبت نشده'}
-            </h2>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-              {topTask
-                ? topTask.completed
-                  ? 'انجام شد ✓'
-                  : `سهمیه: ${toPersianNum(topTask.duration)} دقیقه`
-                : 'تمرکز اصلی روز'}
-            </p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-            <Zap className="w-5 h-5" />
-          </div>
-        </div>
-
-        {/* Card 3: Today's Habits Progress */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              عادت‌های تکمیل‌شده امروز
-            </span>
-            <div className="flex items-baseline gap-2 tabular-nums">
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white">
-                {toPersianNum(completedHabitsToday)} از {toPersianNum(totalHabits)}
-              </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-                {toPersianNum(habitsPercent)}٪
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-              بالاترین زنجیره: {toPersianNum(maxStreak)} روز
-            </p>
-          </div>
-          <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
-            <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-              <path
-                className="text-slate-100 dark:text-slate-800"
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3.8"
-              />
-              <path
-                className="text-emerald-600 dark:text-emerald-500 transition-all duration-500 ease-out"
-                strokeDasharray={`${habitsPercent}, 100`}
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3.8"
-                strokeLinecap="round"
-              />
-            </svg>
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 absolute" />
-          </div>
-        </div>
-
-        {/* Card 4: Best Streak & Motivation */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              زنجیره پیوستگی
-            </span>
-            <div className="flex items-baseline gap-1.5 tabular-nums">
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white">
-                {toPersianNum(maxStreak)}
-              </h2>
-              <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
-                روز متوالی
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              «استمرار کلید نتایج بزرگ است»
-            </p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-            <Flame className="w-5 h-5" />
-          </div>
-        </div>
-      </section>
-
-      {/* 4. Dual Section: Quick Habit Check + Today's Missions List */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Today's Missions list */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-            <div>
-              <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
-                <Target className="w-5 h-5 text-indigo-500" />
-                مأموریت‌های امروز (The One Thing & Priorities)
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                کارهای انجام‌شده خط می‌خورند تا حس دستاورد حفظ شود.
-              </p>
-            </div>
-            <button
-              onClick={() => onSwitchTab('workspace')}
-              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-            >
-              <span>مشاهده تمام میز کار</span>
-              <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+              <span>همهٔ کارها</span>
+              <ArrowLeft className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="space-y-2.5">
-            {todayTasks.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400">
-                امروز هنوز مأموریتی ثبت نکرده‌ای! از کادر بالای صفحه با زبان طبیعی بنویس یا کار جدید اضافه کن.
+          {topPriorities.length === 0 ? (
+            <div className="py-10 px-4 text-center rounded-xl bg-surface-2/60 border border-dashed border-token-subtle space-y-3">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-token-primary">
+                  {completedTasks.length > 0
+                    ? 'تمام کارهای امروز را به پایان رساندید!'
+                    : 'فهرست اولویت‌های امروز خالی است'}
+                </p>
+                <p className="text-xs text-token-secondary">
+                  می‌توانید از کادر بالا یک کار جدید ثبت کنید یا به بخش کارها بروید.
+                </p>
               </div>
-            ) : (
-              todayTasks.slice(0, 5).map((task) => {
-                const isP1 = Number(task.priority) === 1;
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {topPriorities.map((task, idx) => {
+                const isOverdue = task.targetDate < todayKey;
                 return (
                   <div
                     key={task.id}
-                    className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
-                      task.completed
-                        ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800/60 opacity-70'
-                        : isP1
-                        ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500/30 ring-1 ring-indigo-500/10'
-                        : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+                    className={`p-3.5 sm:p-4 rounded-xl border transition flex items-center justify-between gap-3 ${
+                      idx === 0
+                        ? 'bg-indigo-500/[0.05] border-indigo-500/30'
+                        : 'bg-surface-2/50 border-token-subtle hover:bg-surface-2'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
                       <button
+                        type="button"
                         onClick={() => onToggleTask(task.id)}
-                        className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 transition-all ${
-                          task.completed
-                            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25'
-                            : 'bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-transparent hover:border-indigo-500'
-                        }`}
+                        aria-label={`تکمیل کار ${task.title}`}
+                        className="mt-0.5 text-token-muted hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shrink-0"
                       >
-                        <CheckCircle2 className="w-4 h-4" />
+                        <Circle className="w-5 h-5" />
                       </button>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span
-                            className={`text-[10px] font-black px-2 py-0.2 rounded-md ${
-                              isP1
-                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20'
-                                : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md tabular-nums ${
+                              idx === 0
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-surface-1 border border-token-subtle text-token-secondary'
                             }`}
                           >
-                            {isP1 ? '🔥 اولویت ۱' : `اولویت ${toPersianNum(task.priority)}`}
+                            اولویت {toPersianNum(task.priority)}
                           </span>
-                          <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
+                          {isOverdue && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 dark:text-red-400">
+                              عقب‌افتاده
+                            </span>
+                          )}
+                          <h4 className="text-xs sm:text-sm font-bold text-token-primary truncate">
+                            {task.title}
+                          </h4>
+                        </div>
+
+                        {task.description && (
+                          <p className="text-xs text-token-secondary line-clamp-1">
+                            {task.description}
+                          </p>
+                        )}
+
+                        <div className="flex items-center gap-3 text-[11px] text-token-muted tabular-nums">
+                          <span className="inline-flex items-center gap-1">
                             <Clock className="w-3 h-3" />
                             {toPersianNum(task.duration)} دقیقه
                           </span>
+                          {task.reminderTime && (
+                            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                              <Bell className="w-3 h-3" />
+                              ساعت {toPersianNum(task.reminderTime)}
+                            </span>
+                          )}
                         </div>
-                        <h4
-                          className={`text-sm font-bold truncate mt-0.5 ${
-                            task.completed
-                              ? 'line-through text-slate-400 dark:text-slate-500 decoration-2 decoration-emerald-500/70'
-                              : 'text-slate-800 dark:text-slate-100'
-                          }`}
-                        >
-                          {task.title}
-                        </h4>
-                      </div>
-                    </div>
-
-                    {!task.completed && (
-                      <button
-                        onClick={() => onStartFocusOnTask(task.id, task.title, task.duration)}
-                        title="شروع تایمر تمرکز روی این کار"
-                        className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 transition flex items-center gap-1 text-xs font-bold shrink-0"
-                      >
-                        <Timer className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">تمرکز</span>
-                      </button>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: Today's Habit Check-in Widget */}
-        <div className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-3">
-              <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                عادت‌های امروز
-              </h3>
-              <button
-                onClick={() => onSwitchTab('habits')}
-                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                جدول هفتگی
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {habits.slice(0, 6).map((habit) => {
-                const isDone = !!habit.completedDates[todayKey];
-                const streaks = calculateStreaks(
-                  habit.completedDates,
-                  new Date(),
-                  habit.weeklyGoal
-                );
-                return (
-                  <div
-                    key={habit.id}
-                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
-                      isDone
-                        ? 'bg-emerald-500/5 border-emerald-500/20'
-                        : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200/70 dark:border-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-lg shrink-0">{habit.emoji}</span>
-                      <div className="min-w-0">
-                        <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                          {habit.title}
-                        </h5>
-                        <span className="text-[10px] text-slate-400">
-                          زنجیره: {toPersianNum(streaks.current)} روز
-                        </span>
                       </div>
                     </div>
 
                     <button
-                      onClick={() => onToggleHabitToday(habit.id)}
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all shrink-0 ${
-                        isDone
-                          ? 'text-white shadow-md'
-                          : 'bg-slate-200 dark:bg-slate-700 text-transparent hover:bg-slate-300'
-                      }`}
-                      style={{
-                        backgroundColor: isDone ? habit.color : undefined,
-                      }}
+                      type="button"
+                      onClick={() => onStartFocusOnTask(task.id, task.title, task.duration)}
+                      aria-label={`شروع تمرکز روی ${task.title}`}
+                      className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition shrink-0 cursor-pointer"
                     >
-                      <CheckCircle2 className="w-4 h-4 stroke-[3]" />
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>تمرکز</span>
                     </button>
                   </div>
                 );
               })}
+
+              {remainingTodayTasks.length > 0 && (
+                <div className="pt-2 flex items-center justify-between text-xs text-token-secondary px-1">
+                  <span>
+                    + {toPersianNum(remainingTodayTasks.length)} کار دیگر در فهرست امروز
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('workspace')}
+                    className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                  >
+                    مشاهدهٔ همه
+                  </button>
+                </div>
+              )}
             </div>
+          )}
+
+          {/* Completed Today Summary */}
+          {completedTasks.length > 0 && (
+            <div className="pt-3 border-t border-token-subtle space-y-2">
+              <div className="text-xs font-semibold text-token-muted">
+                انجام‌شده‌های امروز ({toPersianNum(completedTasks.length)})
+              </div>
+              <div className="space-y-1.5">
+                {completedTasks.slice(0, 3).map((task) => (
+                  <div
+                    key={task.id}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-2/40 text-xs text-token-muted"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onToggleTask(task.id)}
+                      className="flex items-center gap-2 truncate cursor-pointer hover:text-token-primary"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <span className="line-through truncate">{task.title}</span>
+                    </button>
+                    <span className="text-[11px] tabular-nums shrink-0">
+                      {toPersianNum(task.duration)} دقیقه
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Left Column (5 cols): Today's Habits Check-in */}
+        <div className="lg:col-span-5 bg-surface-1 border border-token-subtle rounded-2xl p-5 sm:p-6 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between border-b border-token-subtle pb-3.5">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-token-primary">
+                ثبت عادت‌های امروز
+              </h3>
+              <p className="text-xs text-token-secondary mt-0.5">
+                تکرار روزانهٔ عادت‌های کوچک و پیوسته
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('habits')}
+              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <span>جدول هفتگی</span>
+              <ArrowLeft className="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          <button
-            onClick={() => onSwitchTab('planner')}
-            className="w-full mt-4 py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 transition"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>چیدن برنامه روزانه با هوش مصنوعی</span>
-          </button>
+          {habits.length === 0 ? (
+            <div className="py-10 px-4 text-center rounded-xl bg-surface-2/60 border border-dashed border-token-subtle space-y-3">
+              <Sparkles className="w-7 h-7 text-indigo-500 mx-auto" />
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-token-primary">هنوز عادتی تعریف نشده است</p>
+                <p className="text-xs text-token-secondary">
+                  از بخش عادت‌ها، اولین عادت روزانهٔ خود را بسازید.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('habits')}
+                className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold cursor-pointer"
+              >
+                رفتن به بخش عادت‌ها
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {habits.map((habit) => {
+                const isDoneToday = Boolean(habit.completedDates[todayKey]);
+                const streak = calculateStreaks(
+                  habit.completedDates,
+                  new Date(),
+                  habit.weeklyGoal,
+                  {
+                    startDate: habit.startDate,
+                    targetDaysOfWeek: habit.targetDaysOfWeek,
+                  }
+                );
+                return (
+                  <button
+                    key={habit.id}
+                    type="button"
+                    onClick={() => onToggleHabitToday(habit.id)}
+                    aria-pressed={isDoneToday}
+                    className={`w-full p-3 rounded-xl border text-right transition flex items-center justify-between gap-3 cursor-pointer ${
+                      isDoneToday
+                        ? 'bg-emerald-500/[0.06] border-emerald-500/30'
+                        : 'bg-surface-2/50 border-token-subtle hover:bg-surface-2'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-lg shrink-0">{habit.emoji}</span>
+                      <div className="min-w-0">
+                        <div
+                          className={`text-xs font-bold truncate ${
+                            isDoneToday
+                              ? 'line-through text-token-muted'
+                              : 'text-token-primary'
+                          }`}
+                        >
+                          {habit.title}
+                        </div>
+                        <div className="text-[11px] text-token-muted tabular-nums flex items-center gap-2 mt-0.5">
+                          <span>هدف: {toPersianNum(habit.weeklyGoal)} روز در هفته</span>
+                          {streak.current > 0 && (
+                            <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                              • زنجیرهٔ فعلی: {toPersianNum(streak.current)} روز
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition ${
+                        isDoneToday
+                          ? 'bg-emerald-600 text-white animate-pop'
+                          : 'border border-token-subtle bg-surface-1 text-transparent'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
-      </section>
+      </div>
     </div>
   );
 };

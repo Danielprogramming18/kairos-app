@@ -108,3 +108,12 @@ class SoundController {
 }
 
 export const soundManager = new SoundController();
+
+export function playAlertBeep(): void {
+  soundManager.playBell();
+}
+
+export function playSuccessSound(): void {
+  soundManager.playCheck();
+}
+

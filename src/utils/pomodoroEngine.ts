@@ -1,43 +1,59 @@
 /**
- * Timestamp-based Pomodoro Engine (BUG-15 .. BUG-20)
+ * Timestamp-based Pomodoro & Focus Engine (BUG-15 .. BUG-20, FIX-09, FIX-16)
  * Zero background drift: computes remaining time from epoch timestamps (`startedAtEpochMs`, `targetEndEpochMs`)
  * rather than relying on `setInterval` decrementing a counter.
+ * Supports presets (15, 25, 45, 60) and any custom duration (1..240 minutes),
+ * deterministic `activeSessionId` for idempotent logging, and accurate completion timestamps.
  */
 
-import { ActiveTimerState, FocusSessionPhase, nowIso } from '../domain/models';
+import { ActiveTimerState, createEntityId, FocusSessionPhase, nowIso } from '../domain/models';
+
+export type PresetOrCustomMinutes = number;
 
 export interface ExtendedActiveTimerState extends ActiveTimerState {
-  selectedPresetMinutes: 25 | 45 | 60;
+  selectedPresetMinutes: PresetOrCustomMinutes;
   completedWorkCycles: number;
+  activeSessionId?: string | null;
+}
+
+export function clampFocusMinutes(minutes: number, fallback = 45): number {
+  const num = Number(minutes);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.max(1, Math.min(240, Math.round(num)));
 }
 
 export function getBreakDurationMinutes(
-  presetMinutes: 25 | 45 | 60,
+  presetMinutes: number,
   phase: 'short_break' | 'long_break'
 ): number {
   if (phase === 'long_break') return 20;
-  return presetMinutes === 25 ? 5 : 15;
+  if (presetMinutes <= 25) return 5;
+  if (presetMinutes < 45) return 10;
+  return 15;
 }
 
 export function getPhaseDurationSeconds(
-  presetMinutes: 25 | 45 | 60,
+  presetMinutes: number,
   phase: FocusSessionPhase
 ): number {
-  if (phase === 'work') return presetMinutes * 60;
-  return getBreakDurationMinutes(presetMinutes, phase) * 60;
+  const safeMinutes = clampFocusMinutes(presetMinutes, 45);
+  if (phase === 'work') return safeMinutes * 60;
+  return getBreakDurationMinutes(safeMinutes, phase) * 60;
 }
 
 export function createInitialTimerState(
-  presetMinutes: 25 | 45 | 60 = 45,
+  presetMinutes: number = 45,
   taskId?: string | null,
   taskTitle?: string
 ): ExtendedActiveTimerState {
-  const durationSeconds = presetMinutes * 60;
+  const safeMinutes = clampFocusMinutes(presetMinutes, 45);
+  const durationSeconds = safeMinutes * 60;
   return {
     isRunning: false,
     phase: 'work',
-    selectedPresetMinutes: presetMinutes,
+    selectedPresetMinutes: safeMinutes,
     completedWorkCycles: 0,
+    activeSessionId: null,
     taskId: taskId ?? null,
     taskTitle,
     durationSeconds,
@@ -63,6 +79,17 @@ export function computeRemainingSeconds(
 }
 
 /**
+ * Computes exact elapsed seconds in the current timer phase.
+ */
+export function computeActualElapsedSeconds(
+  state: ActiveTimerState,
+  nowEpochMs: number = Date.now()
+): number {
+  const remaining = computeRemainingSeconds(state, nowEpochMs);
+  return Math.max(0, Math.min(state.durationSeconds, state.durationSeconds - remaining));
+}
+
+/**
  * Computes actual elapsed minutes for manual stop/finish (BUG-17).
  * Returns 0 if less than 30 seconds have elapsed; otherwise returns at least 1 minute up to planned duration.
  */
@@ -70,10 +97,9 @@ export function computeActualElapsedMinutes(
   state: ActiveTimerState,
   nowEpochMs: number = Date.now()
 ): number {
-  const remaining = computeRemainingSeconds(state, nowEpochMs);
-  const elapsedSeconds = Math.max(0, state.durationSeconds - remaining);
+  const elapsedSeconds = computeActualElapsedSeconds(state, nowEpochMs);
   if (elapsedSeconds < 30) return 0;
-  const plannedMinutes = Math.round(state.durationSeconds / 60);
+  const plannedMinutes = Math.max(1, Math.round(state.durationSeconds / 60));
   return Math.min(plannedMinutes, Math.max(1, Math.round(elapsedSeconds / 60)));
 }
 
@@ -83,9 +109,14 @@ export function startTimer(
 ): ExtendedActiveTimerState {
   const remaining = computeRemainingSeconds(state, nowEpochMs);
   const effectiveRemaining = remaining > 0 ? remaining : state.durationSeconds;
+  const activeSessionId =
+    state.phase === 'work'
+      ? state.activeSessionId || createEntityId('fs')
+      : null;
   return {
     ...state,
     isRunning: true,
+    activeSessionId,
     remainingSecondsWhenPaused: effectiveRemaining,
     startedAtEpochMs: state.startedAtEpochMs ?? nowEpochMs,
     targetEndEpochMs: nowEpochMs + effectiveRemaining * 1000,
@@ -115,6 +146,7 @@ export function resetTimer(
   return {
     ...state,
     isRunning: false,
+    activeSessionId: null,
     durationSeconds,
     remainingSecondsWhenPaused: durationSeconds,
     startedAtEpochMs: null,
@@ -144,6 +176,7 @@ export function transitionTimerPhase(
       ...state,
       isRunning: false,
       phase: nextPhase,
+      activeSessionId: null,
       completedWorkCycles: nextCycles,
       durationSeconds: nextDuration,
       remainingSecondsWhenPaused: nextDuration,
@@ -158,6 +191,7 @@ export function transitionTimerPhase(
     ...state,
     isRunning: false,
     phase: 'work',
+    activeSessionId: null,
     durationSeconds: workDuration,
     remainingSecondsWhenPaused: workDuration,
     startedAtEpochMs: null,
@@ -171,12 +205,17 @@ export interface TimerTickEvaluation {
   completedPhase: FocusSessionPhase | null;
   completedWorkSession: boolean;
   completedDurationMinutes: number;
+  completedDurationSeconds: number;
+  completedAtEpochMs: number | null;
+  completedSessionId: string | null;
   nextState: ExtendedActiveTimerState | null;
 }
 
 /**
- * Pure evaluator for the global root timer loop (FIX-09).
+ * Pure evaluator for the global root timer loop (FIX-09, FIX-16).
  * Evaluates whether an active timer has reached 0 at `nowEpochMs` regardless of which UI tab is mounted.
+ * Uses `state.targetEndEpochMs` as the true completion timestamp so reopening a backgrounded tab hours later
+ * records the session on the actual date/time it completed.
  */
 export function evaluateTimerTick(
   state: ExtendedActiveTimerState,
@@ -190,15 +229,30 @@ export function evaluateTimerTick(
       completedPhase: null,
       completedWorkSession: false,
       completedDurationMinutes: 0,
+      completedDurationSeconds: 0,
+      completedAtEpochMs: null,
+      completedSessionId: null,
       nextState: null,
     };
   }
 
   const completedWorkSession = state.phase === 'work';
-  const completedDurationMinutes = Math.max(
-    1,
-    Math.round((state.durationSeconds || state.selectedPresetMinutes * 60) / 60)
+  const completedDurationSeconds = Math.max(
+    60,
+    Math.round(state.durationSeconds || state.selectedPresetMinutes * 60)
   );
+  const completedDurationMinutes = Math.max(1, Math.round(completedDurationSeconds / 60));
+  const completedAtEpochMs =
+    typeof state.targetEndEpochMs === 'number' && state.targetEndEpochMs > 0
+      ? Math.min(nowEpochMs, state.targetEndEpochMs)
+      : nowEpochMs;
+  const completedSessionId =
+    completedWorkSession && state.activeSessionId
+      ? state.activeSessionId
+      : completedWorkSession
+      ? `fs_auto_${state.startedAtEpochMs || completedAtEpochMs}_${state.taskId || 'general'}`
+      : null;
+
   const nextState = transitionTimerPhase(
     state,
     completedWorkSession,
@@ -211,7 +265,9 @@ export function evaluateTimerTick(
     completedPhase: state.phase,
     completedWorkSession,
     completedDurationMinutes,
+    completedDurationSeconds,
+    completedAtEpochMs,
+    completedSessionId,
     nextState,
   };
 }
-

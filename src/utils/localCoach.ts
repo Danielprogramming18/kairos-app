@@ -36,25 +36,28 @@ export function generateLocalCoachResponse(
     const projectMatch = q
       .replace(/لطفاً|پروژه بزرگ|پروژه|رو به چند مرحله.*|تقسیم کن|خرد کن/g, '')
       .trim();
-    const topic = projectMatch.length > 3 && projectMatch.length < 55 ? projectMatch : 'پروژه اصلی امروز';
+    const topic =
+      projectMatch.length > 3 && projectMatch.length < 55
+        ? projectMatch
+        : 'کار اصلی امروز';
 
     return {
-      reply: `دانیال جان، بهترین راه برای اینکه مغزت در برابر «${topic}» گارد نگیره، شکستن اون به ۳ اسپرینت کوچک و مشخصه:\n\n۱. گام اول فقط ۱۵ دقیقه آماده‌سازی و نوشتن اسکلت اولیه است (بدون کمال‌گرایی).\n۲. گام دوم ۴۵ دقیقه اجرای بخش اصلی با تایمر پومودورو.\n۳. گام سوم ۳۰ دقیقه تست، بازبینی و بستن پرونده.\n\nمی‌تونی با دکمه زیر هر ۳ مرحله رو یکجا به میز کارت اضافه کنی:`,
+      reply: `برای اینکه شروع «${topic}» ساده‌تر شود، پیشنهاد می‌کنم آن را به ۳ مرحلهٔ مشخص تقسیم کنید:\n\n۱. مرحلهٔ اول (۲۰ دقیقه): آماده‌سازی اولیه و مشخص کردن چهارچوب کار.\n۲. مرحلهٔ دوم (۴۵ دقیقه): تمرکز روی بخش اصلی در یک جلسهٔ تمرکز.\n۳. مرحلهٔ سوم (۳۰ دقیقه): بازبینی، تکمیل جزئیات و جمع‌بندی نهایی.\n\nبا دکمهٔ زیر می‌توانید این ۳ مرحله را به فهرست کارهای امروز اضافه کنید:`,
       suggestedTasks: [
         {
-          title: `گام ۱: آماده‌سازی اولیه و طراحی ساختار (${topic})`,
-          description: 'شروع بدون کمال‌گرایی - فقط راه‌اندازی اولیه',
+          title: `گام ۱: آماده‌سازی اولیه و ساختار (${topic})`,
+          description: 'شروع بدون کمال‌گرایی — راه‌اندازی اولیه و فهرست رئوس',
           priority: 1,
           duration: 20,
         },
         {
-          title: `گام ۲: اسپرینت تمرکز عمیق روی بخش اصلی (${topic})`,
-          description: 'یک پومودوروی ۴۵ دقیقه‌ای با گوشی سایلنت',
+          title: `گام ۲: اجرای بخش اصلی (${topic})`,
+          description: 'یک جلسهٔ تمرکز ۴۵ دقیقه‌ای بدون عوامل حواس‌پرتی',
           priority: 2,
           duration: 45,
         },
         {
-          title: `گام ۳: تست نهایی و جمع‌بندی (${topic})`,
+          title: `گام ۳: بازبینی و جمع‌بندی (${topic})`,
           description: 'بررسی خروجی و ثبت نتیجه',
           priority: 3,
           duration: 30,
@@ -73,13 +76,13 @@ export function generateLocalCoachResponse(
     q.includes('خسته') ||
     q.includes('انگیزه')
   ) {
-    const topTaskTitle = pendingToday[0]?.title || 'مهم‌ترین کار امروزت';
+    const topTaskTitle = pendingToday[0]?.title || 'مهم‌ترین کار امروز';
     return {
-      reply: `کاملاً طبیعیه دانیال جان! وقتی کار بزرگ به نظر می‌رسه، مغز برای فرار از استرس سراغ گوشی یا کارهای حاشیه‌ای می‌ره.\n\n🔥 نسخه فوری ضد اهمال‌کاری «کایروس» (قانون ۵ دقیقه):\n۱. به خودت بگو قرار نیست کل «${topTaskTitle}» رو تموم کنم؛ فقط ۵ دقیقه روش کار می‌کنم و بعدش حق دارم متوقف بشم.\n۲. همین الان برو به تب «تمرکز عمیق» و «حالت تک‌کاره» رو روشن کن تا چشمت به بقیه لیست نیفته.\n۳. یک لیوان آب بخور و تایمر رو روی ۱۵ دقیقه بذار.`,
+      reply: `وقتی کاری بزرگ یا مبهم به نظر می‌رسد، طبیعی است که ذهن شروع آن را به تعویق بیندازد.\n\nپیشنهاد عملی (قانون ۵ دقیقه):\n۱. هدف را تمام کردن کل «${topTaskTitle}» نگذارید؛ فقط ۱۵ دقیقه شروع اولیه را هدف بگیرید.\n۲. به بخش «تمرکز» بروید و تایمر را روی ۱۵ دقیقه تنظیم کنید.\n۳. فقط اولین قدم کوچک را انجام دهید؛ ادامه دادن پس از شروع بسیار ساده‌تر است.`,
       suggestedTasks: [
         {
-          title: `شروع ۵ دقیقه‌ای بدون کمال‌گرایی: ${topTaskTitle}`,
-          description: 'فقط باز کردن فایل و انجام اولین قدم کوچک',
+          title: `شروع ۱۵ دقیقه‌ای: ${topTaskTitle}`,
+          description: 'فقط باز کردن کار و انجام اولین قدم کوچک',
           priority: 1,
           duration: 15,
         },
@@ -87,7 +90,7 @@ export function generateLocalCoachResponse(
     };
   }
 
-  // 3. Daily schedule optimization (BUG-26: match explicit schedule phrases instead of bare "ساعت" or "امروز")
+  // 3. Daily schedule optimization (BUG-26: match explicit schedule phrases)
   if (
     q.includes('برنامه') ||
     q.includes('چینش') ||
@@ -100,25 +103,28 @@ export function generateLocalCoachResponse(
       pendingToday.length > 0
         ? pendingToday
             .slice(0, 4)
-            .map((t, i) => `• اولویت ${toPersianNum(i + 1)}: ${t.title} (${toPersianNum(t.duration)} دقیقه)`)
+            .map(
+              (t, i) =>
+                `• اولویت ${toPersianNum(i + 1)}: ${t.title} (${toPersianNum(t.duration)} دقیقه)`
+            )
             .join('\n')
-        : '• تمام کارهای امروزت انجام شده یا هنوز کاری ثبت نکردی!';
+        : '• تمام کارهای امروز انجام شده یا هنوز کاری ثبت نشده است.';
 
     return {
-      reply: `بر اساس وضعیت فعلی میز کار تو در «کایروس»:\n- کارهای انجام‌شده امروز: ${toPersianNum(doneToday.length)} کار\n- کارهای باقی‌مانده: ${toPersianNum(pendingToday.length)} کار (مجموعاً ${toPersianNum(totalPendingMin)} دقیقه)\n- عادت‌های تکمیل‌شده: ${toPersianNum(habitsDone)} از ${toPersianNum(habits.length)}\n\n📅 چینش بلوک‌های پیشنهادی برای ادامه روز:\n${listText}\n\n💡 پیشنهاد مربی: اول از همه «${pendingToday[0]?.title || 'اولویت ۱'}» رو توی تب «تمرکز عمیق» خط بزن و تا قبل از اتمامش سراغ کارهای فرعی نرو.`,
+      reply: `خلاصهٔ وضعیت امروز شما:\n- کارهای انجام‌شده: ${toPersianNum(doneToday.length)} مورد\n- کارهای باقی‌مانده: ${toPersianNum(pendingToday.length)} مورد (مجموعاً ${toPersianNum(totalPendingMin)} دقیقه)\n- عادت‌های ثبت‌شده امروز: ${toPersianNum(habitsDone)} از ${toPersianNum(habits.length)}\n\nترتیب پیشنهادی برای ادامهٔ روز:\n${listText}\n\nپیشنهاد: ابتدا «${pendingToday[0]?.title || 'اولویت ۱'}» را در بخش «تمرکز» شروع کنید و پیش از اتمام آن سراغ کارهای فرعی نروید.`,
     };
   }
 
-  // 4. Default smart response using local context
+  // 4. Default response using local context
   const topTitle = pendingToday[0]?.title || 'تعیین اولویت ۱';
   return {
-    reply: `دانیال جان، پیام تو رو بررسی کردم. در حال حاضر ${toPersianNum(pendingToday.length)} کار ناتمام در لیست امروز داری و اولویت شماره ۱ تو «${topTitle}» است.\n\nمی‌خوای این موضوع رو به چند مرحله کوچک‌تر بشکنیم یا به عنوان یک مأموریت جدید با زمان مشخص به میز کارت اضافه کنم؟`,
+    reply: `در حال حاضر ${toPersianNum(pendingToday.length)} کار ناتمام در برنامهٔ امروز دارید و اولویت اول شما «${topTitle}» است.\n\nمی‌خواهید این موضوع را به چند گام کوچک‌تر تقسیم کنیم یا آن را به عنوان یک کار جدید با زمان مشخص به برنامهٔ امروز اضافه کنم؟`,
     suggestedTasks:
       q.length > 4
         ? [
             {
               title: q.slice(0, 70),
-              description: 'ثبت‌شده از گفت‌وگو با دستیار هوشمند کایروس',
+              description: 'ایجادشده از بخش کمک به برنامه‌ریزی',
               priority: pendingToday.length + 1,
               duration: 45,
             },

@@ -111,6 +111,32 @@ export const getWeekDays = (offset = 0, referenceDate: Date = new Date()): WeekD
   return days;
 };
 
+export const getRollingLastNDays = (
+  daysCount = 7,
+  referenceDate: Date = new Date()
+): WeekDayItem[] => {
+  const today = new Date(referenceDate);
+  today.setHours(0, 0, 0, 0);
+  const todayKey = getDateKey(today);
+
+  const days: WeekDayItem[] = [];
+  for (let i = daysCount - 1; i >= 0; i--) {
+    const d = addDays(today, -i);
+    d.setHours(0, 0, 0, 0);
+    days.push({
+      date: d,
+      key: getDateKey(d),
+      weekdayName: new Intl.DateTimeFormat('fa-IR', { weekday: 'short' }).format(d),
+      weekdayFull: new Intl.DateTimeFormat('fa-IR', { weekday: 'long' }).format(d),
+      dayNumber: new Intl.DateTimeFormat('fa-IR', { day: 'numeric' }).format(d),
+      monthName: new Intl.DateTimeFormat('fa-IR', { month: 'short' }).format(d),
+      isToday: getDateKey(d) === todayKey,
+      isFuture: false,
+    });
+  }
+  return days;
+};
+
 export const formatPersianDateFull = (date: Date = new Date()): string => {
   return new Intl.DateTimeFormat('fa-IR', {
     weekday: 'long',

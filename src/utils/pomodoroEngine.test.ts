@@ -77,3 +77,25 @@ test('FIX-09: evaluateTimerTick detects work completion across any tab and retur
   assert.equal(endTick.nextState?.isRunning, false);
 });
 
+test('FIX-16: createInitialTimerState supports arbitrary custom task durations (e.g. 10 minutes -> 600s) and evaluateTimerTick clamps completedAtEpochMs to targetEndEpochMs', () => {
+  const t0 = 1_700_000_000_000;
+  // 10-minute task must initialize with 600 seconds (not forced to 45 minutes!)
+  const custom10m = createInitialTimerState(10, 't-10m', 'کار ۱۰ دقیقه‌ای');
+  assert.equal(custom10m.selectedPresetMinutes, 10);
+  assert.equal(custom10m.durationSeconds, 600);
+  assert.equal(custom10m.remainingSecondsWhenPaused, 600);
+
+  const running = startTimer(custom10m, t0);
+  assert.ok(running.activeSessionId);
+  assert.equal(running.targetEndEpochMs, t0 + 600_000);
+
+  // Simulate browser tab waking up 2 hours after the 10-minute timer finished
+  const lateWakeupEpoch = t0 + 600_000 + 7_200_000;
+  const tick = evaluateTimerTick(running, lateWakeupEpoch);
+  assert.equal(tick.completedWorkSession, true);
+  assert.equal(tick.completedDurationMinutes, 10);
+  assert.equal(tick.completedDurationSeconds, 600);
+  assert.equal(tick.completedAtEpochMs, t0 + 600_000);
+  assert.equal(tick.completedSessionId, running.activeSessionId);
+});
+

@@ -28,13 +28,12 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'local_coach' | 'ivy_wizard'>('local_coach');
 
-  // Local Smart Coach State
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'assistant',
       text:
-        'سلام دانیال جان! 👋 من دستیار هوشمند «کایروس» هستم (موتور هوشمند محلی بدون نیاز به اینترنت یا کلید API). می‌تونم در تقسیم پروژه‌های بزرگ به مراحل کوچک، غلبه بر اهمال‌کاری، یا چیدن یک برنامه روزانه دقیق و بدون استرس کمکت کنم. چه موضوعی در اولویت ذهنت است؟',
+        'سلام! این بخش به شما کمک می‌کند کارهای بزرگ را به گام‌های کوچک‌تر تقسیم کنید، اولویت‌های امروز را بچینید یا برای شروع کارهای عقب‌افتاده برنامهٔ مشخصی بسازید. دربارهٔ چه کاری برنامه‌ریزی کنیم؟',
       timestamp: Date.now(),
     },
   ]);
@@ -42,7 +41,6 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Ivy Lee Wizard State (BUG-13: initialize priorityCounter from existing today tasks)
   const computeNextPriority = () => {
     const todayKey = getTodayKey();
     const todayTasks = tasks.filter((t) => t.targetDate === todayKey && !t.completed);
@@ -61,7 +59,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
     {
       sender: 'bot',
       text:
-        'سلام دانیال جان! 👋 بیا با متد علمی The One Thing مغزت رو از هرج‌ومرج و عذاب وجدان نجات بدیم.\n\nتصور کن فقط یک کار رو می‌تونستی امروز انجام بدی که بیشترین اثر رو داره؛ اون کار چیه؟ (می‌شه اولویت بعدی تو)',
+        'بیایید با روش اولویت‌بندی Ivy Lee کارهای اصلی را به ترتیب اهمیت مشخص کنیم.\n\nاگر امروز فقط فرصت انجام یک کار کلیدی را داشته باشید، آن کار چیست؟',
     },
   ]);
   const [wizardInput, setWizardInput] = useState('');
@@ -70,7 +68,6 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, wizardChat]);
 
-  // Handle Local Coach Message Submit (100% Client-Side, GitHub Pages Ready)
   const handleLocalCoachSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = inputMessage.trim();
@@ -96,12 +93,10 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
     setInputMessage('');
   };
 
-  // Quick prompt chips
   const handlePromptChip = (text: string) => {
     setInputMessage(text);
   };
 
-  // Wizard Logic
   const handleWizardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const val = wizardInput.trim();
@@ -122,7 +117,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
         ...prev,
         {
           sender: 'bot',
-          text: `عالیه! ثبت شد به عنوان اولویت ${toPersianNum(priorityCounter)}.\nحالا اگر توضیح یا جزئیاتی برای «${val}» داری بنویس یا دکمه رد شدن را بزن:`,
+          text: `ثبت شد به عنوان اولویت ${toPersianNum(priorityCounter)}.\nاگر توضیح یا جزئیاتی برای «${val}» دارید بنویسید یا دکمهٔ «رد شدن» را بزنید:`,
         },
       ]);
     } else if (wizardStep === 'ASK_DESC') {
@@ -134,7 +129,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
           ...prev,
           {
             sender: 'bot',
-            text: 'دانیال جان، لطفاً زمان را به صورت عدد (دقیقه) وارد کن؛ مثلاً 45 یا 60:',
+            text: 'لطفاً زمان تخمینی را به صورت عدد (دقیقه) وارد کنید؛ مثلاً 30 یا 45:',
           },
         ]);
         return;
@@ -150,7 +145,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
       ...prev,
       {
         sender: 'bot',
-        text: `برای اولویت ${toPersianNum(priorityCounter)} (${draftTask.title}) چند دقیقه سهمیه زمانی در نظر بگیریم؟`,
+        text: `برای اولویت ${toPersianNum(priorityCounter)} («${draftTask.title}») چند دقیقه زمان در نظر بگیریم؟`,
       },
     ]);
   };
@@ -168,7 +163,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
       ...prev,
       {
         sender: 'bot',
-        text: `✅ اولویت ${toPersianNum(completedDraft.priority)}: ${completedDraft.title} (${toPersianNum(durationMin)} دقیقه) آماده شد.\nآیا کار دیگری هست که بخواهی به عنوان اولویت ${toPersianNum(priorityCounter + 1)} اضافه کنی؟`,
+        text: `اولویت ${toPersianNum(completedDraft.priority)}: ${completedDraft.title} (${toPersianNum(durationMin)} دقیقه) آماده شد.\nآیا کار دیگری هست که بخواهید به عنوان اولویت ${toPersianNum(priorityCounter + 1)} اضافه کنید؟`,
       },
     ]);
   };
@@ -188,7 +183,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
       ...prev,
       {
         sender: 'bot',
-        text: `🎉 ${toPersianNum(batch.length)} مأموریت با موفقیت برای «${targetDay === 'tomorrow' ? 'فردا' : 'امروز'}» به میز کارت اضافه شد!`,
+        text: `${toPersianNum(batch.length)} کار با موفقیت برای «${targetDay === 'tomorrow' ? 'فردا' : 'امروز'}» به فهرست کارها اضافه شد.`,
       },
     ]);
     setWizardStep('ASK_TITLE');
@@ -205,7 +200,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
       {
         sender: 'bot',
         text:
-          'سلام مجدد دانیال جان! 👋 اولویت شماره ۱ تو چیه که اگر فقط همین کار رو انجام بدی روزت موفقه؟',
+          'اولویت شمارهٔ ۱ شما چیست که اگر امروز انجام شود بیشترین نتیجه را دارد؟',
       },
     ]);
   };
@@ -220,12 +215,12 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
             onClick={() => setActiveSubTab('local_coach')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeSubTab === 'local_coach'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Bot className="w-4 h-4" />
-            <span>دستیار و مربی هوشمند کایروس (لوکال)</span>
+            <span>راهنمای شکستن و چیدمان کارها</span>
           </button>
 
           <button
@@ -233,21 +228,21 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
             onClick={() => setActiveSubTab('ivy_wizard')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeSubTab === 'ivy_wizard'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Sparkles className="w-4 h-4" />
-            <span>ویزارد تعاملی اولویت‌بندی (Ivy Lee)</span>
+            <span>اولویت‌بندی گام‌به‌گام (Ivy Lee)</span>
           </button>
         </div>
       </div>
 
-      {/* Sub-tab 1: Local Smart Coach */}
+      {/* Sub-tab 1: Local Planning Helper */}
       {activeSubTab === 'local_coach' && (
         <div
           data-testid="local-coach-panel"
-          className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]"
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]"
         >
           {/* Header */}
           <div className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
@@ -257,10 +252,10 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
-                  دستیار هوشمند محلی کایروس
+                  کمک به برنامه‌ریزی روزانه
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  پردازش فوری و ۱۰۰٪ آفلاین روی مرورگر (بدون نیاز به API خارجی)
+                  تقسیم کارهای بزرگ به مراحل قابل اجرا و پیشنهاد برنامه بر اساس کارهای فعلی شما
                 </p>
               </div>
             </div>
@@ -272,13 +267,13 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                   {
                     id: 'init',
                     sender: 'assistant',
-                    text: 'گفت‌وگو از نو شروع شد. دانیال جان، در چه زمینه‌ای می‌تونم کمکت کنم؟',
+                    text: 'گفت‌وگو از نو شروع شد. دربارهٔ چه کاری برنامه‌ریزی کنیم؟',
                     timestamp: Date.now(),
                   },
                 ])
               }
-              title="پاک کردن تاریخچه گفت‌وگو"
-              aria-label="پاک کردن تاریخچه گفت‌وگو"
+              title="پاک کردن تاریخچهٔ گفت‌وگو"
+              aria-label="پاک کردن تاریخچهٔ گفت‌وگو"
               className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 text-xs font-bold transition cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
@@ -287,11 +282,11 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 
           {/* Quick Prompts Chips */}
           <div className="px-5 py-2.5 bg-slate-50/80 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-            <span className="text-[11px] text-slate-400 whitespace-nowrap pl-1">پیشنهادات سریع:</span>
+            <span className="text-[11px] text-slate-400 whitespace-nowrap pl-1">الگوهای آماده:</span>
             <button
               type="button"
               onClick={() =>
-                handlePromptChip('لطفاً پروژه بزرگ ساخت نرم‌افزار CRM مغازه رو به چند مرحله ۲۰ تا ۴۵ دقیقه‌ای تقسیم کن.')
+                handlePromptChip('لطفاً پروژهٔ طراحی و پیاده‌سازی وب‌سایت را به چند مرحلهٔ ۲۵ تا ۴۵ دقیقه‌ای تقسیم کن.')
               }
               className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-500 whitespace-nowrap cursor-pointer"
             >
@@ -301,22 +296,22 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
             <button
               type="button"
               onClick={() =>
-                handlePromptChip('امروز حسابی بی‌انرژی و دچار اهمال‌کاری شدم، یک راهکار سریع برای شروع اولین قدم چی داری؟')
+                handlePromptChip('امروز تمرکزم کم است و شروع کار برایم سخت شده؛ چطور اولین قدم را شروع کنم؟')
               }
               className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-500 whitespace-nowrap cursor-pointer"
             >
               <ShieldAlert className="w-3 h-3 inline-block ml-1" />
-              غلبه بر اهمال‌کاری
+              شروع کارهای به تعویق افتاده
             </button>
             <button
               type="button"
               onClick={() =>
-                handlePromptChip('بر اساس کارهای ناتمام امروز من، یک چینش بهینه زمانی برای بعدازظهر تا شب پیشنهاد بده.')
+                handlePromptChip('بر اساس کارهای ناتمام امروز، یک چینش زمانی مناسب پیشنهاد بده.')
               }
               className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-500 whitespace-nowrap cursor-pointer"
             >
               <CalendarCheck className="w-3 h-3 inline-block ml-1" />
-              بهینه‌سازی برنامه امروز
+              پیشنهاد چینش برنامهٔ امروز
             </button>
           </div>
 
@@ -334,13 +329,13 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                       : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
                   }`}
                 >
-                  {m.sender === 'user' ? 'دانیال' : <Bot className="w-4 h-4" />}
+                  {m.sender === 'user' ? 'شما' : <Bot className="w-4 h-4" />}
                 </div>
 
                 <div
                   className={`max-w-[85%] rounded-2xl p-4 text-xs sm:text-sm leading-relaxed space-y-3 ${
                     m.sender === 'user'
-                      ? 'bg-indigo-600 text-white rounded-tl-none font-medium shadow-md shadow-indigo-600/20'
+                      ? 'bg-indigo-600 text-white rounded-tl-none font-medium shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 rounded-tr-none'
                   }`}
                 >
@@ -351,7 +346,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
                           <CheckCircle2 className="w-4 h-4" />
-                          مأموریت‌های پیشنهادی دستیار:
+                          کارهای پیشنهادی:
                         </span>
                         <button
                           type="button"
@@ -359,7 +354,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                             const todayKey = getTodayKey();
                             const newTasks = m.suggestedTasks!.map((st, i) => ({
                               title: st.title,
-                              description: st.description || 'پیشنهاد دستیار هوشمند کایروس',
+                              description: st.description || 'پیشنهاد برنامه‌ریزی کایروس',
                               priority: st.priority || i + 1,
                               duration: st.duration || 45,
                               targetDate: todayKey,
@@ -370,7 +365,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                           className="px-3 py-1 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition shadow-sm flex items-center gap-1 cursor-pointer"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          <span>افزودن به میز کار</span>
+                          <span>افزودن به کارها</span>
                         </button>
                       </div>
                       <div className="space-y-1.5 text-xs tabular-nums">
@@ -403,10 +398,10 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
           >
             <input
               type="text"
-              aria-label="پیام به دستیار هوشمند کایروس"
+              aria-label="پیام به بخش کمک به برنامه‌ریزی"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              placeholder="سؤال یا درخواست برنامه‌ریزی خود را بنویسید..."
+              placeholder="عنوان پروژه یا درخواست برنامه‌ریزی خود را بنویسید..."
               className="flex-1 px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
             />
             <button
@@ -421,9 +416,9 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
         </div>
       )}
 
-      {/* Sub-tab 2: Traditional Ivy Lee Wizard */}
+      {/* Sub-tab 2: Ivy Lee Wizard */}
       {activeSubTab === 'ivy_wizard' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]">
           <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
@@ -431,10 +426,10 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-black text-slate-800 dark:text-white">
-                  ویزارد اولویت‌بندی (Ivy Lee & The One Thing)
+                  اولویت‌بندی گام‌به‌گام (روش Ivy Lee)
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  چینش گام‌به‌گام کارها از اولویت ۱ تا آخر به همراه زمان‌بندی
+                  چینش کارهای اصلی از اولویت ۱ تا ۶ به همراه زمان تخمینی هر کار
                 </p>
               </div>
             </div>
@@ -461,12 +456,12 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                       : 'bg-indigo-500/10 text-indigo-500'
                   }`}
                 >
-                  {m.sender === 'user' ? 'دانیال' : <Bot className="w-4 h-4" />}
+                  {m.sender === 'user' ? 'شما' : <Bot className="w-4 h-4" />}
                 </div>
                 <div
                   className={`max-w-[85%] p-4 rounded-2xl text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${
                     m.sender === 'user'
-                      ? 'bg-indigo-600 text-white rounded-tl-none font-semibold shadow-md shadow-indigo-600/20'
+                      ? 'bg-indigo-600 text-white rounded-tl-none font-semibold shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 rounded-tr-none'
                   }`}
                 >
@@ -490,7 +485,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 
           {wizardStep === 'ASK_TIME' && (
             <div className="px-6 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
-              {[30, 45, 60, 90].map((mins) => (
+              {[25, 30, 45, 60, 90].map((mins) => (
                 <button
                   key={mins}
                   type="button"
@@ -514,27 +509,27 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                     ...prev,
                     {
                       sender: 'bot',
-                      text: `خب دانیال جان، بعد از کارهای قبلی اولویت شماره ${toPersianNum(priorityCounter + 1)} تو چیه؟`,
+                      text: `اولویت شمارهٔ ${toPersianNum(priorityCounter + 1)} شما چیست؟`,
                     },
                   ]);
                 }}
                 className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-indigo-500 cursor-pointer"
               >
-                ➕ ثبت اولویت {toPersianNum(priorityCounter + 1)}
+                ثبت اولویت {toPersianNum(priorityCounter + 1)}
               </button>
               <button
                 type="button"
                 onClick={() => finalizeWizardPlan('today')}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20 cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm cursor-pointer"
               >
-                🚀 ذخیره برای امروز
+                ذخیره برای امروز
               </button>
               <button
                 type="button"
                 onClick={() => finalizeWizardPlan('tomorrow')}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-md cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-sm cursor-pointer"
               >
-                🌙 ذخیره برای برنامه فردا
+                ذخیره برای فردا
               </button>
             </div>
           )}
@@ -545,7 +540,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
           >
             <input
               type="text"
-              aria-label="ورودی ویزارد اولویت‌بندی Ivy Lee"
+              aria-label="ورودی اولویت‌بندی گام‌به‌گام"
               value={wizardInput}
               onChange={(e) => setWizardInput(e.target.value)}
               placeholder={
@@ -554,7 +549,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                   : wizardStep === 'ASK_DESC'
                   ? 'توضیحات تکمیلی کار...'
                   : wizardStep === 'ASK_TIME'
-                  ? 'سهمیه زمان به دقیقه (مثلاً 45)...'
+                  ? 'زمان تخمینی به دقیقه (مثلاً 45)...'
                   : 'یک گزینه از بالا انتخاب کنید...'
               }
               disabled={wizardStep === 'ASK_MORE'}

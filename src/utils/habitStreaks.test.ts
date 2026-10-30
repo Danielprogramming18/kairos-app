@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateHabitWindowRate, calculateStreaks } from './habitStreaks';
+import {
+  calculateHabitWindowRate,
+  calculateStreaks,
+  computeDailyHabitProgress,
+} from './habitStreaks';
 
 test('calculateStreaks calculates zero streak for empty history', () => {
   const res = calculateStreaks({}, new Date('2026-10-25T12:00:00'));
@@ -105,4 +109,32 @@ test('FIX-09: calculateStreaks respects custom targetDaysOfWeek without breaking
   assert.equal(res.current, 3);
   assert.equal(res.best, 3);
 });
+
+test('FIX-18: computeDailyHabitProgress excludes habits on dates before startDate so newly created habits never show 0 of 1 on earlier week days', () => {
+  const todayKey = '2026-10-28';
+  const habits = [
+    {
+      id: 'h_new_today',
+      startDate: '2026-10-28',
+      archived: false,
+      completedDates: {},
+    },
+  ];
+
+  // Yesterday (before startDate = 2026-10-28) -> eligibleCount MUST be 0 (not 0 of 1!)
+  const yesterdayProgress = computeDailyHabitProgress(habits, '2026-10-27', todayKey);
+  assert.equal(yesterdayProgress.doneCount, 0);
+  assert.equal(yesterdayProgress.eligibleCount, 0);
+  assert.equal(yesterdayProgress.ratePercent, 0);
+
+  // Today (on startDate = 2026-10-28) -> eligibleCount is 1
+  const todayProgress = computeDailyHabitProgress(habits, '2026-10-28', todayKey);
+  assert.equal(todayProgress.doneCount, 0);
+  assert.equal(todayProgress.eligibleCount, 1);
+
+  // Tomorrow (future date > todayKey) -> eligibleCount is 0
+  const tomorrowProgress = computeDailyHabitProgress(habits, '2026-10-29', todayKey);
+  assert.equal(tomorrowProgress.eligibleCount, 0);
+});
+
 

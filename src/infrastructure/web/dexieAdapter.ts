@@ -19,6 +19,7 @@ import {
   NoteEntity,
   NoteKind,
   nowIso,
+  StorageConflictError,
   TaskEntity,
   UserSettingsEntity,
 } from '../../domain/models';
@@ -31,6 +32,7 @@ import {
   NoteRepository,
   NotificationService,
   PlatformContainer,
+  SaveMutationOptions,
   SettingsRepository,
   TaskFilter,
   TaskRepository,
@@ -754,9 +756,18 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
         return task ?? null;
       },
 
-      upsertTask: async (task: TaskEntity): Promise<TaskEntity> => {
+      upsertTask: async (task: TaskEntity, options?: SaveMutationOptions): Promise<TaskEntity> => {
         const next = await this.db.transaction('rw', this.db.tasks, async () => {
           const existing = await this.db.tasks.get(task.id);
+          const expectedRev =
+            options?.expectedRevision !== undefined
+              ? options.expectedRevision
+              : existing !== undefined && typeof task.revision === 'number' && task.revision > 0
+              ? task.revision
+              : undefined;
+          if (existing && expectedRev !== undefined && existing.revision !== expectedRev) {
+            throw new StorageConflictError(task.id, expectedRev, existing.revision);
+          }
           const now = nowIso();
           const nextRevision = Math.max(existing?.revision ?? 0, task.revision ?? 0) + 1;
           const record: TaskEntity = {
@@ -869,9 +880,21 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
         return h ?? null;
       },
 
-      upsertHabit: async (habit: HabitEntity): Promise<HabitEntity> => {
+      upsertHabit: async (
+        habit: HabitEntity,
+        options?: SaveMutationOptions
+      ): Promise<HabitEntity> => {
         const next = await this.db.transaction('rw', this.db.habits, async () => {
           const existing = await this.db.habits.get(habit.id);
+          const expectedRev =
+            options?.expectedRevision !== undefined
+              ? options.expectedRevision
+              : existing !== undefined && typeof habit.revision === 'number' && habit.revision > 0
+              ? habit.revision
+              : undefined;
+          if (existing && expectedRev !== undefined && existing.revision !== expectedRev) {
+            throw new StorageConflictError(habit.id, expectedRev, existing.revision);
+          }
           const now = nowIso();
           const nextRevision = Math.max(existing?.revision ?? 0, habit.revision ?? 0) + 1;
           const record: HabitEntity = {
@@ -1000,9 +1023,18 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       },
 
-      upsertNote: async (note: NoteEntity): Promise<NoteEntity> => {
+      upsertNote: async (note: NoteEntity, options?: SaveMutationOptions): Promise<NoteEntity> => {
         const next = await this.db.transaction('rw', this.db.notes, async () => {
           const existing = await this.db.notes.get(note.id);
+          const expectedRev =
+            options?.expectedRevision !== undefined
+              ? options.expectedRevision
+              : existing !== undefined && typeof note.revision === 'number' && note.revision > 0
+              ? note.revision
+              : undefined;
+          if (existing && expectedRev !== undefined && existing.revision !== expectedRev) {
+            throw new StorageConflictError(note.id, expectedRev, existing.revision);
+          }
           const now = nowIso();
           const nextRevision = Math.max(existing?.revision ?? 0, note.revision ?? 0) + 1;
           const record: NoteEntity = {
@@ -1074,6 +1106,10 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       logFocusSession: async (session: FocusSessionEntity): Promise<FocusSessionEntity> => {
         const next = await this.db.transaction('rw', this.db.focusSessions, async () => {
           const existing = await this.db.focusSessions.get(session.id);
+          if (existing && !existing.deletedAt) {
+            // Idempotent session logging: do not duplicate or overwrite an already-logged sessionId
+            return existing;
+          }
           const now = nowIso();
           const nextRevision = Math.max(existing?.revision ?? 0, session.revision ?? 0) + 1;
           const record: FocusSessionEntity = {

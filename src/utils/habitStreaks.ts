@@ -16,11 +16,89 @@ export interface HabitWindowRateResult {
   ratePercent: number;
 }
 
+export interface DailyHabitProgressResult {
+  doneCount: number;
+  eligibleCount: number;
+  ratePercent: number;
+}
+
 /**
  * Converts a JS Date's weekday (`0=Sun..6=Sat`) to the Persian weekday index (`0=Sat..6=Fri`).
  */
 export function getPersianWeekdayIndex(date: Date): number {
   return (date.getDay() + 1) % 7;
+}
+
+/**
+ * Canonical domain eligibility rule for whether a habit is active and expected on `dateKey` (FIX-18).
+ * - Never includes archived habits (`habit.archived === true`).
+ * - Never includes future dates (`dateKey > todayKey`).
+ * - Never includes dates strictly before `habit.startDate` unless the user explicitly checked that date.
+ * - Respects `habit.targetDaysOfWeek` when custom weekdays are configured.
+ */
+export function isHabitEligibleOnDate(
+  habit: {
+    startDate?: string;
+    archived?: boolean;
+    targetDaysOfWeek?: number[];
+    completedDates?: Record<string, boolean>;
+  },
+  dateKey: string,
+  todayKey: string = getDateKey(new Date())
+): boolean {
+  if (habit.archived) return false;
+  if (dateKey > todayKey) return false;
+
+  const isChecked = Boolean(habit.completedDates?.[dateKey]);
+  if (isChecked) return true;
+
+  const validStartDate =
+    habit.startDate && /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate)
+      ? habit.startDate
+      : undefined;
+
+  if (validStartDate && dateKey < validStartDate) {
+    return false;
+  }
+
+  if (habit.targetDaysOfWeek && habit.targetDaysOfWeek.length > 0) {
+    const [y, m, d] = dateKey.split('-').map(Number);
+    if (y && m && d) {
+      const dt = new Date(y, m - 1, d);
+      return habit.targetDaysOfWeek.includes(getPersianWeekdayIndex(dt));
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Computes daily habit completion count, eligible denominator, and percentage for a specific `dateKey`.
+ * Prevents the `0 of 1` bug on days before a new habit's `startDate`.
+ */
+export function computeDailyHabitProgress(
+  habits: Array<{
+    startDate?: string;
+    archived?: boolean;
+    targetDaysOfWeek?: number[];
+    completedDates: Record<string, boolean>;
+  }>,
+  dateKey: string,
+  todayKey: string = getDateKey(new Date())
+): DailyHabitProgressResult {
+  if (dateKey > todayKey) {
+    return { doneCount: 0, eligibleCount: 0, ratePercent: 0 };
+  }
+  const eligibleHabits = habits.filter((h) => isHabitEligibleOnDate(h, dateKey, todayKey));
+  const eligibleCount = eligibleHabits.length;
+  const doneCount = eligibleHabits.filter((h) => Boolean(h.completedDates?.[dateKey])).length;
+  const ratePercent =
+    eligibleCount > 0 ? Math.min(100, Math.round((doneCount / eligibleCount) * 100)) : 0;
+  return {
+    doneCount,
+    eligibleCount,
+    ratePercent,
+  };
 }
 
 /**
@@ -48,13 +126,9 @@ function countTargetDaysGap(
 }
 
 /**
- * Calculates current streak and all-time best streak for a habit
+ * Calculates current streak (`current`) and all-time best streak (`best`) for a habit
  * based on its completed dates dictionary `{ [YYYY-MM-DD]: true }`, `weeklyGoal` (1..7),
- * and optional `startDate` / `targetDaysOfWeek` (BUG-27, FIX-09).
- * - For daily habits (`weeklyGoal === 7`), requires consecutive daily completions.
- * - For flexible weekly habits (`weeklyGoal < 7`), allows up to `7 - weeklyGoal` rest days between check-ins
- *   without breaking the active chain.
- * - Respects `options.startDate` (if provided) and `options.targetDaysOfWeek` (if custom days are configured).
+ * and optional `startDate` / `targetDaysOfWeek` (BUG-27, FIX-09, FIX-18).
  */
 export const calculateStreaks = (
   completedDatesDict: Record<string, boolean> = {},
@@ -131,7 +205,6 @@ export const calculateStreaks = (
     options?.targetDaysOfWeek
   );
 
-  // If the user hasn't missed more than (maxAllowedRestGap + 1) target days including today, the streak is still alive
   let currentStreak = 0;
   if (effectiveSinceLast <= maxAllowedRestGap + 1) {
     currentStreak = 1;
@@ -155,28 +228,23 @@ export const calculateStreaks = (
 
 /**
  * Calculates accurate completion rate for a habit over a given list of date keys (`YYYY-MM-DD`),
- * respecting `habit.startDate`, `todayKey` (never penalizing future days or days before the habit existed),
- * and `habit.weeklyGoal` (FIX-09).
+ * respecting `habit.startDate`, `habit.archived`, `todayKey` (never penalizing future days or days before the habit existed),
+ * and `habit.weeklyGoal` (FIX-09, FIX-18).
  */
 export function calculateHabitWindowRate(
   habit: {
     completedDates: Record<string, boolean>;
     startDate?: string;
+    archived?: boolean;
     weeklyGoal?: number;
     targetDaysOfWeek?: number[];
   },
   dayKeys: string[],
   todayKey: string = getDateKey(new Date())
 ): HabitWindowRateResult {
-  const validStartDate =
-    habit.startDate && /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate)
-      ? habit.startDate
-      : undefined;
-
-  const targetSet =
-    habit.targetDaysOfWeek && habit.targetDaysOfWeek.length > 0
-      ? new Set(habit.targetDaysOfWeek)
-      : null;
+  if (habit.archived) {
+    return { doneCount: 0, expectedCount: 0, ratePercent: 0 };
+  }
 
   let doneCount = 0;
   let activeDaysInWindow = 0;
@@ -187,27 +255,13 @@ export function calculateHabitWindowRate(
     if (isChecked) {
       doneCount++;
     }
-
-    // If the day is before the habit's creation startDate and wasn't manually checked, don't penalize it
-    if (validStartDate && key < validStartDate && !isChecked) {
-      continue;
-    }
-
-    if (targetSet) {
-      const [y, m, d] = key.split('-').map(Number);
-      if (y && m && d) {
-        const dt = new Date(y, m - 1, d);
-        if (targetSet.has(getPersianWeekdayIndex(dt)) || isChecked) {
-          activeDaysInWindow++;
-        }
-      }
-    } else {
+    if (isHabitEligibleOnDate(habit, key, todayKey)) {
       activeDaysInWindow++;
     }
   }
 
   const weeklyGoal = Math.max(1, Math.min(7, Math.round(habit.weeklyGoal || 7)));
-  // Expected count scales with active days since startDate, capped by weeklyGoal per 7-day block
+  // Expected count scales with active eligible days since startDate, capped by weeklyGoal per 7-day block
   const maxGoalForWindow = Math.ceil((dayKeys.length / 7) * weeklyGoal);
   const expectedCount = Math.min(activeDaysInWindow, maxGoalForWindow);
 
@@ -226,4 +280,3 @@ export function calculateHabitWindowRate(
     ratePercent,
   };
 }
-

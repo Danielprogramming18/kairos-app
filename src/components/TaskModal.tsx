@@ -26,7 +26,7 @@ interface TaskModalProps {
     targetDate: string;
     reminderTime?: string;
     category?: string;
-  }) => void;
+  }) => Promise<boolean> | boolean | void;
 }
 
 export const TaskModal: React.FC<TaskModalProps> = ({
@@ -46,6 +46,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [duration, setDuration] = useState<number>(45);
   const [targetDate, setTargetDate] = useState<string>(defaultDateKey || todayKey);
   const [reminderTime, setReminderTime] = useState<string>('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const nlpPreview = useMemo(() => {
     if (!title.trim()) return null;
@@ -71,6 +72,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   };
 
   useEffect(() => {
+    setIsSaving(false);
     if (taskToEdit) {
       setTitle(taskToEdit.title);
       setDescription(taskToEdit.description || '');
@@ -96,30 +98,36 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || isSaving) return;
 
-    // Validate date, time, priority, and duration (BUG-33)
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : todayKey;
     const trimmedReminder = reminderTime.trim();
     const validReminder = /^([01]\d|2[0-3]):([0-5]\d)$/.test(trimmedReminder)
       ? trimmedReminder
       : undefined;
     const validPriority = Math.max(1, Math.min(20, Math.round(Number(priority) || 1)));
-    const validDuration = Math.max(5, Math.min(600, Math.round(Number(duration) || 45)));
+    const validDuration = Math.max(1, Math.min(600, Math.round(Number(duration) || 45)));
 
-    onSave({
-      id: taskToEdit?.id,
-      title: title.trim(),
-      description: description.trim() || undefined,
-      priority: validPriority,
-      duration: validDuration,
-      targetDate: validDate,
-      reminderTime: validReminder,
-      category: 'work',
-    });
-    onClose();
+    setIsSaving(true);
+    try {
+      const ok = await onSave({
+        id: taskToEdit?.id,
+        title: title.trim(),
+        description: description.trim() || undefined,
+        priority: validPriority,
+        duration: validDuration,
+        targetDate: validDate,
+        reminderTime: validReminder,
+        category: 'work',
+      });
+      if (ok !== false) {
+        onClose();
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -128,14 +136,14 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       aria-modal="true"
       aria-labelledby="task-modal-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !isSaving) onClose();
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
     >
       <div
         ref={modalRef}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5"
       >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
           <h3
@@ -143,13 +151,14 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"
           >
             <CheckSquare className="w-5 h-5 text-indigo-500" />
-            <span>{taskToEdit ? 'ویرایش مأموریت' : 'ثبت مأموریت جدید'}</span>
+            <span>{taskToEdit ? 'ویرایش کار' : 'ثبت کار جدید'}</span>
           </h3>
           <button
             type="button"
             aria-label="بستن پنجره"
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+            disabled={isSaving}
+            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -161,7 +170,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               htmlFor="task-modal-title-input"
               className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5"
             >
-              عنوان کار (پشتیبانی از تشخیص هوشمند زمان و تاریخ) *
+              عنوان کار *
             </label>
             <input
               id="task-modal-title-input"
@@ -169,20 +178,19 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثلاً: فردا ساعت ۵ عصر ۴۵ دقیقه تمرین CSS اولویت ۱"
+              placeholder="مثلاً: فردا ساعت ۵ عصر ۴۵ دقیقه مرور گزارش اولویت ۱"
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             />
 
-            {/* Live NLP Extraction Preview Banner (FIX-09) */}
             {nlpPreview && (
               <div
                 data-testid="nlp-extraction-preview"
-                className="mt-2.5 p-3 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/70 space-y-2 animate-fade-in"
+                className="mt-2.5 p-3 rounded-xl bg-indigo-50/90 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/70 space-y-2 animate-fade-in"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-black text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
                     <Sparkles className="w-3.5 h-3.5" />
-                    پیش‌نمایش استخراج هوشمند از متن:
+                    پیش‌نمایش استخراج از متن:
                   </span>
                   <button
                     type="button"
@@ -234,7 +242,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="مثلاً: تمرین فلکس‌باکس و پیاده‌سازی روی فرم CRM..."
+              placeholder="نکات تکمیلی یا گام‌های انجام کار..."
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             />
           </div>
@@ -248,7 +256,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               <button
                 type="button"
                 onClick={() => setTargetDate(todayKey)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                   targetDate === todayKey
                     ? 'bg-indigo-600 text-white'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -259,7 +267,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               <button
                 type="button"
                 onClick={() => setTargetDate(tomorrowKey)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                   targetDate === tomorrowKey
                     ? 'bg-indigo-600 text-white'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -270,7 +278,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               <button
                 type="button"
                 onClick={() => setTargetDate(dayAfterTomorrowKey)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                   targetDate === dayAfterTomorrowKey
                     ? 'bg-indigo-600 text-white'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
@@ -290,7 +298,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                شماره اولویت
+                شمارهٔ اولویت
               </label>
               <input
                 type="number"
@@ -307,7 +315,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               </label>
               <input
                 type="number"
-                min={5}
+                min={1}
                 max={600}
                 value={duration}
                 onChange={(e) => setDuration(parseInt(e.target.value, 10) || 45)}
@@ -332,15 +340,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              disabled={isSaving}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               انصراف
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/25 transition"
+              disabled={isSaving}
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-sm transition cursor-pointer"
             >
-              ذخیره مأموریت
+              {isSaving ? 'در حال ذخیره...' : 'ذخیرهٔ کار'}
             </button>
           </div>
         </form>

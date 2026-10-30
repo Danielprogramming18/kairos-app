@@ -24,11 +24,11 @@
    npm install
    npm run build
    ```
-2. در اسکریپت مقداردهی اولیهٔ Tauri (`initialization_script`)، پل زیر را به `window.__KAIROS_DESKTOP_BRIDGE__` متصل کنید:
+2. در اسکریپت مقداردهی اولیهٔ Tauri (`initialization_script` در `/handoff/windows/src-tauri/src/main.rs`)، پل زیر به‌صورت خودکار به `window.__KAIROS_DESKTOP_BRIDGE__` متصل می‌شود:
    ```javascript
    window.__KAIROS_DESKTOP_BRIDGE__ = {
      invoke: async (rawRequestJson) => {
-       return await window.__TAURI_INTERNALS__.invoke('kairos_bridge_dispatch', {
+       return await window.__TAURI_INTERNALS__.invoke('kairos_bridge_invoke', {
          rawRequestJson,
        });
      },
@@ -42,6 +42,7 @@
 
 ---
 
-## ۴. فایل پیکربندی آمادهٔ Tauri v2 در مخزن
-- فایل `/handoff/windows/tauri.conf.json` حاوی تنظیمات کامل پنجرهٔ راست‌به‌چپ (`کایروس — فضای کار شخصی و تمرکز`)، سیاست امنیتی کاملاً آفلاین (`CSP`) و تنظیمات نصاب ویندوز (`nsis` و `msi` با پشتیبانی از زبان فارسی) در مخزن قرار داده شده است.
+## ۴. فایل‌های آمادهٔ Tauri v2 در مخزن
+- فایل `/handoff/windows/tauri.conf.json` حاوی تنظیمات کامل پنجرهٔ راست‌به‌چپ (`کایروس — فضای کار شخصی و تمرکز`)، نسخهٔ همگام با پروژه (`2.1.0`)، سیاست امنیتی کاملاً آفلاین (`CSP`) و تنظیمات نصاب ویندوز (`nsis` و `msi` با پشتیبانی از زبان فارسی).
+- فایل `/handoff/windows/src-tauri/src/main.rs` حاوی پیاده‌سازی مرجع هندلر Rust (`kairos_bridge_invoke`) منطبق با پروتکل `1.0.0`، اعتبارسنجی نسخه، سقف ۵ مگابایت اندازهٔ پیام و بررسی همزمانی `expectedRevision`.
 

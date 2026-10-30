@@ -15,9 +15,18 @@ import {
   Check,
   Sparkles,
 } from 'lucide-react';
-import { Habit, HabitCategory } from '../types';
-import { toPersianNum, getWeekDays, getDateKey, getTodayKey } from '../utils/persianDate';
-import { calculateHabitWindowRate, calculateStreaks } from '../utils/habitStreaks';
+import { Habit } from '../types';
+import {
+  toPersianNum,
+  getWeekDays,
+  getTodayKey,
+  formatDateKeyToPersian,
+} from '../utils/persianDate';
+import {
+  calculateHabitWindowRate,
+  calculateStreaks,
+  computeDailyHabitProgress,
+} from '../utils/habitStreaks';
 
 export const HABIT_CATEGORIES: Record<
   string,
@@ -52,13 +61,14 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
   const weekDays = getWeekDays(weekOffset);
   const weekKeys = weekDays.map((d) => d.key);
 
-  // 1. KPI Computations (FIX-09: respects startDate and weeklyGoal)
-  const totalHabits = habits.length;
-  const completedToday = habits.filter((h) => h.completedDates[todayKey]).length;
-  const todayPercent = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
+  // 1. Canonical Today KPI (respects startDate, targetDaysOfWeek, and archived)
+  const todayProgress = computeDailyHabitProgress(habits, todayKey, todayKey);
+  const eligibleTodayCount = todayProgress.eligibleCount;
+  const completedToday = todayProgress.doneCount;
+  const todayPercent = todayProgress.ratePercent;
 
   let maxCurrentStreak = 0;
-  let maxCurrentHabitTitle = 'بدون زنجیره فعال';
+  let maxCurrentHabitTitle = 'بدون زنجیرهٔ فعال';
   let maxBestStreak = 0;
   let maxBestHabitTitle = '—';
 
@@ -103,17 +113,17 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              تکمیل شده امروز
+              تکمیل‌شدهٔ امروز
             </span>
             <div className="flex items-baseline gap-2">
               <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
-                {toPersianNum(completedToday)} از {toPersianNum(totalHabits)}
+                {toPersianNum(completedToday)} از {toPersianNum(eligibleTodayCount)}
               </h2>
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 tabular-nums">
                 {toPersianNum(todayPercent)}٪
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">هدف روزانه خود را کامل کنید</p>
+            <p className="text-[11px] text-slate-400">هدف روزانهٔ خود را کامل کنید</p>
           </div>
           <div className="relative w-14 h-14 flex items-center justify-center">
             <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
@@ -142,7 +152,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              بهترین زنجیره فعلی
+              زنجیرهٔ فعلی برتر
             </span>
             <div className="flex items-baseline gap-1.5">
               <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
@@ -163,7 +173,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              رکورد بلندترین زنجیره
+              بهترین رکورد کل
             </span>
             <div className="flex items-baseline gap-1.5">
               <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
@@ -180,17 +190,19 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
           </div>
         </div>
 
-        {/* 7-Day Performance */}
+        {/* Weekly Performance */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              عملکرد ۷ روز گذشته
+              عملکرد بازهٔ هفتگی
             </span>
             <div className="flex items-baseline gap-1.5">
               <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(weeklyRate)}٪
               </h2>
-              <span className="text-xs text-slate-400 tabular-nums">({toPersianNum(totalDoneWeek)} ثبت)</span>
+              <span className="text-xs text-slate-400 tabular-nums">
+                ({toPersianNum(totalDoneWeek)} ثبت)
+              </span>
             </div>
             <p className="text-[11px] text-slate-400">میانگین تحقق اهداف هفتگی</p>
           </div>
@@ -208,51 +220,64 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
             <div>
               <h3 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
                 <Activity className="w-5 h-5 text-indigo-500" />
-                نمودار پیوستگی و عملکرد هفتگی
+                نمودار پیوستگی هفتگی
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                درصد تکمیل عادت‌ها در هر یک از روزهای هفته انتخابی
+                درصد تکمیل عادت‌های فعال در هر یک از روزهای هفتهٔ انتخابی
               </p>
             </div>
             <span className="text-xs font-semibold px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
               {weekOffset === 0
-                ? `هفته جاری (${weekDays[0].dayNumber} ${weekDays[0].monthName} تا ${weekDays[6].dayNumber} ${weekDays[6].monthName})`
+                ? `هفتهٔ جاری (${weekDays[0].dayNumber} ${weekDays[0].monthName} تا ${weekDays[6].dayNumber} ${weekDays[6].monthName})`
                 : `${weekDays[0].dayNumber} ${weekDays[0].monthName} تا ${weekDays[6].dayNumber} ${weekDays[6].monthName}`}
             </span>
           </div>
 
           <div className="grid grid-cols-7 gap-2 sm:gap-4 items-end h-44 pt-6 px-2 border-b border-slate-100 dark:border-slate-800/80">
             {weekDays.map((day) => {
-              const doneCount = habits.filter((h) => h.completedDates[day.key]).length;
-              const percent = totalHabits > 0 ? Math.round((doneCount / totalHabits) * 100) : 0;
+              const dayProgress = computeDailyHabitProgress(habits, day.key, todayKey);
+              const doneCount = dayProgress.doneCount;
+              const eligibleCount = dayProgress.eligibleCount;
+              const percent = dayProgress.ratePercent;
+
               let barColor = 'bg-indigo-500';
               if (percent >= 80) barColor = 'bg-emerald-500 shadow-md shadow-emerald-500/20';
               else if (percent === 0) barColor = 'bg-slate-200 dark:bg-slate-800';
 
-              const heightPercent = Math.max(percent, 8);
+              const heightPercent = eligibleCount > 0 ? Math.max(percent, 8) : 0;
 
               return (
-                <div key={day.key} className="flex flex-col items-center justify-end h-full group relative">
+                <div
+                  key={day.key}
+                  data-testid={`habit-chart-day-${day.key}`}
+                  className="flex flex-col items-center justify-end h-full group relative"
+                >
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-7 bg-slate-800 text-white text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap pointer-events-none z-10">
-                    {toPersianNum(doneCount)} از {toPersianNum(totalHabits)} ({toPersianNum(percent)}٪)
+                    {eligibleCount > 0
+                      ? `${toPersianNum(doneCount)} از ${toPersianNum(eligibleCount)} (${toPersianNum(percent)}٪)`
+                      : 'بدون عادت فعال'}
                   </div>
                   <span
-                    className={`text-[11px] font-bold mb-1.5 ${
+                    className={`text-[11px] font-bold mb-1.5 tabular-nums ${
                       day.isToday ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'
                     }`}
                   >
-                    {toPersianNum(percent)}٪
+                    {eligibleCount > 0 ? `${toPersianNum(percent)}٪` : '—'}
                   </span>
                   <div className="w-full max-w-[38px] h-28 bg-slate-100 dark:bg-slate-800/70 rounded-xl p-1 flex items-end overflow-hidden">
                     <div
                       className={`w-full rounded-lg transition-all duration-500 ease-out ${barColor}`}
-                      style={{ height: day.isFuture ? '0%' : `${heightPercent}%` }}
+                      style={{
+                        height: day.isFuture || eligibleCount === 0 ? '0%' : `${heightPercent}%`,
+                      }}
                     />
                   </div>
                   <div className="mt-2 text-center">
                     <span
                       className={`block text-xs font-bold ${
-                        day.isToday ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-300'
+                        day.isToday
+                          ? 'text-indigo-600 dark:text-indigo-400'
+                          : 'text-slate-600 dark:text-slate-300'
                       }`}
                     >
                       {day.weekdayName}
@@ -274,11 +299,11 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 inline-block" />
-                متوسط
+                در حال پیشرفت
               </span>
             </div>
-            <span className="italic text-slate-500 dark:text-slate-400 hidden sm:inline">
-              «قدم‌های کوچک روزانه، نتایج بزرگ می‌سازند.»
+            <span className="text-slate-500 dark:text-slate-400 hidden sm:inline">
+              روزهای پیش از شروع هر عادت در مخرج محاسبه نمی‌شوند.
             </span>
           </div>
         </div>
@@ -288,10 +313,10 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
           <div>
             <h3 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2 mb-1">
               <PieChart className="w-5 h-5 text-violet-500" />
-              توزیع و پیشرفت دسته‌بندی‌ها
+              پیشرفت دسته‌بندی‌ها
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-5">
-              نرخ موفقیت هفتگی به تفکیک هر حوزه
+              نرخ تحقق هفتگی به تفکیک هر حوزه
             </p>
 
             <div className="space-y-4">
@@ -321,11 +346,11 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                             style={{ backgroundColor: catInfo.color }}
                           />
                           {catInfo.label}
-                          <span className="text-[11px] font-normal text-slate-400">
+                          <span className="text-[11px] font-normal text-slate-400 tabular-nums">
                             ({toPersianNum(count)})
                           </span>
                         </span>
-                        <span className="font-bold text-slate-600 dark:text-slate-300">
+                        <span className="font-bold text-slate-600 dark:text-slate-300 tabular-nums">
                           {toPersianNum(rate)}٪
                         </span>
                       </div>
@@ -342,18 +367,18 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
           </div>
 
           <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400">مجموع عادت‌های فعال:</span>
-            <span className="font-bold text-slate-700 dark:text-slate-200">
+            <span className="text-slate-400">مجموع عادت‌ها:</span>
+            <span className="font-bold text-slate-700 dark:text-slate-200 tabular-nums">
               {toPersianNum(habits.length)} عادت
             </span>
           </div>
         </div>
       </section>
 
-      {/* 3. Filter Bar & Habits Matrix Table */}
+      {/* 3. Filter Bar, Mobile Habit Cards & Desktop Matrix Table */}
       <section className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-          {/* Category Filter Pills */}
+          {/* Category Filter Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
             {Object.entries(HABIT_CATEGORIES).map(([key, cat]) => {
               const isActive = selectedCategory === key;
@@ -364,16 +389,17 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               return (
                 <button
                   key={key}
+                  type="button"
                   onClick={() => setSelectedCategory(key)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
                     isActive
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                      ? 'bg-indigo-600 text-white shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   <span>{cat.label}</span>
                   <span
-                    className={`px-1.5 py-0.2 rounded-md text-[10px] ${
+                    className={`px-1.5 py-0.2 rounded-md text-[10px] tabular-nums ${
                       isActive
                         ? 'bg-white/20 text-white'
                         : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
@@ -386,7 +412,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
             })}
           </div>
 
-          {/* Search & Week Navigator */}
+          {/* Search, New Habit & Week Navigator */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <div className="relative flex-1 sm:flex-initial">
               <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -394,7 +420,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="جستجوی عادت..."
+                placeholder="جست‌وجوی عادت..."
                 className="w-full sm:w-48 pr-9 pl-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/90 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
               />
             </div>
@@ -403,8 +429,8 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setWeekOffset(weekOffset - 1)}
-                title="هفته قبل"
-                aria-label="هفته قبل"
+                title="هفتهٔ قبل"
+                aria-label="هفتهٔ قبل"
                 className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -420,18 +446,147 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                 type="button"
                 onClick={() => setWeekOffset(weekOffset + 1)}
                 disabled={weekOffset >= 0}
-                title="هفته بعد"
-                aria-label="هفته بعد"
+                title="هفتهٔ بعد"
+                aria-label="هفتهٔ بعد"
                 className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => onOpenHabitModal()}
+              className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>عادت جدید</span>
+            </button>
           </div>
         </div>
 
-        {/* Table of Habits */}
-        <div className="overflow-x-auto">
+        {/* Mobile Habit Cards (< md): Today check + compact 7-day bar */}
+        {filteredHabits.length > 0 && (
+          <div className="md:hidden space-y-3" data-testid="habits-mobile-list">
+            {filteredHabits.map((habit) => {
+              const catInfo = HABIT_CATEGORIES[habit.category] || HABIT_CATEGORIES.all;
+              const streaks = calculateStreaks(
+                habit.completedDates,
+                new Date(),
+                habit.weeklyGoal,
+                { startDate: habit.startDate }
+              );
+              const isCheckedToday = !!habit.completedDates[todayKey];
+              const goal = habit.weeklyGoal || 7;
+              const weekDoneCount = weekDays.filter((d) => habit.completedDates[d.key]).length;
+
+              return (
+                <div
+                  key={habit.id}
+                  className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => onToggleHabitDay(habit.id, todayKey)}
+                        aria-label={`ثبت امروز برای عادت «${habit.title}»`}
+                        className={`w-11 h-11 rounded-2xl flex items-center justify-center text-lg shrink-0 transition cursor-pointer ${
+                          isCheckedToday
+                            ? 'text-white shadow-sm'
+                            : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'
+                        }`}
+                        style={
+                          isCheckedToday ? { backgroundColor: habit.color } : undefined
+                        }
+                      >
+                        {isCheckedToday ? <Check className="w-5 h-5 stroke-[3]" /> : habit.emoji}
+                      </button>
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
+                          {habit.title}
+                        </h4>
+                        <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          <span
+                            className="px-2 py-0.5 rounded-md font-semibold"
+                            style={{
+                              backgroundColor: `${catInfo.color}15`,
+                              color: catInfo.color,
+                            }}
+                          >
+                            {catInfo.label}
+                          </span>
+                          <span>زنجیرهٔ فعلی: {toPersianNum(streaks.current)} روز</span>
+                          <span>بهترین رکورد: {toPersianNum(streaks.best)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onOpenHabitModal(habit.id)}
+                        aria-label={`ویرایش عادت «${habit.title}»`}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-500 transition cursor-pointer"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenDeleteModal(habit.id, habit.title)}
+                        aria-label={`حذف عادت «${habit.title}»`}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Compact 7-day row */}
+                  <div className="grid grid-cols-7 gap-1.5 pt-2 border-t border-slate-200/60 dark:border-slate-700/50">
+                    {weekDays.map((d) => {
+                      const isChecked = !!habit.completedDates[d.key];
+                      const isBeforeStart = Boolean(habit.startDate && d.key < habit.startDate);
+                      return (
+                        <button
+                          key={d.key}
+                          type="button"
+                          disabled={d.isFuture}
+                          onClick={() => onToggleHabitDay(habit.id, d.key)}
+                          className={`py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold transition ${
+                            d.isFuture
+                              ? 'opacity-30 cursor-not-allowed bg-slate-100 dark:bg-slate-800'
+                              : isChecked
+                              ? 'text-white'
+                              : isBeforeStart
+                              ? 'opacity-45 bg-slate-100 dark:bg-slate-800/50 text-slate-400'
+                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700'
+                          }`}
+                          style={isChecked ? { backgroundColor: habit.color } : undefined}
+                        >
+                          <span>{d.weekdayName}</span>
+                          <span className="tabular-nums mt-0.5">{d.dayNumber}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>
+                      پیشرفت هفتگی: {toPersianNum(weekDoneCount)} از {toPersianNum(goal)} روز
+                    </span>
+                    {habit.startDate && (
+                      <span>شروع: {formatDateKeyToPersian(habit.startDate)}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Desktop Table of Habits (>= md) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full min-w-[760px] text-right border-collapse">
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-800/80 text-xs text-slate-400 font-medium">
@@ -453,7 +608,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                   </th>
                 ))}
                 <th className="py-3 px-3 text-center">پیشرفت هفتگی</th>
-                <th className="py-3 px-3 text-center">زنجیره</th>
+                <th className="py-3 px-3 text-center">زنجیرهٔ فعلی / رکورد</th>
                 <th className="py-3 pr-2 text-left w-20">عملیات</th>
               </tr>
             </thead>
@@ -514,22 +669,28 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
 
                     {weekDays.map((d) => {
                       const isChecked = !!habit.completedDates[d.key];
+                      const isBeforeStart = Boolean(habit.startDate && d.key < habit.startDate);
                       return (
                         <td key={d.key} className="py-4 px-2 text-center">
                           <button
+                            type="button"
                             onClick={() => onToggleHabitDay(habit.id, d.key)}
                             disabled={d.isFuture}
                             title={
                               d.isFuture
                                 ? 'روزهای آینده قابل ثبت نیستند'
+                                : isBeforeStart
+                                ? `${d.weekdayFull} ${d.dayNumber} ${d.monthName} (پیش از تاریخ شروع عادت)`
                                 : `${d.weekdayFull} ${d.dayNumber} ${d.monthName}`
                             }
                             className={`w-9 h-9 rounded-xl mx-auto flex items-center justify-center transition-all duration-200 ${
                               d.isFuture
                                 ? 'opacity-25 cursor-not-allowed bg-slate-100 dark:bg-slate-800/50 border border-dashed border-slate-300 dark:border-slate-700'
                                 : isChecked
-                                ? 'text-white shadow-md scale-100 hover:opacity-90 animate-pop'
-                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-transparent hover:text-slate-400'
+                                ? 'text-white shadow-md scale-100 hover:opacity-90 animate-pop cursor-pointer'
+                                : isBeforeStart
+                                ? 'opacity-45 bg-slate-100/70 dark:bg-slate-800/40 text-transparent hover:text-slate-400 cursor-pointer'
+                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-transparent hover:text-slate-400 cursor-pointer'
                             }`}
                             style={
                               isChecked
@@ -548,7 +709,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
 
                     <td className="py-4 px-3">
                       <div className="w-28 mx-auto space-y-1">
-                        <div className="flex items-center justify-between text-[11px]">
+                        <div className="flex items-center justify-between text-[11px] tabular-nums">
                           <span className="font-bold text-slate-700 dark:text-slate-200">
                             {toPersianNum(weekDoneCount)}/{toPersianNum(goal)}
                           </span>
@@ -578,10 +739,10 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                               streaks.current > 0 ? 'fill-amber-500/20' : ''
                             }`}
                           />
-                          <span>{toPersianNum(streaks.current)} روز</span>
+                          <span>فعلی: {toPersianNum(streaks.current)} روز</span>
                         </div>
                         <span className="text-[10px] text-slate-400">
-                          رکورد: {toPersianNum(streaks.best)}
+                          بهترین رکورد: {toPersianNum(streaks.best)} روز
                         </span>
                       </div>
                     </td>
@@ -613,52 +774,52 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               })}
             </tbody>
           </table>
+        </div>
 
-          {filteredHabits.length === 0 && (
-            <div
-              data-testid="habits-empty-state"
-              className="py-12 px-4 text-center space-y-3 rounded-2xl bg-slate-50/70 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800 mt-3"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 mx-auto flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                <Sparkles className="w-7 h-7" />
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
-                  {habits.length === 0
-                    ? 'هنوز هیچ عادتی ثبت نشده است'
-                    : 'هیچ عادتی با فیلتر یا جستجوی فعلی مطابقت ندارد'}
-                </h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                  {habits.length === 0
-                    ? 'برای شروع مسیر رشد فردی، اولین عادت روزانه خود را با هدف هفتگی دلخواه ایجاد کنید.'
-                    : 'می‌توانید فیلتر دسته‌بندی یا عبارت جستجو را پاک کنید یا عادت جدیدی بسازید.'}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+        {filteredHabits.length === 0 && (
+          <div
+            data-testid="habits-empty-state"
+            className="py-12 px-4 text-center space-y-3 rounded-2xl bg-slate-50/70 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800 mt-3"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 mx-auto flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+              <Sparkles className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
+                {habits.length === 0
+                  ? 'هنوز هیچ عادتی ثبت نشده است'
+                  : 'هیچ عادتی با فیلتر یا جست‌وجوی فعلی مطابقت ندارد'}
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                {habits.length === 0
+                  ? 'برای شروع پیگیری عادت‌ها، اولین عادت روزانه یا هفتگی خود را ایجاد کنید.'
+                  : 'می‌توانید فیلتر دسته‌بندی یا عبارت جست‌وجو را پاک کنید یا عادت جدیدی بسازید.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => onOpenHabitModal()}
+                className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                افزودن عادت جدید
+              </button>
+              {(selectedCategory !== 'all' || searchQuery.trim() !== '') && (
                 <button
                   type="button"
-                  onClick={() => onOpenHabitModal()}
-                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                  onClick={() => {
+                    setSelectedCategory('all');
+                    setSearchQuery('');
+                  }}
+                  className="inline-flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
                 >
-                  <Plus className="w-4 h-4" />
-                  افزودن عادت جدید
+                  پاک کردن فیلترها
                 </button>
-                {(selectedCategory !== 'all' || searchQuery.trim() !== '') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCategory('all');
-                      setSearchQuery('');
-                    }}
-                    className="inline-flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
-                  >
-                    پاک کردن فیلترها
-                  </button>
-                )}
-              </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </section>
     </div>
   );

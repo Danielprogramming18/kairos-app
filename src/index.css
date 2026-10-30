@@ -2,40 +2,40 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --bg-app: #f8fafc;
-  --bg-surface-1: #ffffff;
-  --bg-surface-2: #f1f5f9;
-  --bg-elevated: #ffffff;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --border-subtle: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --accent-primary: #4f46e5;
-  --accent-primary-hover: #4338ca;
+  --bg-app: #F8F9FA;
+  --bg-surface-1: #FFFFFF;
+  --bg-surface-2: #F1F3F5;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+  --border-subtle: #E5E7EB;
+  --border-strong: #D1D5DB;
+  --accent-primary: #4F46E5;
+  --accent-primary-hover: #4338CA;
   --accent-subtle: rgba(79, 70, 229, 0.08);
-  --status-success: #16a34a;
-  --status-warning: #d97706;
-  --status-danger: #dc2626;
+  --status-success: #16A34A;
+  --status-warning: #D97706;
+  --status-danger: #DC2626;
   color-scheme: light;
 }
 
 .dark {
-  --bg-app: #0b0f17;
-  --bg-surface-1: #111827;
-  --bg-surface-2: #1e293b;
-  --bg-elevated: #1e293b;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --border-subtle: #1e293b;
-  --border-strong: #334155;
-  --accent-primary: #6366f1;
-  --accent-primary-hover: #818cf8;
+  --bg-app: #111315;
+  --bg-surface-1: #181B1F;
+  --bg-surface-2: #20242A;
+  --bg-elevated: #20242A;
+  --text-primary: #F3F4F6;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+  --border-subtle: #2A2F37;
+  --border-strong: #374151;
+  --accent-primary: #6366F1;
+  --accent-primary-hover: #818CF8;
   --accent-subtle: rgba(99, 102, 241, 0.14);
-  --status-success: #22c55e;
-  --status-warning: #f59e0b;
-  --status-danger: #ef4444;
+  --status-success: #22C55E;
+  --status-warning: #F59E0B;
+  --status-danger: #EF4444;
   color-scheme: dark;
 }
 
@@ -56,6 +56,7 @@
     color: var(--text-primary);
     font-feature-settings: "ss01";
     text-rendering: optimizeLegibility;
+    line-height: 1.65;
   }
 
   code, pre, kbd, samp, .font-mono {
@@ -116,21 +117,21 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
+  background: rgba(156, 163, 175, 0.35);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
+  background: rgba(156, 163, 175, 0.55);
 }
 
 /* Pop animation for habit checkmark */
 @keyframes pop {
-  0% { transform: scale(0.88); }
-  50% { transform: scale(1.08); }
+  0% { transform: scale(0.92); }
+  50% { transform: scale(1.05); }
   100% { transform: scale(1); }
 }
 .animate-pop {
-  animation: pop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  animation: pop 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
 /* Hide scrollbar for horizontal pills */

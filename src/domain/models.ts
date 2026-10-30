@@ -100,6 +100,7 @@ export interface FocusSessionEntity extends AuditableEntity {
   phase: FocusSessionPhase;
   plannedMinutes: number;
   durationMinutes: number;
+  durationSeconds?: number;
   dateKey: LocalDateKey;
   startedAt: ISODateTimeString;
   endedAt: ISODateTimeString;
@@ -109,6 +110,7 @@ export interface FocusSessionEntity extends AuditableEntity {
 export interface ActiveTimerState {
   isRunning: boolean;
   phase: FocusSessionPhase;
+  activeSessionId?: EntityId | null;
   taskId?: EntityId | null;
   taskTitle?: string;
   durationSeconds: number;
@@ -116,6 +118,23 @@ export interface ActiveTimerState {
   startedAtEpochMs: number | null;
   targetEndEpochMs: number | null;
   updatedAt: ISODateTimeString;
+}
+
+export class StorageConflictError extends Error {
+  public readonly code = 'CONFLICT_STALE_REVISION' as const;
+  public readonly entityId: EntityId;
+  public readonly expectedRevision: number;
+  public readonly actualRevision: number;
+
+  constructor(entityId: EntityId, expectedRevision: number, actualRevision: number) {
+    super(
+      `تداخل ویرایش همزمان برای رکورد (${entityId}): نسخهٔ فعلی در پایگاه‌داده (${actualRevision}) با نسخهٔ در دست ویرایش (${expectedRevision}) تفاوت دارد. تغییرات شما در فرم حفظ شد تا بازنویسی ناخواسته رخ ندهد.`
+    );
+    this.name = 'StorageConflictError';
+    this.entityId = entityId;
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
+  }
 }
 
 export interface UserSettingsEntity {

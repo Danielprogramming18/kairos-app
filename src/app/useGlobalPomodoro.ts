@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
-import { FocusSession, Task } from '../types';
-import { getTodayKey } from '../utils/persianDate';
-import { soundManager } from '../utils/soundEffects';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createEntityId } from '../domain/models';
 import { PlatformContainer } from '../application/repositories';
+import { FocusSession, Task } from '../types';
+import { getDateKey, toPersianNum } from '../utils/persianDate';
 import {
+  clampFocusMinutes,
   computeActualElapsedMinutes,
+  computeActualElapsedSeconds,
   computeRemainingSeconds,
   createInitialTimerState,
   evaluateTimerTick,
@@ -16,288 +17,569 @@ import {
   startTimer,
   transitionTimerPhase,
 } from '../utils/pomodoroEngine';
+import { playAlertBeep, playSuccessSound } from '../utils/soundEffects';
 
 const ACTIVE_TIMER_STORAGE_KEY = 'kairos_active_timer_v1';
-const PRESET_STORAGE_KEY = 'kairos_pomodoro_preset_v1';
 
-function loadSavedPreset(): 25 | 45 | 60 {
-  try {
-    const raw = Number(localStorage.getItem(PRESET_STORAGE_KEY));
-    if (raw === 25 || raw === 45 || raw === 60) return raw;
-  } catch {}
-  return 45;
-}
-
-function loadSavedTimerState(
-  defaultPreset: 25 | 45 | 60,
-  activeTaskId?: string
-): ExtendedActiveTimerState {
+function loadInitialTimerState(): ExtendedActiveTimerState {
   try {
     const raw = localStorage.getItem(ACTIVE_TIMER_STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as ExtendedActiveTimerState;
-      if (
-        parsed &&
-        typeof parsed.durationSeconds === 'number' &&
-        (parsed.phase === 'work' ||
-          parsed.phase === 'short_break' ||
-          parsed.phase === 'long_break')
-      ) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.durationSeconds === 'number') {
+        const safePreset = clampFocusMinutes(parsed.selectedPresetMinutes, 45);
         return {
+          ...createInitialTimerState(safePreset),
           ...parsed,
-          selectedPresetMinutes:
-            parsed.selectedPresetMinutes === 25 ||
-            parsed.selectedPresetMinutes === 45 ||
-            parsed.selectedPresetMinutes === 60
-              ? parsed.selectedPresetMinutes
-              : defaultPreset,
+          selectedPresetMinutes: safePreset,
           completedWorkCycles: Number(parsed.completedWorkCycles) || 0,
-          taskId: activeTaskId || parsed.taskId || null,
         };
       }
     }
-  } catch {}
-  return createInitialTimerState(defaultPreset, activeTaskId || null);
+  } catch {
+    // Fallback to clean state
+  }
+  return createInitialTimerState(45);
+}
+
+export interface PendingTimerConfirmation {
+  kind: 'switch_task' | 'change_duration' | 'reset' | 'skip';
+  elapsedSeconds: number;
+  elapsedMinutes: number;
+  currentTaskId: string | null;
+  currentTaskTitle?: string;
+  targetTaskId?: string | null;
+  targetTaskTitle?: string;
+  targetDurationMinutes?: number;
 }
 
 export interface GlobalPomodoroController {
   timerState: ExtendedActiveTimerState;
   timeLeft: number;
+  elapsedSeconds: number;
   elapsedMinutes: number;
-  progressPercent: number;
+  pendingConfirmation: PendingTimerConfirmation | null;
   handleTogglePlay: () => void;
   handleReset: () => void;
   handleSkip: () => void;
-  handlePresetChange: (mins: 25 | 45 | 60) => void;
-  handleSelectTask: (taskId: string | null) => void;
+  handlePresetChange: (mins: number) => void;
+  handleSelectTask: (taskId: string, suggestedDurationMinutes?: number) => void;
+  handleStartFocusOnTask: (taskId: string, taskTitle: string, durationMinutes?: number) => void;
   handleFinishEarlyAndLog: () => void;
+  confirmPendingAndLogPrevious: () => void;
+  confirmPendingAndDiscardPrevious: () => void;
+  cancelPendingConfirmation: () => void;
 }
 
-interface UseGlobalPomodoroParams {
-  container: PlatformContainer;
+interface UseGlobalPomodoroOptions {
   tasks: Task[];
-  activeTaskId?: string;
-  onLogFocusSession: (session: FocusSession) => void;
+  soundEnabled: boolean;
+  container: PlatformContainer;
+  onLogSession: (session: FocusSession) => void;
+  onShowToast: (message: string) => void;
 }
 
-/**
- * Root-level Pomodoro Timer Engine (FIX-09).
- * Runs continuously in `App.tsx` regardless of which tab is mounted so that countdown completion,
- * phase transitions (`work` -> `short_break` / `long_break`), audio chime, and `FocusSession`
- * persistence happen reliably across all views.
- */
 export function useGlobalPomodoro({
-  container,
   tasks,
-  activeTaskId,
-  onLogFocusSession,
-}: UseGlobalPomodoroParams): GlobalPomodoroController {
-  const [timerState, setTimerState] = useState<ExtendedActiveTimerState>(() =>
-    loadSavedTimerState(loadSavedPreset(), activeTaskId)
-  );
-  const [nowEpochMs, setNowEpochMs] = useState<number>(() => Date.now());
+  soundEnabled,
+  container,
+  onLogSession,
+  onShowToast,
+}: UseGlobalPomodoroOptions): GlobalPomodoroController {
+  const [timerState, setTimerState] = useState<ExtendedActiveTimerState>(loadInitialTimerState);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingTimerConfirmation | null>(null);
 
-  const persistState = useCallback(
-    (next: ExtendedActiveTimerState) => {
-      setTimerState(next);
-      setNowEpochMs(Date.now());
-      try {
-        localStorage.setItem(ACTIVE_TIMER_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
-      container.focus.saveActiveTimerState(next).catch(() => {});
-    },
-    [container]
-  );
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
 
-  // Hydrate from repository if newer
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+
+  const onLogSessionRef = useRef(onLogSession);
+  onLogSessionRef.current = onLogSession;
+
+  const onShowToastRef = useRef(onShowToast);
+  onShowToastRef.current = onShowToast;
+
+  const loggedSessionIdsRef = useRef<Set<string>>(new Set());
+
+  // Hydrate active timer from PlatformContainer on mount if present
   useEffect(() => {
+    let mounted = true;
     container.focus
       .getActiveTimerState()
-      .then((repoState) => {
-        if (repoState && repoState.updatedAt > timerState.updatedAt) {
-          const ext = repoState as ExtendedActiveTimerState;
-          setTimerState((prev) => ({
-            ...prev,
-            ...ext,
-            selectedPresetMinutes: ext.selectedPresetMinutes || prev.selectedPresetMinutes,
-            completedWorkCycles: ext.completedWorkCycles ?? prev.completedWorkCycles,
-          }));
-        }
+      .then((persisted) => {
+        if (!mounted || !persisted) return;
+        setTimerState((prev) => {
+          const persistedMs = Date.parse(persisted.updatedAt || '');
+          const prevMs = Date.parse(prev.updatedAt || '');
+          if (Number.isFinite(persistedMs) && (!Number.isFinite(prevMs) || persistedMs > prevMs)) {
+            return {
+              ...prev,
+              ...persisted,
+            };
+          }
+          return prev;
+        });
       })
-      .catch(() => {});
+      .catch(() => {
+        // Ignore hydration error
+      });
+    return () => {
+      mounted = false;
+    };
   }, [container]);
 
-  // Sync activeTaskId prop and reset timer if switched while paused (BUG-16)
+  // Persist active timer state to both localStorage (fast synchronous snapshot) and Repository
   useEffect(() => {
-    if (activeTaskId && activeTaskId !== timerState.taskId) {
-      setTimerState((prev) => {
-        if (prev.isRunning) {
-          const nextRunning: ExtendedActiveTimerState = {
-            ...prev,
-            taskId: activeTaskId,
-            updatedAt: new Date().toISOString(),
-          };
-          try {
-            localStorage.setItem(ACTIVE_TIMER_STORAGE_KEY, JSON.stringify(nextRunning));
-          } catch {}
-          container.focus.saveActiveTimerState(nextRunning).catch(() => {});
-          return nextRunning;
-        }
-        const durationSeconds = getPhaseDurationSeconds(prev.selectedPresetMinutes, 'work');
-        const nextPaused: ExtendedActiveTimerState = {
-          ...prev,
-          phase: 'work',
-          taskId: activeTaskId,
-          durationSeconds,
-          remainingSecondsWhenPaused: durationSeconds,
-          startedAtEpochMs: null,
-          targetEndEpochMs: null,
-          updatedAt: new Date().toISOString(),
-        };
-        try {
-          localStorage.setItem(ACTIVE_TIMER_STORAGE_KEY, JSON.stringify(nextPaused));
-        } catch {}
-        container.focus.saveActiveTimerState(nextPaused).catch(() => {});
-        return nextPaused;
-      });
+    try {
+      localStorage.setItem(ACTIVE_TIMER_STORAGE_KEY, JSON.stringify(timerState));
+    } catch {
+      // Ignore storage quota errors
     }
-  }, [activeTaskId, container, timerState.taskId]);
+    container.focus.saveActiveTimerState(timerState).catch(() => {
+      // Ignore async persistence error
+    });
+  }, [timerState, container]);
 
-  // Global wall-clock tick & completion handler across all tabs
+  // Helper to log a work session idempotently
+  const logWorkSessionFromState = useCallback(
+    (
+      stateSnapshot: ExtendedActiveTimerState,
+      durationMins: number,
+      durationSecs: number,
+      endedAtEpochMs: number,
+      completedNaturally: boolean
+    ) => {
+      if (durationMins <= 0 && durationSecs < 30) return false;
+      const effectiveMins = Math.max(1, durationMins);
+      const sessionId =
+        stateSnapshot.activeSessionId ||
+        `fs_${stateSnapshot.startedAtEpochMs || endedAtEpochMs}_${stateSnapshot.taskId || 'general'}`;
+
+      if (loggedSessionIdsRef.current.has(sessionId)) {
+        return false;
+      }
+      loggedSessionIdsRef.current.add(sessionId);
+
+      const linkedTask = tasksRef.current.find((t) => t.id === stateSnapshot.taskId);
+      const endedDate = new Date(endedAtEpochMs);
+      const startedAtMs =
+        stateSnapshot.startedAtEpochMs && stateSnapshot.startedAtEpochMs < endedAtEpochMs
+          ? stateSnapshot.startedAtEpochMs
+          : endedAtEpochMs - durationSecs * 1000;
+
+      onLogSessionRef.current({
+        id: sessionId,
+        taskId: linkedTask?.id,
+        taskTitle: linkedTask?.title || stateSnapshot.taskTitle || 'تمرکز آزاد',
+        durationMinutes: effectiveMins,
+        durationSeconds: durationSecs,
+        plannedMinutes: Math.max(1, Math.round(stateSnapshot.durationSeconds / 60)),
+        phase: 'work',
+        dateKey: getDateKey(endedDate),
+        timestamp: endedAtEpochMs,
+        startedAt: new Date(startedAtMs).toISOString(),
+        endedAt: endedDate.toISOString(),
+        completedNaturally,
+      });
+      return true;
+    },
+    []
+  );
+
+  // Global tick loop: runs in App root regardless of active tab
   useEffect(() => {
+    const evaluateNow = () => {
+      const now = Date.now();
+      setNowTick(now);
+
+      setTimerState((current) => {
+        if (!current.isRunning) return current;
+        const tick = evaluateTimerTick(current, now, 4);
+        if (!tick.completedPhase || !tick.nextState) {
+          return current;
+        }
+
+        const completionEpochMs = tick.completedAtEpochMs ?? now;
+
+        // Timer phase just completed!
+        if (tick.completedWorkSession) {
+          if (soundEnabledRef.current) playSuccessSound();
+          logWorkSessionFromState(
+            {
+              ...current,
+              activeSessionId: tick.completedSessionId || current.activeSessionId,
+            },
+            tick.completedDurationMinutes,
+            tick.completedDurationSeconds,
+            completionEpochMs,
+            true
+          );
+
+          const isLong = tick.nextState.phase === 'long_break';
+          onShowToastRef.current(
+            isLong
+              ? `۴ چرخهٔ تمرکز کامل شد (${toPersianNum(tick.completedDurationMinutes)} دقیقه ثبت شد). زمان استراحت طولانی است.`
+              : `جلسهٔ تمرکز (${toPersianNum(tick.completedDurationMinutes)} دقیقه) ثبت شد. زمان استراحت کوتاه است.`
+          );
+        } else {
+          if (soundEnabledRef.current) playAlertBeep();
+          onShowToastRef.current('زمان استراحت به پایان رسید؛ آمادهٔ شروع مرحلهٔ بعدی هستید.');
+        }
+
+        return tick.nextState;
+      });
+    };
+
+    evaluateNow();
+
     if (!timerState.isRunning) return;
 
-    const checkTick = () => {
-      const now = Date.now();
-      setNowEpochMs(now);
-      const evaluation = evaluateTimerTick(timerState, now, 4);
-
-      if (evaluation.nextState) {
-        soundManager.playBell();
-        if (evaluation.completedWorkSession) {
-          const matchedTask = tasks.find((t) => t.id === timerState.taskId);
-          onLogFocusSession({
-            id: createEntityId('focus'),
-            taskId: timerState.taskId || undefined,
-            taskTitle: matchedTask?.title || 'جلسه تمرکز آزاد',
-            durationMinutes: evaluation.completedDurationMinutes,
-            dateKey: getTodayKey(),
-            timestamp: now,
-          });
-        }
-        persistState(evaluation.nextState);
-      }
-    };
-
-    checkTick();
-    const interval = setInterval(checkTick, 250);
-
+    const interval = setInterval(evaluateNow, 500);
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        checkTick();
+        evaluateNow();
       }
     };
-    window.addEventListener('focus', checkTick);
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener('focus', checkTick);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [timerState, tasks, onLogFocusSession, persistState]);
+  }, [timerState.isRunning, logWorkSessionFromState]);
 
-  const timeLeft = computeRemainingSeconds(timerState, nowEpochMs);
-  const elapsedMinutes = computeActualElapsedMinutes(timerState, nowEpochMs);
-  const totalTime = timerState.durationSeconds || timerState.selectedPresetMinutes * 60;
-  const progressPercent = Math.min(
-    100,
-    Math.max(0, Math.round(((totalTime - timeLeft) / totalTime) * 100))
-  );
+  const timeLeft = computeRemainingSeconds(timerState, nowTick);
+  const elapsedSeconds = computeActualElapsedSeconds(timerState, nowTick);
+  const elapsedMinutes = computeActualElapsedMinutes(timerState, nowTick);
 
-  const handlePresetChange = useCallback(
-    (mins: 25 | 45 | 60) => {
-      try {
-        localStorage.setItem(PRESET_STORAGE_KEY, String(mins));
-      } catch {}
-      container.settings
-        .saveSettings({
-          pomodoroWorkMinutes: mins,
-          pomodoroShortBreakMinutes: mins === 25 ? 5 : 15,
-        })
-        .catch(() => {});
-
-      const next: ExtendedActiveTimerState = {
-        ...timerState,
-        isRunning: false,
-        phase: 'work',
-        selectedPresetMinutes: mins,
-        durationSeconds: mins * 60,
-        remainingSecondsWhenPaused: mins * 60,
-        startedAtEpochMs: null,
-        targetEndEpochMs: null,
-        updatedAt: new Date().toISOString(),
-      };
-      persistState(next);
-    },
-    [container, persistState, timerState]
-  );
+  const hasProtectableWorkProgress =
+    timerState.phase === 'work' && (timerState.isRunning || elapsedSeconds >= 15);
 
   const handleTogglePlay = useCallback(() => {
     const now = Date.now();
-    if (timerState.isRunning) {
-      persistState(pauseTimer(timerState, now));
-    } else {
-      persistState(startTimer(timerState, now));
-    }
-  }, [persistState, timerState]);
+    setNowTick(now);
+    setTimerState((prev) => (prev.isRunning ? pauseTimer(prev, now) : startTimer(prev, now)));
+  }, []);
+
+  const applyImmediateReset = useCallback(() => {
+    const now = Date.now();
+    setNowTick(now);
+    setTimerState((prev) => resetTimer(prev, now));
+    setPendingConfirmation(null);
+  }, []);
 
   const handleReset = useCallback(() => {
-    persistState(resetTimer(timerState, Date.now()));
-  }, [persistState, timerState]);
+    const now = Date.now();
+    const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+    if (timerState.phase === 'work' && (timerState.isRunning || curElapsedSec >= 15)) {
+      const linkedTask = tasksRef.current.find((t) => t.id === timerState.taskId);
+      setPendingConfirmation({
+        kind: 'reset',
+        elapsedSeconds: curElapsedSec,
+        elapsedMinutes: computeActualElapsedMinutes(timerState, now),
+        currentTaskId: timerState.taskId || null,
+        currentTaskTitle: linkedTask?.title || timerState.taskTitle || 'تمرکز آزاد',
+      });
+      return;
+    }
+    applyImmediateReset();
+  }, [timerState, applyImmediateReset]);
+
+  const applyImmediateSkip = useCallback(() => {
+    const now = Date.now();
+    setNowTick(now);
+    setTimerState((prev) => transitionTimerPhase(prev, false, 4, now));
+    setPendingConfirmation(null);
+  }, []);
 
   const handleSkip = useCallback(() => {
-    persistState(transitionTimerPhase(timerState, false, 4, Date.now()));
-  }, [persistState, timerState]);
-
-  const handleSelectTask = useCallback(
-    (taskId: string | null) => {
-      persistState({
-        ...timerState,
-        taskId,
-        updatedAt: new Date().toISOString(),
+    const now = Date.now();
+    const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+    if (timerState.phase === 'work' && (timerState.isRunning || curElapsedSec >= 15)) {
+      const linkedTask = tasksRef.current.find((t) => t.id === timerState.taskId);
+      setPendingConfirmation({
+        kind: 'skip',
+        elapsedSeconds: curElapsedSec,
+        elapsedMinutes: computeActualElapsedMinutes(timerState, now),
+        currentTaskId: timerState.taskId || null,
+        currentTaskTitle: linkedTask?.title || timerState.taskTitle || 'تمرکز آزاد',
       });
+      return;
+    }
+    applyImmediateSkip();
+  }, [timerState, applyImmediateSkip]);
+
+  const applyImmediateDuration = useCallback((mins: number) => {
+    const safeMins = clampFocusMinutes(mins, 45);
+    const now = Date.now();
+    setNowTick(now);
+    setTimerState((prev) => {
+      const durationSeconds = getPhaseDurationSeconds(safeMins, 'work');
+      return {
+        ...prev,
+        isRunning: false,
+        phase: 'work',
+        activeSessionId: null,
+        selectedPresetMinutes: safeMins,
+        durationSeconds,
+        remainingSecondsWhenPaused: durationSeconds,
+        startedAtEpochMs: null,
+        targetEndEpochMs: null,
+        updatedAt: new Date(now).toISOString(),
+      };
+    });
+    setPendingConfirmation(null);
+  }, []);
+
+  const handlePresetChange = useCallback(
+    (mins: number) => {
+      const safeMins = clampFocusMinutes(mins, 45);
+      const now = Date.now();
+      const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+      if (timerState.phase === 'work' && (timerState.isRunning || curElapsedSec >= 15)) {
+        const linkedTask = tasksRef.current.find((t) => t.id === timerState.taskId);
+        setPendingConfirmation({
+          kind: 'change_duration',
+          elapsedSeconds: curElapsedSec,
+          elapsedMinutes: computeActualElapsedMinutes(timerState, now),
+          currentTaskId: timerState.taskId || null,
+          currentTaskTitle: linkedTask?.title || timerState.taskTitle || 'تمرکز آزاد',
+          targetDurationMinutes: safeMins,
+        });
+        return;
+      }
+      applyImmediateDuration(safeMins);
     },
-    [persistState, timerState]
+    [timerState, applyImmediateDuration]
   );
 
-  const handleFinishEarlyAndLog = useCallback(() => {
-    if (timerState.phase !== 'work' || elapsedMinutes < 1) return;
+  const applyTaskAndDurationSelection = useCallback(
+    (taskId: string, taskTitle?: string, durationMinutes?: number) => {
+      const now = Date.now();
+      setNowTick(now);
+      const taskObj = tasksRef.current.find((t) => t.id === taskId);
+      const resolvedTitle = taskTitle || taskObj?.title;
+      const resolvedMinutes =
+        durationMinutes !== undefined && durationMinutes > 0
+          ? clampFocusMinutes(durationMinutes, 45)
+          : taskObj?.duration && taskObj.duration > 0
+          ? clampFocusMinutes(taskObj.duration, 45)
+          : undefined;
+
+      setTimerState((prev) => {
+        const nextPreset = resolvedMinutes ?? prev.selectedPresetMinutes;
+        const durationSeconds = getPhaseDurationSeconds(nextPreset, 'work');
+        return {
+          ...prev,
+          isRunning: false,
+          phase: 'work',
+          activeSessionId: null,
+          taskId: taskId || null,
+          taskTitle: resolvedTitle,
+          selectedPresetMinutes: nextPreset,
+          durationSeconds,
+          remainingSecondsWhenPaused: durationSeconds,
+          startedAtEpochMs: null,
+          targetEndEpochMs: null,
+          updatedAt: new Date(now).toISOString(),
+        };
+      });
+      setPendingConfirmation(null);
+    },
+    []
+  );
+
+  const handleSelectTask = useCallback(
+    (taskId: string, suggestedDurationMinutes?: number) => {
+      const now = Date.now();
+      const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+      const normalizedNewId = taskId || null;
+      const normalizedOldId = timerState.taskId || null;
+
+      if (
+        normalizedNewId !== normalizedOldId &&
+        timerState.phase === 'work' &&
+        (timerState.isRunning || curElapsedSec >= 15)
+      ) {
+        const currentTask = tasksRef.current.find((t) => t.id === normalizedOldId);
+        const targetTask = tasksRef.current.find((t) => t.id === normalizedNewId);
+        setPendingConfirmation({
+          kind: 'switch_task',
+          elapsedSeconds: curElapsedSec,
+          elapsedMinutes: computeActualElapsedMinutes(timerState, now),
+          currentTaskId: normalizedOldId,
+          currentTaskTitle: currentTask?.title || timerState.taskTitle || 'تمرکز آزاد',
+          targetTaskId: normalizedNewId,
+          targetTaskTitle: targetTask?.title || 'تمرکز آزاد',
+          targetDurationMinutes:
+            suggestedDurationMinutes ??
+            (targetTask?.duration ? clampFocusMinutes(targetTask.duration, 45) : undefined),
+        });
+        return;
+      }
+
+      const targetTask = tasksRef.current.find((t) => t.id === normalizedNewId);
+      applyTaskAndDurationSelection(
+        taskId,
+        targetTask?.title,
+        suggestedDurationMinutes ?? targetTask?.duration
+      );
+    },
+    [timerState, applyTaskAndDurationSelection]
+  );
+
+  const handleStartFocusOnTask = useCallback(
+    (taskId: string, taskTitle: string, durationMinutes?: number) => {
+      const now = Date.now();
+      const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+      const safeDuration =
+        durationMinutes !== undefined && durationMinutes > 0
+          ? clampFocusMinutes(durationMinutes, 45)
+          : undefined;
+
+      // If timer is already running or has active work progress on another task/duration, ask user how to handle active session
+      if (
+        timerState.phase === 'work' &&
+        (timerState.isRunning || curElapsedSec >= 15) &&
+        (timerState.taskId !== taskId ||
+          (safeDuration !== undefined && timerState.selectedPresetMinutes !== safeDuration))
+      ) {
+        const currentTask = tasksRef.current.find((t) => t.id === timerState.taskId);
+        setPendingConfirmation({
+          kind: 'switch_task',
+          elapsedSeconds: curElapsedSec,
+          elapsedMinutes: computeActualElapsedMinutes(timerState, now),
+          currentTaskId: timerState.taskId || null,
+          currentTaskTitle: currentTask?.title || timerState.taskTitle || 'تمرکز آزاد',
+          targetTaskId: taskId,
+          targetTaskTitle: taskTitle,
+          targetDurationMinutes: safeDuration,
+        });
+        return;
+      }
+
+      // Otherwise apply the task and its exact duration immediately
+      applyTaskAndDurationSelection(taskId, taskTitle, safeDuration);
+    },
+    [timerState, applyTaskAndDurationSelection]
+  );
+
+  const executePendingAction = useCallback(
+    (conf: PendingTimerConfirmation) => {
+      if (conf.kind === 'reset') {
+        applyImmediateReset();
+      } else if (conf.kind === 'skip') {
+        applyImmediateSkip();
+      } else if (conf.kind === 'change_duration' && conf.targetDurationMinutes !== undefined) {
+        applyImmediateDuration(conf.targetDurationMinutes);
+      } else if (conf.kind === 'switch_task') {
+        applyTaskAndDurationSelection(
+          conf.targetTaskId || '',
+          conf.targetTaskTitle,
+          conf.targetDurationMinutes
+        );
+      } else {
+        setPendingConfirmation(null);
+      }
+    },
+    [
+      applyImmediateReset,
+      applyImmediateSkip,
+      applyImmediateDuration,
+      applyTaskAndDurationSelection,
+    ]
+  );
+
+  const confirmPendingAndLogPrevious = useCallback(() => {
+    if (!pendingConfirmation) return;
     const now = Date.now();
-    soundManager.playCheck();
-    const matchedTask = tasks.find((t) => t.id === timerState.taskId);
-    onLogFocusSession({
-      id: createEntityId('focus'),
-      taskId: timerState.taskId || undefined,
-      taskTitle: matchedTask?.title || 'جلسه تمرکز آزاد',
-      durationMinutes: elapsedMinutes,
-      dateKey: getTodayKey(),
-      timestamp: now,
-    });
-    const next = transitionTimerPhase(timerState, true, 4, now);
-    persistState(next);
-  }, [elapsedMinutes, onLogFocusSession, persistState, tasks, timerState]);
+    const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+    const curElapsedMin = Math.max(
+      1,
+      computeActualElapsedMinutes(timerState, now) || Math.ceil(curElapsedSec / 60)
+    );
+    if (curElapsedSec >= 15) {
+      logWorkSessionFromState(
+        {
+          ...timerState,
+          activeSessionId: timerState.activeSessionId || createEntityId('fs'),
+        },
+        curElapsedMin,
+        curElapsedSec,
+        now,
+        false
+      );
+      onShowToastRef.current(
+        `${toPersianNum(curElapsedMin)} دقیقه تمرکز برای «${
+          pendingConfirmation.currentTaskTitle || 'جلسهٔ قبلی'
+        }» ثبت شد.`
+      );
+    }
+    executePendingAction(pendingConfirmation);
+  }, [pendingConfirmation, timerState, logWorkSessionFromState, executePendingAction]);
+
+  const confirmPendingAndDiscardPrevious = useCallback(() => {
+    if (!pendingConfirmation) return;
+    executePendingAction(pendingConfirmation);
+  }, [pendingConfirmation, executePendingAction]);
+
+  const cancelPendingConfirmation = useCallback(() => {
+    setPendingConfirmation(null);
+  }, []);
+
+  const handleFinishEarlyAndLog = useCallback(() => {
+    const now = Date.now();
+    setNowTick(now);
+    const actualMins = computeActualElapsedMinutes(timerState, now);
+    const actualSecs = computeActualElapsedSeconds(timerState, now);
+    if (actualMins <= 0 || actualSecs < 30) {
+      onShowToastRef.current('حداقل ۳۰ ثانیه تمرکز برای ثبت در تاریخچه لازم است.');
+      return;
+    }
+
+    if (soundEnabledRef.current) playSuccessSound();
+    logWorkSessionFromState(
+      {
+        ...timerState,
+        activeSessionId: timerState.activeSessionId || createEntityId('fs'),
+      },
+      actualMins,
+      actualSecs,
+      now,
+      false
+    );
+
+    const linkedTask = tasksRef.current.find((t) => t.id === timerState.taskId);
+    onShowToastRef.current(
+      `${toPersianNum(actualMins)} دقیقه تمرکز واقعی${
+        linkedTask ? ` روی «${linkedTask.title}»` : ''
+      } ثبت شد.`
+    );
+    setTimerState((prev) => transitionTimerPhase(prev, true, 4, now));
+    setPendingConfirmation(null);
+  }, [timerState, logWorkSessionFromState]);
+
+  void hasProtectableWorkProgress;
 
   return {
     timerState,
     timeLeft,
+    elapsedSeconds,
     elapsedMinutes,
-    progressPercent,
+    pendingConfirmation,
     handleTogglePlay,
     handleReset,
     handleSkip,
     handlePresetChange,
     handleSelectTask,
+    handleStartFocusOnTask,
     handleFinishEarlyAndLog,
+    confirmPendingAndLogPrevious,
+    confirmPendingAndDiscardPrevious,
+    cancelPendingConfirmation,
   };
 }

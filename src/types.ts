@@ -81,6 +81,7 @@ export interface FocusSession {
   taskId?: string;
   taskTitle?: string;
   durationMinutes: number;
+  durationSeconds?: number;
   plannedMinutes?: number;
   phase?: 'work' | 'short_break' | 'long_break';
   dateKey: string;

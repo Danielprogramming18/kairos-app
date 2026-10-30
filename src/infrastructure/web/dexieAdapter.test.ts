@@ -655,3 +655,126 @@ test('restoreBackup aborts and leaves existing DB intact if pre-restore snapshot
   assert.equal(remainingTasks[0].title, 'دادهٔ محافظت‌شدهٔ کاربر');
 });
 
+test('FIX-15: expectedRevision enforces optimistic concurrency on upsertTask, upsertHabit, and upsertNote and logFocusSession is idempotent', async () => {
+  const db = new KairosWebDatabase('test_concurrency_' + Date.now());
+  const adapter = new WebDexiePlatformAdapter(db);
+  const now = nowIso();
+
+  // 1. Task optimistic concurrency
+  const createdTask = await adapter.tasks.upsertTask({
+    id: 't_conc_1',
+    title: 'نسخه اول کار',
+    status: 'todo',
+    completed: false,
+    priority: 1,
+    duration: 25,
+    targetDate: '2026-03-30',
+    category: 'work',
+    tags: [],
+    subtasks: [],
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+    revision: 1,
+  });
+  assert.equal(createdTask.revision, 2);
+
+  // Tab B updates with matching expectedRevision = 2 -> succeeds (revision becomes 3)
+  const updatedByTabB = await adapter.tasks.upsertTask(
+    { ...createdTask, title: 'نسخه دوم از تب B' },
+    { expectedRevision: 2 }
+  );
+  assert.equal(updatedByTabB.revision, 3);
+
+  // Tab A tries to overwrite using stale expectedRevision = 2 -> rejected with CONFLICT_STALE_REVISION!
+  await assert.rejects(
+    () =>
+      adapter.tasks.upsertTask(
+        { ...createdTask, title: 'نسخه قدیمی از تب A' },
+        { expectedRevision: 2 }
+      ),
+    (err: any) => err && err.code === 'CONFLICT_STALE_REVISION' && err.actualRevision === 3
+  );
+
+  // Verify Tab B's title was NOT overwritten
+  const currentTask = await adapter.tasks.getTaskById('t_conc_1');
+  assert.equal(currentTask?.title, 'نسخه دوم از تب B');
+
+  // 2. Habit optimistic concurrency
+  const createdHabit = await adapter.habits.upsertHabit({
+    id: 'h_conc_1',
+    title: 'عادت همزمانی',
+    category: 'health',
+    emoji: '🌿',
+    color: '#10b981',
+    frequencyType: 'daily',
+    weeklyGoal: 7,
+    startDate: '2026-03-30',
+    archived: false,
+    completedDates: {},
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+    revision: 1,
+  });
+  assert.equal(createdHabit.revision, 2);
+
+  await adapter.habits.upsertHabit(
+    { ...createdHabit, title: 'عادت به‌روزشده' },
+    { expectedRevision: 2 }
+  );
+  await assert.rejects(
+    () =>
+      adapter.habits.upsertHabit(
+        { ...createdHabit, title: 'عادت قدیمی' },
+        { expectedRevision: 2 }
+      ),
+    (err: any) => err && err.code === 'CONFLICT_STALE_REVISION'
+  );
+
+  // 3. Note optimistic concurrency
+  const createdNote = await adapter.notes.upsertNote({
+    id: 'n_conc_1',
+    kind: 'useful_info',
+    title: 'یادداشت اول',
+    content: 'متن اول',
+    category: 'note',
+    pinned: false,
+    tags: [],
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+    revision: 1,
+  });
+  assert.equal(createdNote.revision, 2);
+
+  await adapter.notes.upsertNote(
+    { ...createdNote, content: 'متن جدیدتر' },
+    { expectedRevision: 2 }
+  );
+  await assert.rejects(
+    () =>
+      adapter.notes.upsertNote(
+        { ...createdNote, content: 'متن قدیمی‌تر' },
+        { expectedRevision: 2 }
+      ),
+    (err: any) => err && err.code === 'CONFLICT_STALE_REVISION'
+  );
+
+  // 4. Idempotent logFocusSession on duplicate session.id
+  const sessionEntity = focusSessionToDomainEntity({
+    id: 'fs_idempotent_1',
+    taskId: 't_conc_1',
+    taskTitle: 'نسخه دوم از تب B',
+    durationMinutes: 10,
+    durationSeconds: 600,
+    dateKey: '2026-03-30',
+    timestamp: Date.now(),
+  });
+  await adapter.focus.logFocusSession(sessionEntity);
+  await adapter.focus.logFocusSession(sessionEntity);
+  const allSessions = await adapter.focus.listFocusSessions();
+  assert.equal(allSessions.length, 1);
+  assert.equal(allSessions[0].durationMinutes, 10);
+});
+

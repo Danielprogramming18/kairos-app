@@ -18,6 +18,10 @@ import {
   UserSettingsEntity,
 } from '../domain/models';
 
+export interface SaveMutationOptions {
+  expectedRevision?: number;
+}
+
 export interface TaskFilter {
   includeDeleted?: boolean;
   targetDate?: LocalDateKey;
@@ -28,7 +32,7 @@ export interface TaskFilter {
 export interface TaskRepository {
   listTasks(filter?: TaskFilter): Promise<TaskEntity[]>;
   getTaskById(id: EntityId): Promise<TaskEntity | null>;
-  upsertTask(task: TaskEntity): Promise<TaskEntity>;
+  upsertTask(task: TaskEntity, options?: SaveMutationOptions): Promise<TaskEntity>;
   upsertTasksBatch(tasks: TaskEntity[]): Promise<TaskEntity[]>;
   softDeleteTask(id: EntityId): Promise<void>;
   restoreTask(id: EntityId): Promise<TaskEntity | null>;
@@ -38,7 +42,7 @@ export interface TaskRepository {
 export interface HabitRepository {
   listHabits(includeDeleted?: boolean): Promise<HabitEntity[]>;
   getHabitById(id: EntityId): Promise<HabitEntity | null>;
-  upsertHabit(habit: HabitEntity): Promise<HabitEntity>;
+  upsertHabit(habit: HabitEntity, options?: SaveMutationOptions): Promise<HabitEntity>;
   toggleHabitDate(habitId: EntityId, dateKey: LocalDateKey): Promise<HabitEntity | null>;
   listHabitEntries(habitId?: EntityId): Promise<HabitEntryEntity[]>;
   softDeleteHabit(id: EntityId): Promise<void>;
@@ -48,7 +52,7 @@ export interface HabitRepository {
 
 export interface NoteRepository {
   listNotes(kind?: NoteKind, includeDeleted?: boolean): Promise<NoteEntity[]>;
-  upsertNote(note: NoteEntity): Promise<NoteEntity>;
+  upsertNote(note: NoteEntity, options?: SaveMutationOptions): Promise<NoteEntity>;
   softDeleteNote(id: EntityId): Promise<void>;
   restoreNote(id: EntityId): Promise<NoteEntity | null>;
   hardDeleteNote(id: EntityId): Promise<void>;

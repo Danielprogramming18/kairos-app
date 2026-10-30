@@ -1,21 +1,23 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Lightbulb, Plus, Trash2, ArrowUpRight, Search, Edit3, X, Check } from 'lucide-react';
 import { Idea, IdeaCategory, Task } from '../types';
 import { toPersianNum } from '../utils/persianDate';
 
 export const IDEA_CATEGORIES: Record<string, { label: string; color: string }> = {
   all: { label: 'همه ایده‌ها', color: '#6366f1' },
-  project: { label: 'پروژه و کدنویسی 💻', color: '#8b5cf6' },
-  learning: { label: 'آموزش و مهارت 📚', color: '#3b82f6' },
-  business: { label: 'کسب‌وکار و محتوا 💼', color: '#10b981' },
-  personal: { label: 'شخصی و تفریح 🎸', color: '#f59e0b' },
+  project: { label: 'پروژه و کدنویسی', color: '#8b5cf6' },
+  learning: { label: 'آموزش و مهارت', color: '#3b82f6' },
+  business: { label: 'کسب‌وکار و محتوا', color: '#10b981' },
+  personal: { label: 'شخصی و روزمره', color: '#f59e0b' },
 };
+
+const IDEA_DRAFT_STORAGE_KEY = 'kairos_idea_draft_v1';
 
 interface NotesAndIdeasViewProps {
   ideas: Idea[];
   tasks?: Task[];
-  onAddIdea: (idea: Omit<Idea, 'id' | 'createdAt'>) => void;
-  onUpdateIdea?: (id: string, data: Partial<Idea>) => void;
+  onAddIdea: (idea: Omit<Idea, 'id' | 'createdAt'>) => Promise<boolean> | boolean | void;
+  onUpdateIdea?: (id: string, data: Partial<Idea>) => Promise<boolean> | boolean | void;
   onConvertIdeaToTask: (ideaId: string) => void;
   onDeleteIdea: (ideaId: string) => void;
 }
@@ -28,47 +30,117 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
   onConvertIdeaToTask,
   onDeleteIdea,
 }) => {
-  const [title, setTitle] = useState('');
-  const [note, setNote] = useState('');
-  const [category, setCategory] = useState<IdeaCategory>('project');
+  const [title, setTitle] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(IDEA_DRAFT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved).title || '';
+    } catch {
+      // ignore
+    }
+    return '';
+  });
+  const [note, setNote] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(IDEA_DRAFT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved).note || '';
+    } catch {
+      // ignore
+    }
+    return '';
+  });
+  const [category, setCategory] = useState<IdeaCategory>(() => {
+    try {
+      const saved = sessionStorage.getItem(IDEA_DRAFT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved).category || 'project';
+    } catch {
+      // ignore
+    }
+    return 'project';
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmCancelEdit, setConfirmCancelEdit] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState<number>(50);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-
-    if (editingId && onUpdateIdea) {
-      onUpdateIdea(editingId, {
-        title: title.trim(),
-        note: note.trim() || undefined,
-        category,
-      });
-      setEditingId(null);
-    } else {
-      onAddIdea({
-        title: title.trim(),
-        note: note.trim() || undefined,
-        category,
-      });
+  useEffect(() => {
+    if (!editingId) {
+      try {
+        sessionStorage.setItem(
+          IDEA_DRAFT_STORAGE_KEY,
+          JSON.stringify({ title, note, category })
+        );
+      } catch {
+        // ignore
+      }
     }
-    setTitle('');
-    setNote('');
+  }, [title, note, category, editingId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      let ok: boolean | void = true;
+      if (editingId && onUpdateIdea) {
+        ok = await onUpdateIdea(editingId, {
+          title: title.trim(),
+          note: note.trim() || undefined,
+          category,
+        });
+        if (ok !== false) {
+          setEditingId(null);
+          setConfirmCancelEdit(false);
+        }
+      } else {
+        ok = await onAddIdea({
+          title: title.trim(),
+          note: note.trim() || undefined,
+          category,
+        });
+      }
+
+      if (ok !== false) {
+        setTitle('');
+        setNote('');
+        try {
+          sessionStorage.removeItem(IDEA_DRAFT_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleStartEdit = (idea: Idea) => {
     setEditingId(idea.id);
+    setConfirmCancelEdit(false);
     setTitle(idea.title);
     setNote(idea.note || '');
     setCategory(idea.category);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = (force = false) => {
+    if (!force && editingId) {
+      const original = ideas.find((i) => i.id === editingId);
+      const isDirty =
+        original &&
+        (title.trim() !== original.title.trim() ||
+          note.trim() !== (original.note || '').trim() ||
+          category !== original.category);
+      if (isDirty && !confirmCancelEdit) {
+        setConfirmCancelEdit(true);
+        return;
+      }
+    }
     setEditingId(null);
+    setConfirmCancelEdit(false);
     setTitle('');
     setNote('');
     setCategory('project');
@@ -88,26 +160,50 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
   return (
     <div className="space-y-6">
       {/* 1. Fast Add / Edit Idea Form */}
-      <section className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="flex items-center justify-between gap-2">
+      <section className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
               <Lightbulb className="w-5 h-5 text-amber-500" />
-              <span>بانک ایده‌ها (تخلیه بار شناختی ذهن)</span>
+              <span>ایده‌ها و جرقه‌های ذهنی</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              هر ایده، پروژه یا آموزشی که به ذهنت می‌رسد را با دسته‌بندی اینجا ثبت کن تا ذهنت هنگام تمرکز درگیرش نماند.
+              هر ایده، پروژه یا نکته‌ای را سریع ثبت کنید و هر زمان آماده بود به کار تبدیل نمایید.
             </p>
           </div>
           {editingId && (
-            <button
-              type="button"
-              onClick={handleCancelEdit}
-              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>انصراف از ویرایش</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {confirmCancelEdit ? (
+                <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl text-xs">
+                  <span className="text-amber-700 dark:text-amber-300 font-bold">
+                    تغییرات ذخیره نشده است. لغو شود؟
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelEdit(true)}
+                    className="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-bold cursor-pointer"
+                  >
+                    بله
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCancelEdit(false)}
+                    className="px-2 py-0.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold cursor-pointer"
+                  >
+                    ادامه ویرایش
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleCancelEdit(false)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>انصراف از ویرایش</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -139,26 +235,27 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
               aria-label="دسته‌بندی ایده"
               className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             >
-              <option value="project">پروژه و کدنویسی 💻</option>
-              <option value="learning">آموزش و مهارت 📚</option>
-              <option value="business">کسب‌وکار و محتوا 💼</option>
-              <option value="personal">شخصی و تفریح 🎸</option>
+              <option value="project">پروژه و کدنویسی</option>
+              <option value="learning">آموزش و مهارت</option>
+              <option value="business">کسب‌وکار و محتوا</option>
+              <option value="personal">شخصی و روزمره</option>
             </select>
           </div>
           <div className="md:col-span-1">
             <button
               type="submit"
-              className="w-full h-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-indigo-600/25 transition cursor-pointer"
+              disabled={!title.trim() || isSaving}
+              className="w-full h-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>{editingId ? 'ذخیره' : 'ثبت'}</span>
+              <span>{isSaving ? '...' : editingId ? 'ذخیره' : 'ثبت'}</span>
             </button>
           </div>
         </form>
       </section>
 
       {/* 2. Filters & Search */}
-      <section className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
+      <section className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
             {Object.entries(IDEA_CATEGORIES).map(([key, info]) => {
@@ -170,16 +267,17 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
               return (
                 <button
                   key={key}
+                  type="button"
                   onClick={() => setSelectedCategory(key)}
                   className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
                     active
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                      ? 'bg-indigo-600 text-white shadow-sm'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                   }`}
                 >
                   <span>{info.label}</span>
                   <span
-                    className={`px-1.5 py-0.2 rounded-md text-[10px] ${
+                    className={`px-1.5 py-0.2 rounded-md text-[10px] tabular-nums ${
                       active ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700'
                     }`}
                   >
@@ -196,7 +294,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="جستجو در ایده‌ها..."
+              placeholder="جست‌وجو در ایده‌ها..."
               className="w-full sm:w-48 pr-9 pl-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -213,7 +311,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
             return (
               <div
                 key={idea.id}
-                className="p-5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex flex-col justify-between gap-4 hover:-translate-y-0.5 transition"
+                className="p-5 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex flex-col justify-between gap-4 transition"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -251,12 +349,12 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
                     {alreadyConverted ? (
                       <>
                         <Check className="w-3.5 h-3.5" />
-                        <span>در لیست کارها موجود است</span>
+                        <span>در فهرست کارها موجود است</span>
                       </>
                     ) : (
                       <>
                         <ArrowUpRight className="w-3.5 h-3.5" />
-                        <span>تبدیل به مأموریت میز کار</span>
+                        <span>تبدیل به کار</span>
                       </>
                     )}
                   </button>
@@ -299,13 +397,13 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
               <div className="space-y-1">
                 <h4 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
                   {ideas.length === 0
-                    ? 'بانک ایده‌های شما خالی است'
-                    : 'هیچ ایده‌ای با فیلتر یا جستجوی فعلی یافت نشد'}
+                    ? 'هنوز هیچ ایده‌ای ثبت نشده است'
+                    : 'هیچ ایده‌ای با فیلتر یا جست‌وجوی فعلی یافت نشد'}
                 </h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
                   {ideas.length === 0
-                    ? 'ایده‌ها و جرقه‌های ذهنی خود را اینجا ثبت کنید تا هنگام تمرکز عمیق، ذهن شما آرام بماند.'
-                    : 'می‌توانید فیلتر دسته‌بندی یا عبارت جستجو را پاک کنید یا ایده جدیدی ثبت نمایید.'}
+                    ? 'ایده‌ها و جرقه‌های ذهنی خود را اینجا ثبت کنید تا هنگام تمرکز، ذهن شما آرام بماند.'
+                    : 'می‌توانید فیلتر دسته‌بندی یا عبارت جست‌وجو را پاک کنید یا ایدهٔ جدیدی ثبت نمایید.'}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">

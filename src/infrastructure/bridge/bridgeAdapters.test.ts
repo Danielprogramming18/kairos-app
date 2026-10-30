@@ -236,3 +236,45 @@ test('WindowsDesktopPlatformAdapter fails closed when missing and handles async 
     (globalThis as any).window = originalWindow;
   }
 });
+
+test('FIX-20: Native handoff files (KairosAndroidBridge.java, main.rs, tauri.conf.json) strictly match BridgeProtocol 1.0.0 and security policies', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const rootDir = process.cwd();
+
+  const javaSource = fs.readFileSync(
+    path.join(rootDir, 'handoff/android/KairosAndroidBridge.java'),
+    'utf8'
+  );
+  const { ALLOWED_BRIDGE_OPERATIONS } = await import('./protocol');
+
+  // 1. Uses "version" (not legacy "protocolVersion") and matches BRIDGE_CONTRACT_VERSION
+  assert.ok(javaSource.includes(`CONTRACT_VERSION = "${BRIDGE_CONTRACT_VERSION}"`));
+  assert.equal(javaSource.includes('"protocolVersion"'), false);
+
+  // 2. Does NOT enable insecure setAllowUniversalAccessFromFileURLs(true)
+  assert.equal(javaSource.includes('setAllowUniversalAccessFromFileURLs(true)'), false);
+
+  // 3. Supports every operation in ALLOWED_BRIDGE_OPERATIONS
+  for (const op of ALLOWED_BRIDGE_OPERATIONS) {
+    assert.ok(
+      javaSource.includes(`"${op}"`),
+      `KairosAndroidBridge.java must implement operation "${op}"`
+    );
+  }
+
+  // 4. Windows Tauri config & Rust reference match package.json version and protocol
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+  const tauriConf = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'handoff/windows/tauri.conf.json'), 'utf8')
+  );
+  assert.equal(tauriConf.version, pkgJson.version);
+
+  const rustSource = fs.readFileSync(
+    path.join(rootDir, 'handoff/windows/src-tauri/src/main.rs'),
+    'utf8'
+  );
+  assert.ok(rustSource.includes(`BRIDGE_CONTRACT_VERSION: &str = "${BRIDGE_CONTRACT_VERSION}"`));
+  assert.ok(rustSource.includes('CONFLICT_STALE_REVISION'));
+});
+

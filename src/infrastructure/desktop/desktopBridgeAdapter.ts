@@ -139,8 +139,11 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
         this.transport.invoke<TaskFilter | undefined, TaskEntity[]>('tasks.list', filter),
       getTaskById: (id: EntityId) =>
         this.transport.invoke<{ id: EntityId }, TaskEntity | null>('tasks.getById', { id }),
-      upsertTask: (task: TaskEntity) =>
-        this.transport.invoke<{ task: TaskEntity }, TaskEntity>('tasks.upsert', { task }),
+      upsertTask: (task: TaskEntity, options?: { expectedRevision?: number }) =>
+        this.transport.invoke<{ task: TaskEntity; expectedRevision?: number }, TaskEntity>(
+          'tasks.upsert',
+          { task, expectedRevision: options?.expectedRevision }
+        ),
       upsertTasksBatch: (tasks: TaskEntity[]) =>
         this.transport.invoke<{ tasks: TaskEntity[] }, TaskEntity[]>('tasks.upsertBatch', {
           tasks,
@@ -160,8 +163,11 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
         }),
       getHabitById: (id: EntityId) =>
         this.transport.invoke<{ id: EntityId }, HabitEntity | null>('habits.getById', { id }),
-      upsertHabit: (habit: HabitEntity) =>
-        this.transport.invoke<{ habit: HabitEntity }, HabitEntity>('habits.upsert', { habit }),
+      upsertHabit: (habit: HabitEntity, options?: { expectedRevision?: number }) =>
+        this.transport.invoke<{ habit: HabitEntity; expectedRevision?: number }, HabitEntity>(
+          'habits.upsert',
+          { habit, expectedRevision: options?.expectedRevision }
+        ),
       toggleHabitDate: (habitId: EntityId, dateKey: LocalDateKey) =>
         this.transport.invoke<{ habitId: EntityId; dateKey: LocalDateKey }, HabitEntity | null>(
           'habits.toggleDate',
@@ -185,8 +191,11 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
           'notes.list',
           { kind, includeDeleted }
         ),
-      upsertNote: (note: NoteEntity) =>
-        this.transport.invoke<{ note: NoteEntity }, NoteEntity>('notes.upsert', { note }),
+      upsertNote: (note: NoteEntity, options?: { expectedRevision?: number }) =>
+        this.transport.invoke<{ note: NoteEntity; expectedRevision?: number }, NoteEntity>(
+          'notes.upsert',
+          { note, expectedRevision: options?.expectedRevision }
+        ),
       softDeleteNote: (id: EntityId) =>
         this.transport.invoke<{ id: EntityId }, void>('notes.softDelete', { id }),
       restoreNote: (id: EntityId) =>

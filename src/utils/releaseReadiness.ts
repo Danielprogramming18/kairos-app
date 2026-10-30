@@ -14,6 +14,8 @@ import {
 import { parseNaturalTaskInput } from './nlpTaskParser';
 import { detectHostCapabilities } from './hostCapabilities';
 
+export type DiagnosticCheckStatus = 'passed' | 'failed' | 'not_run' | 'unsupported';
+
 export interface DiagnosticCheckResult {
   id:
     | 'storage_check'
@@ -21,11 +23,14 @@ export interface DiagnosticCheckResult {
     | 'crypto_check'
     | 'calendar_check'
     | 'nlp_check'
-    | 'offline_bundle_check';
+    | 'offline_bundle_check'
+    | 'native_host_bridge_check';
   titleFa: string;
+  status: DiagnosticCheckStatus;
   passed: boolean;
   durationMs: number;
   detailFa: string;
+  scopeFa: string;
 }
 
 export interface SelfDiagnosticSummary {
@@ -40,14 +45,16 @@ export interface StorageProbePort {
 }
 
 /**
- * Runs a non-destructive live verification suite across all 6 core Kairos subsystems.
- * Never mutates or deletes user tasks, habits, notes, or focus sessions.
+ * Runs a non-destructive live verification suite across Kairos runtime subsystems.
+ * Honestly distinguishes `passed`, `failed`, `not_run`, and `unsupported` checks,
+ * and states the exact scope of each check without exaggerated claims (FIX-19).
  */
 export async function runSubsystemSelfDiagnostics(
   storagePort?: StorageProbePort
 ): Promise<SelfDiagnosticSummary> {
   const suiteStart = performance.now();
   const checks: DiagnosticCheckResult[] = [];
+  const caps = detectHostCapabilities();
 
   // 1. Storage Engine Check (Non-destructive repository health & read probe)
   {
@@ -57,37 +64,42 @@ export async function runSubsystemSelfDiagnostics(
         const health = await storagePort.verifyStorageHealth();
         checks.push({
           id: 'storage_check',
-          titleFa: 'تراکنش و سلامت پایگاه‌داده (IndexedDB / Repository)',
+          titleFa: 'اتصال و سلامت موتور ذخیره‌سازی (IndexedDB / Repository)',
+          status: health.healthy ? 'passed' : 'failed',
           passed: health.healthy,
           durationMs: Math.max(1, Math.round(performance.now() - t0)),
           detailFa: health.healthy
-            ? `اتصال به موتور «${health.engine}» بدون دست‌کاری داده‌های کاربر با موفقیت تأیید شد.`
+            ? `اتصال به موتور «${health.engine}» بدون دست‌کاری داده‌های کاربر تأیید شد.`
             : health.errorMessage || 'موتور ذخیره‌سازی وضعیت ناسالم گزارش کرد.',
+          scopeFa: 'بررسی دسترسی خواندن و وضعیت اتصال پایه (بدون نوشتن روی داده‌های کاربر).',
         });
       } else {
-        const caps = detectHostCapabilities();
         checks.push({
           id: 'storage_check',
-          titleFa: 'تراکنش و سلامت پایگاه‌داده (IndexedDB / Repository)',
+          titleFa: 'اتصال و سلامت موتور ذخیره‌سازی (IndexedDB / Repository)',
+          status: caps.hasIndexedDB ? 'passed' : 'failed',
           passed: caps.hasIndexedDB,
           durationMs: Math.max(1, Math.round(performance.now() - t0)),
           detailFa: caps.hasIndexedDB
-            ? 'موتور IndexedDB در محیط اجرا در دسترس است.'
+            ? 'رابط IndexedDB در این محیط در دسترس است.'
             : 'رابط IndexedDB در این محیط یافت نشد.',
+          scopeFa: 'بررسی وجود رابط IndexedDB در مرورگر یا WebView.',
         });
       }
     } catch (err: any) {
       checks.push({
         id: 'storage_check',
-        titleFa: 'تراکنش و سلامت پایگاه‌داده (IndexedDB / Repository)',
+        titleFa: 'اتصال و سلامت موتور ذخیره‌سازی (IndexedDB / Repository)',
+        status: 'failed',
         passed: false,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
         detailFa: `خطا در بررسی پایگاه‌داده: ${err?.message || 'نامشخص'}`,
+        scopeFa: 'بررسی دسترسی خواندن و وضعیت اتصال پایه.',
       });
     }
   }
 
-  // 2. Backup Contract V2 & SHA-256 Checksum Verification
+  // 2. Backup Contract V2 & Checksum Verification
   {
     const t0 = performance.now();
     try {
@@ -95,7 +107,7 @@ export async function runSubsystemSelfDiagnostics(
         tasks: [
           {
             id: 'diag-task-1',
-            title: 'مأموریت آزمایشی کایروس',
+            title: 'کار آزمایشی کایروس',
             completed: false,
             priority: 1,
             duration: 45,
@@ -119,20 +131,24 @@ export async function runSubsystemSelfDiagnostics(
         Boolean(sampleEnvelope.checksum);
       checks.push({
         id: 'backup_contract_check',
-        titleFa: 'قرارداد پشتیبان نسخهٔ ۲ و کنترل سلامت Checksum',
+        titleFa: 'ساختار پاکت پشتیبان نسخهٔ ۲ و کد کنترلی Checksum',
+        status: passed ? 'passed' : 'failed',
         passed,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
         detailFa: passed
-          ? 'ساخت پاکت BackupEnvelopeV2، محاسبهٔ Checksum و اعتبارسنجی رکوردها تأیید شد.'
+          ? 'ساخت پاکت BackupEnvelopeV2، محاسبهٔ Checksum و اعتبارسنجی ساختار رکوردها در حافظه تأیید شد.'
           : preview.error || 'خطا در اعتبارسنجی قرارداد پشتیبان نسخهٔ ۲',
+        scopeFa: 'تشخیص خرابی تصادفی فایل (Checksum جایگزین امضای دیجیتال رمزنگاری نیست).',
       });
     } catch (err: any) {
       checks.push({
         id: 'backup_contract_check',
-        titleFa: 'قرارداد پشتیبان نسخهٔ ۲ و کنترل سلامت Checksum',
+        titleFa: 'ساختار پاکت پشتیبان نسخهٔ ۲ و کد کنترلی Checksum',
+        status: 'failed',
         passed: false,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
         detailFa: `خطا در بررسی قرارداد پشتیبان: ${err?.message || 'نامشخص'}`,
+        scopeFa: 'تشخیص خرابی تصادفی فایل پشتیبان.',
       });
     }
   }
@@ -140,53 +156,69 @@ export async function runSubsystemSelfDiagnostics(
   // 3. Authenticated Encryption Round-Trip (PBKDF2-SHA256 + AES-256-GCM)
   {
     const t0 = performance.now();
-    try {
-      const sampleEnvelope = createPlainBackupEnvelope({
-        tasks: [],
-        habits: [],
-        ideas: [
-          {
-            id: 'diag-idea-1',
-            title: 'ایدهٔ آزمایشی رمزنگاری آفلاین',
-            note: 'تست PBKDF2 و AES-GCM',
-            category: 'project',
-            tags: ['امنیت'],
-            createdAt: '۱ فروردین',
-          },
-        ],
-        focusSessions: [],
-        usefulInfos: [],
-      });
-      const encrypted = await createEncryptedBackupEnvelope(sampleEnvelope, 'KairosDiag#1404');
-      const decrypted = await decryptBackupEnvelope(
-        JSON.stringify(encrypted),
-        'KairosDiag#1404'
-      );
-      const wrongPass = await decryptBackupEnvelope(
-        JSON.stringify(encrypted),
-        'WrongPass#0000'
-      );
-      const passed =
-        decrypted.valid &&
-        decrypted.counts?.ideas === 1 &&
-        !wrongPass.valid;
+    if (!caps.hasWebCryptoSubtle) {
       checks.push({
         id: 'crypto_check',
-        titleFa: 'رمزنگاری احرازهویت‌شده (AES-256-GCM + PBKDF2)',
-        passed,
-        durationMs: Math.max(1, Math.round(performance.now() - t0)),
-        detailFa: passed
-          ? 'رمزگذاری، رمزگشایی با گذرواژهٔ درست و رد گذرواژهٔ اشتباه با موفقیت تأیید شد.'
-          : 'خطا در چرخهٔ رمزنگاری یا رمزگشایی WebCrypto',
-      });
-    } catch (err: any) {
-      checks.push({
-        id: 'crypto_check',
-        titleFa: 'رمزنگاری احرازهویت‌شده (AES-256-GCM + PBKDF2)',
+        titleFa: 'رمزنگاری فایل پشتیبان (AES-256-GCM + PBKDF2)',
+        status: 'unsupported',
         passed: false,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
-        detailFa: `خطا در WebCrypto: ${err?.message || 'نامشخص'}`,
+        detailFa: 'رابط WebCrypto Subtle در این مبدأ غیرفعال است؛ فقط خروجی JSON معمولی در دسترس است.',
+        scopeFa: 'رمزگذاری فایل خروجی پشتیبان با گذرواژه.',
       });
+    } else {
+      try {
+        const sampleEnvelope = createPlainBackupEnvelope({
+          tasks: [],
+          habits: [],
+          ideas: [
+            {
+              id: 'diag-idea-1',
+              title: 'یادداشت آزمایشی رمزنگاری آفلاین',
+              note: 'تست PBKDF2 و AES-GCM',
+              category: 'project',
+              tags: ['امنیت'],
+              createdAt: '۱ فروردین',
+            },
+          ],
+          focusSessions: [],
+          usefulInfos: [],
+        });
+        const encrypted = await createEncryptedBackupEnvelope(sampleEnvelope, 'KairosDiag#1404');
+        const decrypted = await decryptBackupEnvelope(
+          JSON.stringify(encrypted),
+          'KairosDiag#1404'
+        );
+        const wrongPass = await decryptBackupEnvelope(
+          JSON.stringify(encrypted),
+          'WrongPass#0000'
+        );
+        const passed =
+          decrypted.valid &&
+          decrypted.counts?.ideas === 1 &&
+          !wrongPass.valid;
+        checks.push({
+          id: 'crypto_check',
+          titleFa: 'رمزنگاری فایل پشتیبان (AES-256-GCM + PBKDF2)',
+          status: passed ? 'passed' : 'failed',
+          passed,
+          durationMs: Math.max(1, Math.round(performance.now() - t0)),
+          detailFa: passed
+            ? 'رمزگذاری، رمزگشایی با گذرواژهٔ درست و رد گذرواژهٔ اشتباه در حافظه تأیید شد.'
+            : 'خطا در چرخهٔ رمزنگاری یا رمزگشایی WebCrypto',
+          scopeFa: 'رمزگذاری روی فایل خروجی پشتیبان اعمال می‌شود، نه روی دیتابیس زندهٔ مرورگر.',
+        });
+      } catch (err: any) {
+        checks.push({
+          id: 'crypto_check',
+          titleFa: 'رمزنگاری فایل پشتیبان (AES-256-GCM + PBKDF2)',
+          status: 'failed',
+          passed: false,
+          durationMs: Math.max(1, Math.round(performance.now() - t0)),
+          detailFa: `خطا در WebCrypto: ${err?.message || 'نامشخص'}`,
+          scopeFa: 'رمزگذاری روی فایل خروجی پشتیبان.',
+        });
+      }
     }
   }
 
@@ -211,19 +243,23 @@ export async function runSubsystemSelfDiagnostics(
       checks.push({
         id: 'calendar_check',
         titleFa: 'موتور تقویم جلالی و محاسبهٔ سال‌های کبیسه',
+        status: passed ? 'passed' : 'failed',
         passed,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
         detailFa: passed
-          ? 'تشخیص ۳۰ اسفند ۱۴۰۳ (کبیسه) و ۲۹ اسفند ۱۴۰۴ (عادی) بدون خطای انحراف تأیید شد.'
+          ? 'تشخیص ۳۰ اسفند ۱۴۰۳ (کبیسه) و ۲۹ اسفند ۱۴۰۴ (عادی) تأیید شد.'
           : 'عدم تطابق در تبدیل تاریخ جلالی یا تشخیص سال کبیسه',
+        scopeFa: 'بررسی تبدیل تاریخ شمسی و طول ماه اسفند در سال کبیسه و عادی.',
       });
     } catch (err: any) {
       checks.push({
         id: 'calendar_check',
         titleFa: 'موتور تقویم جلالی و محاسبهٔ سال‌های کبیسه',
+        status: 'failed',
         passed: false,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
         detailFa: `خطا در تقویم جلالی: ${err?.message || 'نامشخص'}`,
+        scopeFa: 'بررسی تبدیل تاریخ شمسی و سال کبیسه.',
       });
     }
   }
@@ -245,20 +281,24 @@ export async function runSubsystemSelfDiagnostics(
         parsed.hasExtractedTokens;
       checks.push({
         id: 'nlp_check',
-        titleFa: 'مفسر هوشمند زبان طبیعی فارسی (NLP Task Parser)',
+        titleFa: 'تحلیلگر عبارت‌های تاریخ و زمان فارسی (Quick Add Parser)',
+        status: passed ? 'passed' : 'failed',
         passed,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
         detailFa: passed
-          ? 'استخراج عنوان پاک‌شده، تاریخ «فردا»، ساعت «۱۴:۳۰»، مدت «۳۰ دقیقه» و «اولویت ۲» تأیید شد.'
-          : 'خروجی مفسر زبان طبیعی با مقادیر مورد انتظار تطابق ندارد.',
+          ? 'استخراج عنوان، تاریخ «فردا»، ساعت «۱۴:۳۰»، مدت «۳۰ دقیقه» و «اولویت ۲» تأیید شد.'
+          : 'خروجی تحلیلگر متن با مقادیر مورد انتظار تطابق ندارد.',
+        scopeFa: 'تحلیل مبتنی بر الگوهای متنی فارسی؛ پیش از ثبت نهایی توسط کاربر قابل ویرایش است.',
       });
     } catch (err: any) {
       checks.push({
         id: 'nlp_check',
-        titleFa: 'مفسر هوشمند زبان طبیعی فارسی (NLP Task Parser)',
+        titleFa: 'تحلیلگر عبارت‌های تاریخ و زمان فارسی (Quick Add Parser)',
+        status: 'failed',
         passed: false,
         durationMs: Math.max(1, Math.round(performance.now() - t0)),
-        detailFa: `خطا در مفسر NLP: ${err?.message || 'نامشخص'}`,
+        detailFa: `خطا در تحلیلگر متن: ${err?.message || 'نامشخص'}`,
+        scopeFa: 'تحلیل مبتنی بر الگوهای متنی فارسی.',
       });
     }
   }
@@ -266,20 +306,23 @@ export async function runSubsystemSelfDiagnostics(
   // 6. Offline Static Bundle & Local Font Readiness
   {
     const t0 = performance.now();
-    const caps = detectHostCapabilities();
     const passed = caps.isOfflineReady;
     checks.push({
       id: 'offline_bundle_check',
-      titleFa: 'آمادگی بستهٔ آفلاین، فونت محلی وزیرمتن و مسیرهای نسبی',
+      titleFa: 'آمادگی دارایی‌های آفلاین و ذخیره‌سازی محلی',
+      status: passed ? 'passed' : 'failed',
       passed,
       durationMs: Math.max(1, Math.round(performance.now() - t0)),
       detailFa: passed
-        ? `محیط «${caps.hostLabelFa}» با ذخیره‌سازی محلی و بدون وابستگی به CDN خارجی آماده است.`
+        ? `محیط «${caps.hostLabelFa}» با ذخیره‌سازی محلی در دسترس است.`
         : caps.warningsFa.join(' | ') || 'نقص در قابلیت‌های آفلاین میزبان',
+      scopeFa: 'بررسی دسترسی به موتور ذخیره‌سازی در محیط فعلی.',
     });
   }
 
-  const allPassed = checks.every((c) => c.passed);
+  const requiredChecks = checks.filter((c) => c.status !== 'unsupported' && c.status !== 'not_run');
+  const allPassed = requiredChecks.length > 0 && requiredChecks.every((c) => c.status === 'passed');
+
   return {
     ranAtIso: new Date().toISOString(),
     allPassed,
@@ -299,8 +342,10 @@ export function getPlatformHandoffSnippets(): {
       'ws.setDomStorageEnabled(true); // الزامی برای IndexedDB و localStorage',
       'ws.setDatabaseEnabled(true);',
       'ws.setAllowFileAccess(true);',
-      'ws.setAllowFileAccessFromFileURLs(true);',
-      'ws.setAllowUniversalAccessFromFileURLs(true);',
+      '// نکته امنیتی: از فعال کردن setAllowUniversalAccessFromFileURLs خودداری کنید.',
+      'ws.setAllowFileAccessFromFileURLs(false);',
+      'ws.setAllowUniversalAccessFromFileURLs(false);',
+      '// در صورت امکان از WebViewAssetLoader (https://appassets.androidplatform.net) استفاده شود:',
       'webview1.loadUrl("file:///android_asset/www/index.html");',
     ].join('\n'),
     windowsBuildCommands: [

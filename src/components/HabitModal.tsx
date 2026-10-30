@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { Habit, HabitCategory } from '../types';
 import { useModalFocusTrap } from '../utils/useModalFocusTrap';
+import { getTodayKey } from '../utils/persianDate';
 
 export const EMOJIS = [
   '🚿', '📚', '💻', '🎯', '🧹', '💧', '🎨', '💰',
@@ -30,7 +31,8 @@ interface HabitModalProps {
     weeklyGoal: number;
     emoji: string;
     color: string;
-  }) => void;
+    startDate?: string;
+  }) => Promise<boolean> | boolean | void;
 }
 
 export const HabitModal: React.FC<HabitModalProps> = ({
@@ -39,27 +41,33 @@ export const HabitModal: React.FC<HabitModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const todayKey = getTodayKey();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<HabitCategory>('health');
   const [weeklyGoal, setWeeklyGoal] = useState<number>(7);
   const [selectedEmoji, setSelectedEmoji] = useState<string>(EMOJIS[0]);
   const [selectedColor, setSelectedColor] = useState<string>(COLORS[0].hex);
+  const [startDate, setStartDate] = useState<string>(todayKey);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    setIsSaving(false);
     if (habitToEdit) {
       setTitle(habitToEdit.title);
       setCategory(habitToEdit.category);
       setWeeklyGoal(habitToEdit.weeklyGoal || 7);
       setSelectedEmoji(habitToEdit.emoji || EMOJIS[0]);
       setSelectedColor(habitToEdit.color || COLORS[0].hex);
+      setStartDate(habitToEdit.startDate || todayKey);
     } else {
       setTitle('');
       setCategory('health');
       setWeeklyGoal(7);
       setSelectedEmoji(EMOJIS[0]);
       setSelectedColor(COLORS[0].hex);
+      setStartDate(todayKey);
     }
-  }, [habitToEdit, isOpen]);
+  }, [habitToEdit, isOpen, todayKey]);
 
   const modalRef = useModalFocusTrap<HTMLDivElement>(
     isOpen,
@@ -69,18 +77,26 @@ export const HabitModal: React.FC<HabitModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
-    onSave({
-      id: habitToEdit?.id,
-      title: title.trim(),
-      category,
-      weeklyGoal,
-      emoji: selectedEmoji,
-      color: selectedColor,
-    });
-    onClose();
+    if (!title.trim() || isSaving) return;
+    setIsSaving(true);
+    try {
+      const ok = await onSave({
+        id: habitToEdit?.id,
+        title: title.trim(),
+        category,
+        weeklyGoal,
+        emoji: selectedEmoji,
+        color: selectedColor,
+        startDate: /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : todayKey,
+      });
+      if (ok !== false) {
+        onClose();
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -89,14 +105,14 @@ export const HabitModal: React.FC<HabitModalProps> = ({
       aria-modal="true"
       aria-labelledby="habit-modal-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !isSaving) onClose();
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
     >
       <div
         ref={modalRef}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 relative"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 relative"
       >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
           <h3
@@ -110,7 +126,8 @@ export const HabitModal: React.FC<HabitModalProps> = ({
             type="button"
             aria-label="بستن پنجره"
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+            disabled={isSaving}
+            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -130,7 +147,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثلاً: مطالعه ۲۰ صفحه کتاب"
+              placeholder="مثلاً: مطالعهٔ ۲۰ صفحه کتاب"
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             />
           </div>
@@ -148,7 +165,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
                 <option value="health">سلامتی و بهداشت</option>
                 <option value="learning">مطالعه و یادگیری</option>
                 <option value="work">کار و بهره‌وری</option>
-                <option value="mindfulness">آرامش و نظم شخصی</option>
+                <option value="mindfulness">ذهن‌آگاهی و نظم</option>
                 <option value="finance">مدیریت مالی</option>
               </select>
             </div>
@@ -182,7 +199,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
                   key={emoji}
                   type="button"
                   onClick={() => setSelectedEmoji(emoji)}
-                  className={`h-9 rounded-lg flex items-center justify-center text-lg transition ${
+                  className={`h-9 rounded-lg flex items-center justify-center text-lg transition cursor-pointer ${
                     selectedEmoji === emoji
                       ? 'bg-indigo-600/15 ring-2 ring-indigo-500 scale-105'
                       : 'hover:bg-slate-200/70 dark:hover:bg-slate-700'
@@ -204,7 +221,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
                   key={c.name}
                   type="button"
                   onClick={() => setSelectedColor(c.hex)}
-                  className={`w-7 h-7 rounded-full transition-transform ${
+                  className={`w-7 h-7 rounded-full transition-transform cursor-pointer ${
                     selectedColor === c.hex
                       ? 'scale-125 ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-900'
                       : 'opacity-75 hover:opacity-100'
@@ -219,15 +236,17 @@ export const HabitModal: React.FC<HabitModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              disabled={isSaving}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               انصراف
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/25 transition"
+              disabled={isSaving}
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-sm transition cursor-pointer"
             >
-              ذخیره عادت
+              {isSaving ? 'در حال ذخیره...' : 'ذخیرهٔ عادت'}
             </button>
           </div>
         </form>
