@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import confetti from 'canvas-confetti';
-import { BellRing, X, Check } from 'lucide-react';
+import { BellRing, X, Check, AlertTriangle, RefreshCw, Download, Database } from 'lucide-react';
 import { Header } from './components/Header';
 import { Navigation, NavTabId } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
@@ -20,6 +20,7 @@ import { NotesAndIdeasView } from './components/NotesAndIdeasView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { BackupAndSyncView, DeletedTrashItem } from './components/BackupAndSyncView';
 import { GlobalMiniTimer } from './components/GlobalMiniTimer';
+import { useGlobalPomodoro } from './app/useGlobalPomodoro';
 import { HabitModal } from './components/HabitModal';
 import { TaskModal } from './components/TaskModal';
 import { DeleteModal } from './components/DeleteModal';
@@ -55,10 +56,15 @@ import {
   domainEntityToHabit,
   habitToDomainEntity,
   ideaToDomainNote,
+  domainNoteToIdea,
   usefulInfoToDomainNote,
+  domainNoteToUsefulInfo,
   focusSessionToDomainEntity,
+  domainEntityToFocusSession,
 } from './app/PlatformContext';
-import { createEntityId } from './domain/models';
+import { BackupEnvelopeV2, createEntityId, nowIso } from './domain/models';
+import { CROSS_TAB_SYNC_CHANNEL } from './infrastructure/web/dexieAdapter';
+import { createPlainBackupEnvelope } from './utils/backupCrypto';
 
 const HASH_TO_TAB: Record<string, NavTabId> = {
   '#/today': 'dashboard',
@@ -95,10 +101,12 @@ const TAB_TO_HASH: Record<NavTabId, string> = {
   sync: '#/settings',
 };
 
-export default function App() {
-  const { container, ready: platformReady, bridgeError } = usePlatform();
+export type StorageLifecycleStatus = 'initializing' | 'ready' | 'saving' | 'saved' | 'error';
 
-  // 1. Persistent UI State with Hash Route Support
+export default function App() {
+  const { container, ready: platformReady, migrationReport, bridgeError } = usePlatform();
+
+  // 1. UI Navigation State with Hash Route Support
   const [activeTab, setActiveTabState] = useState<NavTabId>(() => {
     if (typeof window !== 'undefined' && window.location.hash) {
       const mapped = HASH_TO_TAB[window.location.hash];
@@ -149,103 +157,255 @@ export default function App() {
     time: string;
   } | null>(null);
 
-  // 2. Persistent Core Data (Preserving all existing localStorage keys + IndexedDB repository)
-  const [habits, setHabits] = useState<Habit[]>(() => {
-    try {
-      const saved = localStorage.getItem('nazmyar_habits_v1');
-      return saved ? JSON.parse(saved) : getInitialHabits();
-    } catch {
-      return getInitialHabits();
-    }
-  });
+  // 2. Single Source of Truth State (Purely hydrated from Repository — NO independent localStorage DB)
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
+  const [storageStatus, setStorageStatus] = useState<StorageLifecycleStatus>('initializing');
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [lastFailedOperation, setLastFailedOperation] = useState<{
+    label: string;
+    retry: () => Promise<void>;
+  } | null>(null);
 
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const saved = localStorage.getItem('nazmyar_danial_tasks_v1');
-      if (saved) {
-        return JSON.parse(saved) as Task[];
-      }
-      return getInitialTasks();
-    } catch {
-      return getInitialTasks();
-    }
-  });
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
+  const [usefulInfos, setUsefulInfos] = useState<UsefulInfoItem[]>([]);
+  const [deletedTrashItems, setDeletedTrashItems] = useState<DeletedTrashItem[]>([]);
 
-  const [ideas, setIdeas] = useState<Idea[]>(() => {
-    try {
-      const saved = localStorage.getItem('nazmyar_danial_ideas_v1');
-      return saved ? JSON.parse(saved) : getInitialIdeas();
-    } catch {
-      return getInitialIdeas();
-    }
-  });
+  // Toast notifications (BUG-41: timer cleanup on unmount; BUG-44: Undo action support)
+  const [toasts, setToasts] = useState<
+    Array<{ id: string; text: string; type: 'info' | 'success'; onUndo?: () => void }>
+  >([]);
+  const toastTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
-  const [focusSessions, setFocusSessions] = useState<FocusSession[]>(() => {
-    try {
-      const saved = localStorage.getItem('nazmyar_focus_sessions_v1');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  useEffect(() => {
+    const timers = toastTimersRef.current;
+    return () => {
+      timers.forEach((timerId) => clearTimeout(timerId));
+      timers.clear();
+    };
+  }, []);
 
-  const [usefulInfos, setUsefulInfos] = useState<UsefulInfoItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('nazmyar_useful_info_v1');
-      return saved ? JSON.parse(saved) : getInitialUsefulInfos();
-    } catch {
-      return getInitialUsefulInfos();
-    }
-  });
+  const showToast = useCallback(
+    (text: string, type: 'info' | 'success' = 'info', onUndo?: () => void) => {
+      const id = createEntityId('toast');
+      setToasts((prev) => [...prev, { id, text, type, onUndo }]);
+      const durationMs = onUndo ? 6000 : 3200;
+      const timerId = setTimeout(() => {
+        toastTimersRef.current.delete(timerId);
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, durationMs);
+      toastTimersRef.current.add(timerId);
+    },
+    []
+  );
 
-  // Hydrate & Synchronize with Clean Architecture PlatformContainer (IndexedDB / Native Bridge)
+  // Canonical reload from Repository (Tasks, Habits, Notes/Ideas/UsefulInfo, FocusSessions, Settings, Trash)
+  const reloadAllFromRepository = useCallback(async () => {
+    const [allTaskEntities, allHabitEntities, allNoteEntities, allFocusEntities, userSettings] =
+      await Promise.all([
+        container.tasks.listTasks({ includeDeleted: true }),
+        container.habits.listHabits(true),
+        container.notes.listNotes(undefined, true),
+        container.focus.listFocusSessions(false),
+        container.settings.getSettings(),
+      ]);
+
+    const activeTasks = allTaskEntities.filter((t) => !t.deletedAt).map(domainEntityToTask);
+    const activeHabits = allHabitEntities.filter((h) => !h.deletedAt).map(domainEntityToHabit);
+    const activeIdeas = allNoteEntities
+      .filter((n) => n.kind === 'idea' && !n.deletedAt)
+      .map(domainNoteToIdea);
+    const activeUsefulInfos = allNoteEntities
+      .filter((n) => n.kind === 'useful_info' && !n.deletedAt)
+      .map(domainNoteToUsefulInfo);
+    const activeFocusSessions = allFocusEntities.map(domainEntityToFocusSession);
+
+    // Build unified Recycle Bin / Trash view directly from soft-deleted Repository records
+    const trashList: DeletedTrashItem[] = [
+      ...allTaskEntities
+        .filter((t) => Boolean(t.deletedAt))
+        .map((t) => ({
+          id: t.id,
+          type: 'task' as const,
+          title: t.title,
+          deletedAt: t.deletedAt!,
+          payload: domainEntityToTask(t),
+        })),
+      ...allHabitEntities
+        .filter((h) => Boolean(h.deletedAt))
+        .map((h) => ({
+          id: h.id,
+          type: 'habit' as const,
+          title: h.title,
+          deletedAt: h.deletedAt!,
+          payload: domainEntityToHabit(h),
+        })),
+      ...allNoteEntities
+        .filter((n) => Boolean(n.deletedAt) && (n.kind === 'idea' || n.kind === 'useful_info'))
+        .map((n) => ({
+          id: n.id,
+          type: (n.kind === 'idea' ? 'idea' : 'useful_info') as 'idea' | 'useful_info',
+          title: n.title,
+          deletedAt: n.deletedAt!,
+          payload: n.kind === 'idea' ? domainNoteToIdea(n) : domainNoteToUsefulInfo(n),
+        })),
+    ].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+
+    setTasks(activeTasks);
+    setHabits(activeHabits);
+    setIdeas(activeIdeas);
+    setUsefulInfos(activeUsefulInfos);
+    setFocusSessions(activeFocusSessions);
+    setDeletedTrashItems(trashList);
+
+    const nextDark = userSettings.theme !== 'light';
+    setIsDark(nextDark);
+    if (nextDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+
+    setSoundEnabled(userSettings.soundEnabled);
+    soundManager.setEnabled(userSettings.soundEnabled);
+  }, [container]);
+
+  // Startup Hydration (runs ONLY after PlatformProvider initialization & migration finish)
   const hasHydratedFromRepoRef = useRef<boolean>(false);
   useEffect(() => {
-    if (!platformReady || bridgeError || hasHydratedFromRepoRef.current) return;
+    if (!platformReady) return;
+    if (bridgeError) {
+      setStorageStatus('error');
+      setStorageError(bridgeError);
+      setIsHydrated(true);
+      return;
+    }
+    if (hasHydratedFromRepoRef.current) return;
     hasHydratedFromRepoRef.current = true;
 
     (async () => {
       try {
-        const [repoTasks, repoHabits, repoNotes, repoFocus] = await Promise.all([
-          container.tasks.listTasks(),
-          container.habits.listHabits(),
-          container.notes.listNotes(),
-          container.focus.listFocusSessions(),
-        ]);
-
-        if (repoTasks.length > 0) {
-          setTasks(repoTasks.map(domainEntityToTask));
-        } else if (tasks.length > 0) {
-          await container.tasks.upsertTasksBatch(tasks.map(taskToDomainEntity));
-        }
-
-        if (repoHabits.length > 0) {
-          setHabits(repoHabits.map(domainEntityToHabit));
-        } else if (habits.length > 0) {
-          for (const h of habits) {
-            await container.habits.upsertHabit(habitToDomainEntity(h));
-          }
-        }
-
-        if (repoNotes.length === 0 && (ideas.length > 0 || usefulInfos.length > 0)) {
-          for (const idea of ideas) {
-            await container.notes.upsertNote(ideaToDomainNote(idea));
-          }
-          for (const info of usefulInfos) {
-            await container.notes.upsertNote(usefulInfoToDomainNote(info));
-          }
-        }
-
-        if (repoFocus.length === 0 && focusSessions.length > 0) {
-          for (const fs of focusSessions) {
-            await container.focus.logFocusSession(focusSessionToDomainEntity(fs));
-          }
-        }
-      } catch {
-        // Keep local state intact if repository hydration encounters an error
+        setStorageStatus('initializing');
+        await reloadAllFromRepository();
+        setStorageStatus('ready');
+        setStorageError(null);
+      } catch (err: any) {
+        const msg =
+          err?.message || 'خطا در خواندن اطلاعات از پایگاه‌دادهٔ محلی (IndexedDB / Bridge).';
+        setStorageStatus('error');
+        setStorageError(msg);
+      } finally {
+        setIsHydrated(true);
       }
     })();
-  }, [platformReady, bridgeError, container]);
+  }, [platformReady, bridgeError, reloadAllFromRepository]);
+
+  // Cross-Tab Synchronization via BroadcastChannel (prevents silent overwrite across multiple open tabs)
+  useEffect(() => {
+    if (!isHydrated || bridgeError || typeof BroadcastChannel === 'undefined') return;
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(CROSS_TAB_SYNC_CHANNEL);
+      channel.onmessage = () => {
+        reloadAllFromRepository().catch((err: any) => {
+          setStorageStatus('error');
+          setStorageError(err?.message || 'خطا در همگام‌سازی تب‌های موازی.');
+        });
+      };
+    } catch {
+      // BroadcastChannel unavailable
+    }
+    return () => {
+      if (channel) channel.close();
+    };
+  }, [isHydrated, bridgeError, reloadAllFromRepository]);
+
+  // Unified Transactional Storage Mutation Runner:
+  // UI action -> validation -> repository transaction -> result -> UI update (never hides errors)
+  const executeStorageMutation = useCallback(
+    async <T,>(
+      label: string,
+      mutationFn: () => Promise<T>,
+      onSuccess?: (result: T) => void
+    ): Promise<T | null> => {
+      setStorageStatus('saving');
+      setStorageError(null);
+      try {
+        const result = await mutationFn();
+        await reloadAllFromRepository();
+        setStorageStatus('saved');
+        setLastFailedOperation(null);
+        if (onSuccess) onSuccess(result);
+        return result;
+      } catch (err: any) {
+        const msg = err?.message || `خطا در ذخیرهٔ تغییرات (${label}).`;
+        setStorageStatus('error');
+        setStorageError(msg);
+        setLastFailedOperation({
+          label,
+          retry: async () => {
+            await executeStorageMutation(label, mutationFn, onSuccess);
+          },
+        });
+        showToast(`خطا در ذخیره‌سازی: ${msg}`);
+        return null;
+      }
+    },
+    [reloadAllFromRepository, showToast]
+  );
+
+  // Optional Sample Data Loader for Clean First Run (Never auto-seeds on empty DB)
+  const handleLoadSampleData = useCallback(async () => {
+    await executeStorageMutation(
+      'بارگذاری داده‌های نمونه آزمایشی',
+      async () => {
+        const sampleTasks = getInitialTasks().map(taskToDomainEntity);
+        const sampleHabits = getInitialHabits().map(habitToDomainEntity);
+        const sampleIdeas = getInitialIdeas().map(ideaToDomainNote);
+        const sampleUseful = getInitialUsefulInfos().map(usefulInfoToDomainNote);
+
+        await container.tasks.upsertTasksBatch(sampleTasks);
+        for (const h of sampleHabits) {
+          await container.habits.upsertHabit(h);
+        }
+        for (const n of [...sampleIdeas, ...sampleUseful]) {
+          await container.notes.upsertNote(n);
+        }
+      },
+      () => {
+        showToast('داده‌های نمونه آزمایشی با موفقیت بارگذاری شدند.', 'success');
+      }
+    );
+  }, [container, executeStorageMutation, showToast]);
+
+  // Emergency Recovery Export (allows user to export current in-memory state + migration snapshot if storage errors occur)
+  const handleDownloadEmergencyRecovery = useCallback(() => {
+    const recoveryPayload = {
+      exportedAt: nowIso(),
+      reason: 'emergency_recovery_export',
+      storageError,
+      migrationReport,
+      inMemoryState: {
+        tasks,
+        habits,
+        ideas,
+        usefulInfos,
+        focusSessions,
+        deletedTrashItems,
+      },
+    };
+    const blob = new Blob([JSON.stringify(recoveryPayload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kairos-emergency-recovery-${getTodayKey()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [storageError, migrationReport, tasks, habits, ideas, usefulInfos, focusSessions, deletedTrashItems]);
 
   // 3. Legacy GitHub REST API Sync State (Offline-First Policy: automatic background network calls disabled)
   const [githubConfig, setGithubConfig] = useState<GitHubSyncConfig>(() => {
@@ -263,7 +423,6 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [githubSyncError, setGithubSyncError] = useState<string | null>(null);
 
-  const isApplyingRemoteRef = useRef<boolean>(false);
   const latestDataRef = useRef({
     habits,
     tasks,
@@ -302,82 +461,6 @@ export default function App() {
   });
 
   const [activeFocusTaskId, setActiveFocusTaskId] = useState<string | undefined>(undefined);
-
-  // Toast notifications (BUG-41: timer cleanup on unmount; BUG-44: Undo action support)
-  const [toasts, setToasts] = useState<
-    Array<{ id: string; text: string; type: 'info' | 'success'; onUndo?: () => void }>
-  >([]);
-  const toastTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
-
-  useEffect(() => {
-    const timers = toastTimersRef.current;
-    return () => {
-      timers.forEach((timerId) => clearTimeout(timerId));
-      timers.clear();
-    };
-  }, []);
-
-  const showToast = useCallback(
-    (text: string, type: 'info' | 'success' = 'info', onUndo?: () => void) => {
-      const id = createEntityId('toast');
-      setToasts((prev) => [...prev, { id, text, type, onUndo }]);
-      const durationMs = onUndo ? 6000 : 3200;
-      const timerId = setTimeout(() => {
-        toastTimersRef.current.delete(timerId);
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, durationMs);
-      toastTimersRef.current.add(timerId);
-    },
-    []
-  );
-
-  // Safe localStorage persistence helper (BUG-34: explicit quota warning instead of silent failure)
-  const quotaWarnedRef = useRef<boolean>(false);
-  const safeSetLocalStorage = useCallback(
-    (key: string, value: string) => {
-      try {
-        localStorage.setItem(key, value);
-      } catch {
-        if (!quotaWarnedRef.current) {
-          quotaWarnedRef.current = true;
-          showToast(
-            'حافظهٔ مرورگر (LocalStorage) پر شده است؛ داده‌ها در پایگاه‌دادهٔ محلی IndexedDB نگهداری می‌شوند.',
-            'info'
-          );
-        }
-      }
-    },
-    [showToast]
-  );
-
-  // Sync to localStorage & IndexedDB Repository
-  useEffect(() => {
-    safeSetLocalStorage('nazmyar_habits_v1', JSON.stringify(habits));
-    if (platformReady && !bridgeError && hasHydratedFromRepoRef.current) {
-      habits.forEach((h) => {
-        container.habits.upsertHabit(habitToDomainEntity(h)).catch(() => {});
-      });
-    }
-  }, [habits, safeSetLocalStorage, platformReady, bridgeError, container]);
-
-  useEffect(() => {
-    safeSetLocalStorage('nazmyar_danial_tasks_v1', JSON.stringify(tasks));
-    if (platformReady && !bridgeError && hasHydratedFromRepoRef.current) {
-      container.tasks.upsertTasksBatch(tasks.map(taskToDomainEntity)).catch(() => {});
-    }
-  }, [tasks, safeSetLocalStorage, platformReady, bridgeError, container]);
-
-  useEffect(() => {
-    safeSetLocalStorage('nazmyar_danial_ideas_v1', JSON.stringify(ideas));
-  }, [ideas, safeSetLocalStorage]);
-
-  useEffect(() => {
-    safeSetLocalStorage('nazmyar_focus_sessions_v1', JSON.stringify(focusSessions));
-  }, [focusSessions, safeSetLocalStorage]);
-
-  useEffect(() => {
-    safeSetLocalStorage('nazmyar_useful_info_v1', JSON.stringify(usefulInfos));
-  }, [usefulInfos, safeSetLocalStorage]);
 
   const updateStoredSha = useCallback((sha: string | null) => {
     setLastKnownSha(sha);
@@ -420,13 +503,16 @@ export default function App() {
         }
 
         if (!silent || res.sha !== lastKnownSha) {
-          isApplyingRemoteRef.current = true;
           const remoteData = res.fileData.data;
-          if (Array.isArray(remoteData.habits)) setHabits(remoteData.habits);
-          if (Array.isArray(remoteData.tasks)) setTasks(remoteData.tasks);
-          if (Array.isArray(remoteData.ideas)) setIdeas(remoteData.ideas);
-          if (Array.isArray(remoteData.focusSessions)) setFocusSessions(remoteData.focusSessions);
-          if (Array.isArray(remoteData.usefulInfos)) setUsefulInfos(remoteData.usefulInfos);
+          await executeStorageMutation('دریافت داده از گیت‌هاب', async () => {
+            const validated = await container.backup.validateBackupJson(
+              JSON.stringify(remoteData)
+            );
+            if (!validated.valid || !validated.envelope) {
+              throw new Error(validated.errors.join(' | ') || 'ساختار دادهٔ گیت‌هاب نامعتبر است.');
+            }
+            await container.backup.restoreBackup(validated.envelope, 'replace');
+          });
 
           updateStoredSha(res.sha);
           setLastSyncedAt(
@@ -437,12 +523,8 @@ export default function App() {
             }).format(new Date())
           );
 
-          setTimeout(() => {
-            isApplyingRemoteRef.current = false;
-          }, 200);
-
           if (!silent) {
-            showToast('آخرین اطلاعات از گیت‌هاب دریافت و همگام شد!', 'success');
+            showToast('آخرین اطلاعات از گیت‌هاب دریافت و در پایگاه‌داده ذخیره شد!', 'success');
           }
         }
       } catch (err: any) {
@@ -453,7 +535,7 @@ export default function App() {
         setIsGitHubSyncing(false);
       }
     },
-    [githubConfig, lastKnownSha, showToast, updateStoredSha]
+    [githubConfig, lastKnownSha, showToast, updateStoredSha, container, executeStorageMutation]
   );
 
   const handlePushToGitHub = useCallback(
@@ -478,15 +560,14 @@ export default function App() {
         );
 
         if (res.hadConflictResolved) {
-          isApplyingRemoteRef.current = true;
-          setHabits(res.mergedData.habits);
-          setTasks(res.mergedData.tasks);
-          setIdeas(res.mergedData.ideas);
-          setFocusSessions(res.mergedData.focusSessions);
-          setUsefulInfos(res.mergedData.usefulInfos);
-          setTimeout(() => {
-            isApplyingRemoteRef.current = false;
-          }, 200);
+          await executeStorageMutation('ادغام تغییرات گیت‌هاب', async () => {
+            const validated = await container.backup.validateBackupJson(
+              JSON.stringify(res.mergedData)
+            );
+            if (validated.valid && validated.envelope) {
+              await container.backup.restoreBackup(validated.envelope, 'replace');
+            }
+          });
           showToast(
             'تغییرات دستگاه دیگر تشخیص داده شد و با موفقیت ادغام و ذخیره گردید!',
             'success'
@@ -502,7 +583,7 @@ export default function App() {
         setIsGitHubSyncing(false);
       }
     },
-    [githubConfig, lastKnownSha, showToast, updateStoredSha]
+    [githubConfig, lastKnownSha, showToast, updateStoredSha, container, executeStorageMutation]
   );
 
   const handleSaveGitHubConfig = (newCfg: GitHubSyncConfig) => {
@@ -513,27 +594,9 @@ export default function App() {
     showToast('تنظیمات ذخیره شد (حالت آفلاین-محور فعال است).', 'success');
   };
 
-  // Load Theme & Sound on mount
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('nazmyar_theme');
-    if (savedTheme === 'light') {
-      setIsDark(false);
-      document.documentElement.classList.remove('dark');
-    } else {
-      setIsDark(true);
-      document.documentElement.classList.add('dark');
-    }
-
-    const savedSound = localStorage.getItem('nazmyar_sound');
-    if (savedSound !== null) {
-      const enabled = savedSound === 'true';
-      setSoundEnabled(enabled);
-      soundManager.setEnabled(enabled);
-    }
-  }, []);
-
   // Background Task Reminder Checker (runs every 15 seconds; BUG-40: catches up missed reminders from earlier today)
   useEffect(() => {
+    if (!isHydrated) return;
     const checkReminders = () => {
       const now = new Date();
       const hh = String(now.getHours()).padStart(2, '0');
@@ -554,9 +617,14 @@ export default function App() {
           !task.reminded &&
           (isDueToday || isDueFromBefore)
         ) {
-          setTasks((prev) =>
-            prev.map((t) => (t.id === task.id ? { ...t, reminded: true } : t))
-          );
+          const updatedTask: Task = { ...task, reminded: true };
+          container.tasks
+            .upsertTask(taskToDomainEntity(updatedTask))
+            .then(() => reloadAllFromRepository())
+            .catch((err: any) => {
+              setStorageStatus('error');
+              setStorageError(err?.message || 'خطا در ثبت وضعیت یادآور.');
+            });
 
           soundManager.playBell();
           setActiveReminderAlert({
@@ -579,7 +647,7 @@ export default function App() {
 
     const interval = setInterval(checkReminders, 15000);
     return () => clearInterval(interval);
-  }, [tasks]);
+  }, [tasks, isHydrated, container, reloadAllFromRepository]);
 
   // Global Keyboard Shortcuts (BUG-45: Alt+N new task, Alt+H new habit, Alt+F deep focus, Alt+D dashboard)
   useEffect(() => {
@@ -614,7 +682,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
+  }, [setActiveTab]);
 
   const handleRequestNotificationPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -663,63 +731,56 @@ export default function App() {
 
   const handleToggleTheme = () => {
     const nextDark = !isDark;
-    setIsDark(nextDark);
-    if (nextDark) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('nazmyar_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('nazmyar_theme', 'light');
-    }
+    executeStorageMutation(
+      'تغییر تم ظاهر',
+      () => container.settings.saveSettings({ theme: nextDark ? 'dark' : 'light' }),
+      () => {
+        try {
+          localStorage.setItem('nazmyar_theme', nextDark ? 'dark' : 'light');
+        } catch {}
+      }
+    );
   };
 
   const handleToggleSound = () => {
     const nextVal = !soundEnabled;
-    setSoundEnabled(nextVal);
-    soundManager.setEnabled(nextVal);
-    localStorage.setItem('nazmyar_sound', String(nextVal));
-    showToast(nextVal ? 'افکت‌های صوتی فعال شدند' : 'افکت‌های صوتی بی‌صدا شدند');
+    executeStorageMutation(
+      'تغییر وضعیت صدا',
+      () => container.settings.saveSettings({ soundEnabled: nextVal }),
+      () => {
+        try {
+          localStorage.setItem('nazmyar_sound', String(nextVal));
+        } catch {}
+        showToast(nextVal ? 'افکت‌های صوتی فعال شدند' : 'افکت‌های صوتی بی‌صدا شدند');
+      }
+    );
   };
 
-  // ================= HABITS ACTIONS =================
+  // ================= HABITS ACTIONS (Repository-First) =================
   const handleToggleHabitDay = (habitId: string, dateKey: string) => {
     const todayKey = getTodayKey();
-    let isNowCompleted = false;
-
-    setHabits((prev) =>
-      prev.map((h) => {
-        if (h.id === habitId) {
-          const wasChecked = !!h.completedDates[dateKey];
-          isNowCompleted = !wasChecked;
-          const updated = { ...h.completedDates };
-          if (wasChecked) {
-            delete updated[dateKey];
-          } else {
-            updated[dateKey] = true;
-          }
-          return { ...h, completedDates: updated };
-        }
-        return h;
-      })
-    );
-
-    if (isNowCompleted) {
-      soundManager.playCheck();
-      setTimeout(() => {
-        setHabits((currentHabits) => {
+    executeStorageMutation(
+      'ثبت وضعیت عادت',
+      () => container.habits.toggleHabitDate(habitId, dateKey),
+      (updatedHabit) => {
+        if (!updatedHabit) return;
+        const isNowCompleted = Boolean(updatedHabit.completedDates[dateKey]);
+        if (isNowCompleted) {
+          soundManager.playCheck();
           const allDone =
-            currentHabits.length > 0 &&
-            currentHabits.every((h) => h.completedDates[todayKey]);
+            habits.length > 0 &&
+            habits.every((h) =>
+              h.id === habitId ? isNowCompleted : Boolean(h.completedDates[todayKey])
+            );
           if (dateKey === todayKey && allDone) {
             confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-            showToast('تبریک! تمام عادت‌های امروزت تکمیل شد 🎉', 'success');
+            showToast('تبریک! تمام عادت‌های امروزت تکمیل شد', 'success');
           }
-          return currentHabits;
-        });
-      }, 50);
-    } else {
-      soundManager.playUncheck();
-    }
+        } else {
+          soundManager.playUncheck();
+        }
+      }
+    );
   };
 
   const handleOpenHabitModal = (habitId?: string) => {
@@ -740,83 +801,130 @@ export default function App() {
     emoji: string;
     color: string;
   }) => {
+    const trimmedTitle = data.title.trim();
+    if (!trimmedTitle) {
+      showToast('عنوان عادت نمی‌تواند خالی باشد.');
+      return;
+    }
+
     if (data.id) {
-      setHabits((prev) =>
-        prev.map((h) => (h.id === data.id ? { ...h, ...data } : h))
+      const existing = habits.find((h) => h.id === data.id);
+      if (!existing) return;
+      const merged: Habit = {
+        ...existing,
+        ...data,
+        title: trimmedTitle,
+      };
+      executeStorageMutation(
+        'ویرایش عادت',
+        () => container.habits.upsertHabit(habitToDomainEntity(merged)),
+        () => showToast('تغییرات عادت ذخیره شد.', 'success')
       );
-      showToast('تغییرات عادت ذخیره شد.');
     } else {
       const newHabit: Habit = {
-        id: 'h_' + Date.now(),
-        title: data.title,
+        id: createEntityId('h'),
+        title: trimmedTitle,
         category: data.category,
         weeklyGoal: data.weeklyGoal,
         emoji: data.emoji,
         color: data.color,
+        startDate: getTodayKey(),
         completedDates: {},
       };
-      setHabits((prev) => [newHabit, ...prev]);
-      showToast('عادت جدید با موفقیت اضافه شد.');
+      executeStorageMutation(
+        'ایجاد عادت جدید',
+        () => container.habits.upsertHabit(habitToDomainEntity(newHabit)),
+        () => showToast('عادت جدید با موفقیت اضافه شد.', 'success')
+      );
     }
   };
 
-  // ================= TASKS ACTIONS =================
+  // ================= TASKS ACTIONS (Repository-First) =================
   const handleToggleTask = (taskId: string) => {
-    let nowDone = false;
-    let taskTitle = '';
+    const existing = tasks.find((t) => t.id === taskId);
+    if (!existing) return;
+    const nowDone = !existing.completed;
+    const updatedTask: Task = {
+      ...existing,
+      completed: nowDone,
+      status: nowDone ? 'done' : 'todo',
+      completedAt: nowDone ? nowIso() : null,
+    };
 
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id === taskId) {
-          nowDone = !t.completed;
-          taskTitle = t.title;
-          return {
-            ...t,
-            completed: nowDone,
-            completedAt: nowDone ? new Date().toISOString() : undefined,
-          };
-        }
-        return t;
-      })
-    );
-
-    if (nowDone) {
-      soundManager.playCheck();
-      showToast(`مأموریت «${taskTitle}» انجام شد!`, 'success');
-      const todayKey = getTodayKey();
-      setTimeout(() => {
-        setTasks((cur) => {
-          const todayTasks = cur.filter((t) => t.targetDate <= todayKey);
-          if (todayTasks.length > 0 && todayTasks.every((t) => t.completed)) {
+    executeStorageMutation(
+      'تغییر وضعیت انجام کار',
+      () => container.tasks.upsertTask(taskToDomainEntity(updatedTask)),
+      () => {
+        if (nowDone) {
+          soundManager.playCheck();
+          showToast(`مأموریت «${existing.title}» انجام شد!`, 'success');
+          const todayKey = getTodayKey();
+          const todayTasks = tasks.filter((t) => t.targetDate <= todayKey);
+          const allDone =
+            todayTasks.length > 0 &&
+            todayTasks.every((t) => (t.id === taskId ? true : t.completed));
+          if (allDone) {
             confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
           }
-          return cur;
-        });
-      }, 50);
-    } else {
-      soundManager.playUncheck();
-    }
+        } else {
+          soundManager.playUncheck();
+        }
+      }
+    );
   };
 
   const handleAddTask = (taskData: Omit<Task, 'id' | 'completed'>) => {
+    const trimmedTitle = taskData.title.trim();
+    if (!trimmedTitle) {
+      showToast('عنوان مأموریت نمی‌تواند خالی باشد.');
+      return;
+    }
     const newTask: Task = {
       ...taskData,
-      id: 't_' + Date.now(),
+      title: trimmedTitle,
+      id: createEntityId('t'),
       completed: false,
+      status: 'todo',
     };
-    setTasks((prev) => [newTask, ...prev]);
-    const remNote = newTask.reminderTime ? ` (یادآور: ${toPersianNum(newTask.reminderTime)})` : '';
-    showToast(`مأموریت با «اولویت ${toPersianNum(newTask.priority)}» ثبت شد${remNote}.`, 'success');
+    executeStorageMutation(
+      'افزودن مأموریت جدید',
+      () => container.tasks.upsertTask(taskToDomainEntity(newTask)),
+      () => {
+        const remNote = newTask.reminderTime
+          ? ` (یادآور: ${toPersianNum(newTask.reminderTime)})`
+          : '';
+        showToast(
+          `مأموریت با «اولویت ${toPersianNum(newTask.priority)}» ثبت شد${remNote}.`,
+          'success'
+        );
+      }
+    );
   };
 
   const handleAddTasksBatch = (newTasks: Array<Omit<Task, 'id' | 'completed'>>) => {
-    const mapped = newTasks.map((t, idx) => ({
-      ...t,
-      id: 't_' + Date.now() + '_' + idx,
-      completed: false,
-    }));
-    setTasks((prev) => [...mapped, ...prev]);
-    showToast(`${toPersianNum(newTasks.length)} مأموریت پیشنهادی به میز کار اضافه شد!`, 'success');
+    const validTasks = newTasks
+      .filter((t) => t.title && t.title.trim())
+      .map((t) =>
+        taskToDomainEntity({
+          ...t,
+          title: t.title.trim(),
+          id: createEntityId('t'),
+          completed: false,
+          status: 'todo',
+        })
+      );
+    if (validTasks.length === 0) return;
+
+    executeStorageMutation(
+      'افزودن دسته‌ای مأموریت‌ها',
+      () => container.tasks.upsertTasksBatch(validTasks),
+      () => {
+        showToast(
+          `${toPersianNum(validTasks.length)} مأموریت پیشنهادی به میز کار اضافه شد!`,
+          'success'
+        );
+      }
+    );
   };
 
   const handleOpenTaskModal = (taskId?: string) => {
@@ -839,18 +947,29 @@ export default function App() {
     category?: string;
     reminderTime?: string;
   }) => {
+    const trimmedTitle = taskData.title.trim();
+    if (!trimmedTitle) {
+      showToast('عنوان مأموریت نمی‌تواند خالی باشد.');
+      return;
+    }
+
     if (taskData.id) {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskData.id
-            ? { ...t, ...taskData, reminded: false }
-            : t
-        )
+      const existing = tasks.find((t) => t.id === taskData.id);
+      if (!existing) return;
+      const merged: Task = {
+        ...existing,
+        ...taskData,
+        title: trimmedTitle,
+        reminded: false,
+      };
+      executeStorageMutation(
+        'ویرایش مأموریت',
+        () => container.tasks.upsertTask(taskToDomainEntity(merged)),
+        () => showToast('مأموریت ویرایش شد.', 'success')
       );
-      showToast('مأموریت ویرایش شد.');
     } else {
       handleAddTask({
-        title: taskData.title,
+        title: trimmedTitle,
         description: taskData.description,
         priority: taskData.priority,
         duration: taskData.duration,
@@ -862,110 +981,190 @@ export default function App() {
   };
 
   const handleMoveTaskDay = (taskId: string, targetDay: 'today' | 'tomorrow') => {
+    const existing = tasks.find((t) => t.id === taskId);
+    if (!existing) return;
     const dateKey = targetDay === 'tomorrow' ? getTomorrowKey() : getTodayKey();
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, targetDate: dateKey } : t))
+    const updated: Task = { ...existing, targetDate: dateKey };
+    executeStorageMutation(
+      'انتقال روز مأموریت',
+      () => container.tasks.upsertTask(taskToDomainEntity(updated)),
+      () =>
+        showToast(
+          targetDay === 'tomorrow'
+            ? 'کار به برنامه فردا منتقل شد.'
+            : 'کار به لیست امروز منتقل شد.'
+        )
     );
-    showToast(targetDay === 'tomorrow' ? 'کار به برنامه فردا منتقل شد.' : 'کار به لیست امروز منتقل شد.');
   };
 
   const handleMoveAllPendingToTomorrow = () => {
     const todayKey = getTodayKey();
     const tomorrowKey = getTomorrowKey();
-    let count = 0;
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.targetDate <= todayKey && !t.completed) {
-          count++;
-          return { ...t, targetDate: tomorrowKey };
-        }
-        return t;
-      })
-    );
+    const affected = tasks
+      .filter((t) => t.targetDate <= todayKey && !t.completed)
+      .map((t) => taskToDomainEntity({ ...t, targetDate: tomorrowKey }));
 
-    if (count === 0) {
+    if (affected.length === 0) {
       showToast('تمام کارهای امروزت تکمیل شده یا کاری برای انتقال نیست!');
-    } else {
-      showToast(`${toPersianNum(count)} کار ناتمام بدون عذاب وجدان به فردا منتقل شد.`);
+      return;
     }
+
+    executeStorageMutation(
+      'انتقال کارهای ناتمام به فردا',
+      () => container.tasks.upsertTasksBatch(affected),
+      () =>
+        showToast(
+          `${toPersianNum(affected.length)} کار ناتمام بدون عذاب وجدان به فردا منتقل شد.`
+        )
+    );
   };
 
   const handleApplyTomorrowToToday = () => {
     const todayKey = getTodayKey();
     const tomorrowKey = getTomorrowKey();
-    let count = 0;
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.targetDate === tomorrowKey) {
-          count++;
-          return { ...t, targetDate: todayKey };
-        }
-        return t;
-      })
-    );
+    const affected = tasks
+      .filter((t) => t.targetDate === tomorrowKey)
+      .map((t) => taskToDomainEntity({ ...t, targetDate: todayKey }));
 
-    if (count === 0) {
+    if (affected.length === 0) {
       showToast('کاری در برنامه فردا وجود ندارد.');
-    } else {
-      showToast(`${toPersianNum(count)} مأموریت فردا به لیست امروز منتقل شد.`);
+      return;
     }
+
+    executeStorageMutation(
+      'انتقال کارهای فردا به امروز',
+      () => container.tasks.upsertTasksBatch(affected),
+      () =>
+        showToast(`${toPersianNum(affected.length)} مأموریت فردا به لیست امروز منتقل شد.`)
+    );
   };
 
-  const handleStartFocusOnTask = (taskId: string, taskTitle: string, duration: number) => {
+  const handleLogFocusSession = useCallback(
+    (session: FocusSession) => {
+      executeStorageMutation(
+        'ثبت جلسه تمرکز',
+        () => container.focus.logFocusSession(focusSessionToDomainEntity(session)),
+        () =>
+          showToast(
+            `جلسه تمرکز ${toPersianNum(session.durationMinutes)} دقیقه‌ای ثبت شد!`,
+            'success'
+          )
+      );
+    },
+    [container, executeStorageMutation, showToast]
+  );
+
+  const pomodoroController = useGlobalPomodoro({
+    container,
+    tasks,
+    activeTaskId: activeFocusTaskId,
+    onLogFocusSession: handleLogFocusSession,
+  });
+
+  const handleStartFocusOnTask = (taskId: string, taskTitle: string, _duration: number) => {
     setActiveFocusTaskId(taskId);
+    pomodoroController.handleSelectTask(taskId);
     setActiveTab('pomodoro');
     showToast(`تایمر تمرکز برای «${taskTitle}» آماده شد.`);
   };
 
-  // ================= USEFUL INFO ACTIONS =================
+  // ================= USEFUL INFO / NOTES ACTIONS (Repository-First) =================
   const handleAddUsefulInfo = (data: Omit<UsefulInfoItem, 'id' | 'createdAt'>) => {
+    const trimmedTitle = data.title.trim();
+    if (!trimmedTitle) {
+      showToast('عنوان یادداشت نمی‌تواند خالی باشد.');
+      return;
+    }
+    const now = nowIso();
     const newItem: UsefulInfoItem = {
       ...data,
-      id: 'info_' + Date.now(),
+      title: trimmedTitle,
+      id: createEntityId('info'),
       createdAt: new Intl.DateTimeFormat('fa-IR', {
         month: 'short',
         day: 'numeric',
       }).format(new Date()),
+      createdAtIso: now,
+      updatedAt: now,
     };
-    setUsefulInfos((prev) => [newItem, ...prev]);
-    showToast('در بخش اطلاعات کاربردی ذخیره شد!', 'success');
+
+    executeStorageMutation(
+      'افزودن یادداشت و مرجع کاربردی',
+      () => container.notes.upsertNote(usefulInfoToDomainNote(newItem)),
+      () => showToast('در بخش یادداشت‌ها و اطلاعات کاربردی ذخیره شد!', 'success')
+    );
   };
 
   const handleUpdateUsefulInfo = (id: string, data: Partial<UsefulInfoItem>) => {
-    setUsefulInfos((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...data } : item))
+    const existing = usefulInfos.find((item) => item.id === id);
+    if (!existing) return;
+    const merged: UsefulInfoItem = {
+      ...existing,
+      ...data,
+      title: data.title !== undefined ? data.title.trim() || existing.title : existing.title,
+      updatedAt: nowIso(),
+    };
+
+    executeStorageMutation(
+      'ویرایش یادداشت کاربردی',
+      () => container.notes.upsertNote(usefulInfoToDomainNote(merged)),
+      () => showToast('یادداشت کاربردی بروزرسانی شد.', 'success')
     );
-    showToast('اطلاعات کاربردی بروزرسانی شد.');
   };
 
-  // ================= IDEAS ACTIONS =================
+  // ================= IDEAS ACTIONS (Repository-First) =================
   const handleAddIdea = (data: Omit<Idea, 'id' | 'createdAt'>) => {
+    const trimmedTitle = data.title.trim();
+    if (!trimmedTitle) {
+      showToast('عنوان ایده نمی‌تواند خالی باشد.');
+      return;
+    }
+    const now = nowIso();
     const newIdea: Idea = {
       ...data,
-      id: 'id_' + Date.now(),
+      title: trimmedTitle,
+      id: createEntityId('id'),
       createdAt: new Intl.DateTimeFormat('fa-IR', {
         month: 'short',
         day: 'numeric',
       }).format(new Date()),
+      createdAtIso: now,
+      updatedAt: now,
     };
-    setIdeas((prev) => [newIdea, ...prev]);
-    showToast('ایده در بانک ایده‌ها ذخیره شد تا ذهنت آزاد بماند.');
+
+    executeStorageMutation(
+      'ثبت ایده جدید',
+      () => container.notes.upsertNote(ideaToDomainNote(newIdea)),
+      () => showToast('ایده در بانک ایده‌ها ذخیره شد تا ذهنت آزاد بماند.', 'success')
+    );
   };
 
   const handleUpdateIdea = (id: string, data: Partial<Idea>) => {
-    setIdeas((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...data } : item))
+    const existing = ideas.find((item) => item.id === id);
+    if (!existing) return;
+    const merged: Idea = {
+      ...existing,
+      ...data,
+      title: data.title !== undefined ? data.title.trim() || existing.title : existing.title,
+      updatedAt: nowIso(),
+    };
+
+    executeStorageMutation(
+      'ویرایش ایده',
+      () => container.notes.upsertNote(ideaToDomainNote(merged)),
+      () => showToast('ایده با موفقیت ویرایش شد.', 'success')
     );
-    showToast('ایده با موفقیت ویرایش شد.', 'success');
   };
 
   const handleConvertIdeaToTask = (ideaId: string) => {
     const idea = ideas.find((i) => i.id === ideaId);
     if (!idea) return;
 
-    // Prevent accidental duplicate conversion (BUG-29)
+    // Prevent accidental duplicate conversion via sourceId or matching title (BUG-29)
     const alreadyExists = tasks.some(
-      (t) => t.title.trim() === idea.title.trim() && !t.completed
+      (t) =>
+        t.sourceId === idea.id ||
+        (t.title.trim() === idea.title.trim() && !t.completed)
     );
     if (alreadyExists) {
       showToast(`مأموریت «${idea.title}» هم‌اکنون در لیست کارهای فعال موجود است.`);
@@ -974,60 +1173,95 @@ export default function App() {
 
     const todayKey = getTodayKey();
     const todayCount = tasks.filter((t) => t.targetDate === todayKey).length;
-    handleAddTask({
-      title: idea.title,
+    const newTaskId = createEntityId('t');
+    const newTask: Task = {
+      id: newTaskId,
+      title: idea.title.trim(),
       description: idea.note || 'منتقل شده از بانک ایده‌ها',
       priority: todayCount + 1,
       duration: 45,
       targetDate: todayKey,
       category: 'work',
-    });
-    showToast(`«${idea.title}» با اولویت ${toPersianNum(todayCount + 1)} به میز کار اضافه شد!`, 'success');
+      completed: false,
+      status: 'todo',
+      sourceId: idea.id,
+    };
+
+    executeStorageMutation(
+      'تبدیل ایده به مأموریت',
+      async () => {
+        await container.tasks.upsertTask(taskToDomainEntity(newTask));
+        await container.notes.upsertNote(
+          ideaToDomainNote({
+            ...idea,
+            linkedTaskId: newTaskId,
+            updatedAt: nowIso(),
+          })
+        );
+      },
+      () =>
+        showToast(
+          `«${idea.title}» با اولویت ${toPersianNum(todayCount + 1)} به میز کار اضافه شد!`,
+          'success'
+        )
+    );
   };
 
-  // ================= RECYCLE BIN / TRASH STATE =================
-  const [deletedTrashItems, setDeletedTrashItems] = useState<DeletedTrashItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('nazmyar_trash_v1');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    safeSetLocalStorage('nazmyar_trash_v1', JSON.stringify(deletedTrashItems));
-  }, [deletedTrashItems, safeSetLocalStorage]);
-
+  // ================= RECYCLE BIN / TRASH ACTIONS (Repository-First) =================
   const handleRestoreTrashItem = (item: DeletedTrashItem) => {
-    setDeletedTrashItems((prev) => prev.filter((x) => x.id !== item.id));
-    if (item.type === 'task' && item.payload) {
-      setTasks((prev) => [item.payload, ...prev.filter((t) => t.id !== item.id)]);
-      container.tasks.restoreTask(item.id).catch(() => {});
-    } else if (item.type === 'habit' && item.payload) {
-      setHabits((prev) => [item.payload, ...prev.filter((h) => h.id !== item.id)]);
-      container.habits.upsertHabit(habitToDomainEntity(item.payload)).catch(() => {});
-    } else if (item.type === 'idea' && item.payload) {
-      setIdeas((prev) => [item.payload, ...prev.filter((i) => i.id !== item.id)]);
-      container.notes.upsertNote(ideaToDomainNote(item.payload)).catch(() => {});
-    } else if (item.type === 'useful_info' && item.payload) {
-      setUsefulInfos((prev) => [item.payload, ...prev.filter((u) => u.id !== item.id)]);
-      container.notes.upsertNote(usefulInfoToDomainNote(item.payload)).catch(() => {});
-    }
-    showToast(`«${item.title}» از سطل زباله بازیابی شد!`, 'success');
+    executeStorageMutation(
+      'بازیابی از سطل زباله',
+      async () => {
+        if (item.type === 'task') {
+          await container.tasks.restoreTask(item.id);
+        } else if (item.type === 'habit') {
+          await container.habits.restoreHabit(item.id);
+        } else if (item.type === 'idea' || item.type === 'useful_info') {
+          await container.notes.restoreNote(item.id);
+        }
+      },
+      () => showToast(`«${item.title}» از سطل زباله بازیابی شد!`, 'success')
+    );
   };
 
   const handlePermanentDeleteTrashItem = (id: string) => {
-    setDeletedTrashItems((prev) => prev.filter((x) => x.id !== id));
-    showToast('مورد انتخاب‌شده برای همیشه از سطل زباله پاک شد.');
+    const target = deletedTrashItems.find((x) => x.id === id);
+    if (!target) return;
+    executeStorageMutation(
+      'حذف دائمی از سطل زباله',
+      async () => {
+        if (target.type === 'task') {
+          await container.tasks.hardDeleteTask(id);
+        } else if (target.type === 'habit') {
+          await container.habits.hardDeleteHabit(id);
+        } else {
+          await container.notes.hardDeleteNote(id);
+        }
+      },
+      () => showToast('مورد انتخاب‌شده برای همیشه از پایگاه‌داده پاک شد.')
+    );
   };
 
   const handleEmptyTrash = () => {
-    setDeletedTrashItems([]);
-    showToast('سطل زباله به طور کامل تخلیه شد.');
+    if (deletedTrashItems.length === 0) return;
+    executeStorageMutation(
+      'تخلیه کامل سطل زباله',
+      async () => {
+        for (const item of deletedTrashItems) {
+          if (item.type === 'task') {
+            await container.tasks.hardDeleteTask(item.id);
+          } else if (item.type === 'habit') {
+            await container.habits.hardDeleteHabit(item.id);
+          } else {
+            await container.notes.hardDeleteNote(item.id);
+          }
+        }
+      },
+      () => showToast('سطل زباله به طور کامل تخلیه شد.')
+    );
   };
 
-  // ================= DELETE MODAL ACTIONS =================
+  // ================= DELETE MODAL ACTIONS (Repository Soft-Delete + Undo) =================
   const handleOpenDeleteModal = (
     type: 'habit' | 'task' | 'idea' | 'useful_info',
     id: string,
@@ -1043,110 +1277,93 @@ export default function App() {
 
   const handleConfirmDelete = () => {
     const { type, id } = deleteModalState;
-    const nowIso = new Date().toISOString();
+    setDeleteModalState((prev) => ({ ...prev, isOpen: false }));
 
     if (type === 'habit') {
-      const deletedHabit = habits.find((h) => h.id === id);
-      setHabits((prev) => prev.filter((h) => h.id !== id));
-      container.habits.softDeleteHabit(id).catch(() => {});
-      if (deletedHabit) {
-        setDeletedTrashItems((prev) => [
-          { id, type: 'habit', title: deletedHabit.title, deletedAt: nowIso, payload: deletedHabit },
-          ...prev.filter((x) => x.id !== id),
-        ]);
-      }
-      showToast(
-        'عادت به سطل زباله منتقل شد.',
-        'info',
-        deletedHabit
-          ? () => {
-              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedHabit.id));
-              setHabits((prev) => [deletedHabit, ...prev.filter((h) => h.id !== deletedHabit.id)]);
-              container.habits.upsertHabit(habitToDomainEntity(deletedHabit)).catch(() => {});
-              showToast('عادت حذف‌شده بازیابی شد!', 'success');
-            }
-          : undefined
+      executeStorageMutation(
+        'حذف نرم عادت',
+        () => container.habits.softDeleteHabit(id),
+        () => {
+          showToast('عادت به سطل زباله منتقل شد.', 'info', () => {
+            executeStorageMutation(
+              'واگرد حذف عادت',
+              () => container.habits.restoreHabit(id),
+              () => showToast('عادت حذف‌شده بازیابی شد!', 'success')
+            );
+          });
+        }
       );
     } else if (type === 'task') {
-      const deletedTask = tasks.find((t) => t.id === id);
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-      container.tasks.softDeleteTask(id).catch(() => {});
-      if (deletedTask) {
-        setDeletedTrashItems((prev) => [
-          { id, type: 'task', title: deletedTask.title, deletedAt: nowIso, payload: deletedTask },
-          ...prev.filter((x) => x.id !== id),
-        ]);
-      }
-      showToast(
-        'مأموریت به سطل زباله منتقل شد.',
-        'info',
-        deletedTask
-          ? () => {
-              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedTask.id));
-              setTasks((prev) => [deletedTask, ...prev.filter((t) => t.id !== deletedTask.id)]);
-              container.tasks.restoreTask(deletedTask.id).catch(() => {});
-              showToast('مأموریت حذف‌شده بازیابی شد!', 'success');
-            }
-          : undefined
+      executeStorageMutation(
+        'حذف نرم مأموریت',
+        () => container.tasks.softDeleteTask(id),
+        () => {
+          showToast('مأموریت به سطل زباله منتقل شد.', 'info', () => {
+            executeStorageMutation(
+              'واگرد حذف مأموریت',
+              () => container.tasks.restoreTask(id),
+              () => showToast('مأموریت حذف‌شده بازیابی شد!', 'success')
+            );
+          });
+        }
       );
-    } else if (type === 'idea') {
-      const deletedIdea = ideas.find((i) => i.id === id);
-      setIdeas((prev) => prev.filter((i) => i.id !== id));
-      container.notes.softDeleteNote(id).catch(() => {});
-      if (deletedIdea) {
-        setDeletedTrashItems((prev) => [
-          { id, type: 'idea', title: deletedIdea.title, deletedAt: nowIso, payload: deletedIdea },
-          ...prev.filter((x) => x.id !== id),
-        ]);
-      }
-      showToast(
-        'ایده به سطل زباله منتقل شد.',
-        'info',
-        deletedIdea
-          ? () => {
-              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedIdea.id));
-              setIdeas((prev) => [deletedIdea, ...prev.filter((i) => i.id !== deletedIdea.id)]);
-              container.notes.upsertNote(ideaToDomainNote(deletedIdea)).catch(() => {});
-              showToast('ایدهٔ حذف‌شده بازیابی شد!', 'success');
-            }
-          : undefined
-      );
-    } else if (type === 'useful_info') {
-      const deletedInfo = usefulInfos.find((u) => u.id === id);
-      setUsefulInfos((prev) => prev.filter((u) => u.id !== id));
-      container.notes.softDeleteNote(id).catch(() => {});
-      if (deletedInfo) {
-        setDeletedTrashItems((prev) => [
-          {
-            id,
-            type: 'useful_info',
-            title: deletedInfo.title,
-            deletedAt: nowIso,
-            payload: deletedInfo,
-          },
-          ...prev.filter((x) => x.id !== id),
-        ]);
-      }
-      showToast(
-        'مورد به سطل زباله منتقل شد.',
-        'info',
-        deletedInfo
-          ? () => {
-              setDeletedTrashItems((prev) => prev.filter((x) => x.id !== deletedInfo.id));
-              setUsefulInfos((prev) => [
-                deletedInfo,
-                ...prev.filter((u) => u.id !== deletedInfo.id),
-              ]);
-              container.notes.upsertNote(usefulInfoToDomainNote(deletedInfo)).catch(() => {});
-              showToast('اطلاعات حذف‌شده بازیابی شد!', 'success');
-            }
-          : undefined
+    } else if (type === 'idea' || type === 'useful_info') {
+      const label = type === 'idea' ? 'ایده' : 'یادداشت کاربردی';
+      executeStorageMutation(
+        `حذف نرم ${label}`,
+        () => container.notes.softDeleteNote(id),
+        () => {
+          showToast(`${label} به سطل زباله منتقل شد.`, 'info', () => {
+            executeStorageMutation(
+              `واگرد حذف ${label}`,
+              () => container.notes.restoreNote(id),
+              () => showToast(`${label} حذف‌شده بازیابی شد!`, 'success')
+            );
+          });
+        }
       );
     }
-    setDeleteModalState((prev) => ({ ...prev, isOpen: false }));
   };
 
-  // ================= RESTORE / BACKUP =================
+  // ================= RESTORE / BACKUP (Transactional Replace / Merge / Rollback on Repository) =================
+  const handleRestoreEnvelope = async (
+    envelope: BackupEnvelopeV2,
+    strategy: 'replace' | 'merge'
+  ): Promise<void> => {
+    const res = await executeStorageMutation(
+      strategy === 'replace'
+        ? 'بازیابی و جایگزینی کامل پایگاه‌داده از فایل پشتیبان'
+        : 'ادغام هوشمند فایل پشتیبان با پایگاه‌داده',
+      () => container.backup.restoreBackup(envelope, strategy),
+      () =>
+        showToast(
+          strategy === 'replace'
+            ? 'اطلاعات با موفقیت در پایگاه‌داده جایگزین و بازیابی شدند!'
+            : 'اطلاعات فایل پشتیبان با موفقیت با داده‌های فعلی ادغام شدند!',
+          'success'
+        )
+    );
+    if (!res) {
+      throw new Error('عملیات بازیابی متوقف شد؛ داده‌های فعلی دست‌نخورده باقی ماندند.');
+    }
+  };
+
+  const handleRollbackLastRestore = async (): Promise<void> => {
+    if (!container.backup.rollbackLastRestore) return;
+    const res = await executeStorageMutation(
+      'بازگردانی به اسنپ‌شات امنیتی پیش از آخرین بازیابی',
+      () => container.backup.rollbackLastRestore!(),
+      () =>
+        showToast(
+          'پایگاه‌داده با موفقیت به وضعیت پیش از آخرین بازیابی بازگردانده شد!',
+          'success'
+        )
+    );
+    if (!res) {
+      throw new Error('خطا در بازگردانی اسنپ‌شات قبلی.');
+    }
+  };
+
   const handleRestoreData = (data: {
     habits: Habit[];
     tasks: Task[];
@@ -1154,21 +1371,29 @@ export default function App() {
     focusSessions: FocusSession[];
     usefulInfos: UsefulInfoItem[];
   }) => {
-    if (Array.isArray(data.habits)) setHabits(data.habits);
-    if (Array.isArray(data.tasks)) setTasks(data.tasks);
-    if (Array.isArray(data.ideas)) setIdeas(data.ideas);
-    if (Array.isArray(data.focusSessions)) setFocusSessions(data.focusSessions);
-    if (Array.isArray(data.usefulInfos)) setUsefulInfos(data.usefulInfos);
-    showToast('اطلاعات با موفقیت بازیابی شدند!', 'success');
+    const canonicalEnvelope = createPlainBackupEnvelope(data);
+    handleRestoreEnvelope(canonicalEnvelope, 'replace').catch(() => {});
   };
 
   // Counts for Badges
-  const pendingTasksCount = tasks.filter((t) => t.targetDate <= getTodayKey() && !t.completed).length;
+  const pendingTasksCount = tasks.filter(
+    (t) => t.targetDate <= getTodayKey() && !t.completed
+  ).length;
+
+  const isDatabaseCompletelyEmpty =
+    isHydrated &&
+    tasks.length === 0 &&
+    habits.length === 0 &&
+    ideas.length === 0 &&
+    usefulInfos.length === 0 &&
+    deletedTrashItems.length === 0;
 
   return (
-    <div className="min-h-screen pb-24 lg:pb-16 selection:bg-indigo-500 selection:text-white transition-colors duration-300">
+    <div className="min-h-screen bg-app text-token-primary pb-24 lg:pb-16 selection:bg-indigo-500 selection:text-white transition-colors duration-200">
       {/* Header */}
       <Header
+        activeTab={activeTab}
+        storageStatus={storageStatus}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
         isDark={isDark}
@@ -1189,30 +1414,87 @@ export default function App() {
         }
       />
 
-      {/* Explicit Native Bridge Diagnostic Banner (Never fail silently) */}
-      {bridgeError && (
-        <div
-          role="alert"
-          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3"
-        >
-          <div className="bg-rose-600 text-white rounded-2xl p-4 shadow-lg flex items-center justify-between gap-3">
-            <p className="text-xs sm:text-sm font-bold">{bridgeError}</p>
+      {/* Storage Initialization / Error / Migration Diagnostic Banner (Never fail silently) */}
+      {(bridgeError ||
+        storageError ||
+        (migrationReport && migrationReport.skippedInvalidRecords > 0)) && (
+        <div role="alert" className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-3">
+          <div className="bg-rose-600 text-white rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div className="space-y-1 text-xs sm:text-sm">
+                {bridgeError && <p className="font-bold">{bridgeError}</p>}
+                {storageError && <p className="font-bold">{storageError}</p>}
+                {migrationReport && migrationReport.skippedInvalidRecords > 0 && (
+                  <p className="font-medium">
+                    هشدار مهاجرت داده: {toPersianNum(migrationReport.skippedInvalidRecords)} رکورد
+                    آسیب‌دیده در داده‌های قدیمی شناسایی شد. نسخهٔ خام اصلی در کلید{' '}
+                    <code className="font-mono dir-ltr bg-black/20 px-1.5 py-0.5 rounded">
+                      {migrationReport.recoverySnapshotKey}
+                    </code>{' '}
+                    نگهداری شده است.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {lastFailedOperation && (
+                <button
+                  type="button"
+                  onClick={() => lastFailedOperation.retry()}
+                  className="px-3 py-1.5 rounded-xl bg-white text-rose-700 font-bold text-xs flex items-center gap-1.5 hover:bg-rose-50 transition cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  تلاش مجدد ({lastFailedOperation.label})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleDownloadEmergencyRecovery}
+                className="px-3 py-1.5 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                خروجی اضطراری داده‌ها
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Optional Sample Data Banner on Clean First Run */}
+      {isDatabaseCompletelyEmpty && !storageError && (
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-3">
+          <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
+              <Database className="w-4 h-4 text-indigo-500 shrink-0" />
+              <span>
+                پایگاه‌دادهٔ محلی کایروس روی این دستگاه آماده و خالی است. می‌توانید از صفر شروع
+                کنید یا داده‌های نمونهٔ آزمایشی را بارگذاری نمایید.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleLoadSampleData}
+              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition cursor-pointer shrink-0"
+            >
+              بارگذاری داده‌های نمونه (اختیاری)
+            </button>
           </div>
         </div>
       )}
 
       {/* In-App Active Reminder Alert Banner */}
       {activeReminderAlert && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 animate-fade-in">
-          <div className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 text-white rounded-2xl p-4 shadow-xl shadow-indigo-600/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-3 animate-fade-in">
+          <div className="bg-indigo-600 text-white rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0 animate-bounce">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
                 <BellRing className="w-5 h-5 text-white" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-black bg-white/20 px-2 py-0.5 rounded-md">
-                    یادآور هوشمند کایروس • ساعت {toPersianNum(activeReminderAlert.time)}
+                  <span className="text-[11px] font-black bg-white/20 px-2 py-0.5 rounded-md tabular-nums">
+                    یادآور کایروس • ساعت {toPersianNum(activeReminderAlert.time)}
                   </span>
                 </div>
                 <p className="text-sm font-black mt-1">{activeReminderAlert.title}</p>
@@ -1227,7 +1509,7 @@ export default function App() {
                     }
                     setActiveReminderAlert(null);
                   }}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   انجام شد
@@ -1238,7 +1520,7 @@ export default function App() {
                   setActiveTab('deep_focus');
                   setActiveReminderAlert(null);
                 }}
-                className="px-3.5 py-2 rounded-xl bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-bold transition cursor-pointer active:scale-95"
+                className="px-3.5 py-2 rounded-xl bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-bold transition cursor-pointer"
               >
                 ورود به تمرکز عمیق
               </button>
@@ -1254,17 +1536,22 @@ export default function App() {
         </div>
       )}
 
-      {/* Navigation */}
-      <Navigation
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        pendingTasksCount={pendingTasksCount}
-        ideasCount={ideas.length}
-        usefulInfoCount={usefulInfos.length}
-      />
+      {/* Workspace Shell: RTL Desktop Sidebar + Main Content Canvas */}
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-6 flex flex-col lg:flex-row items-start gap-6">
+        <Navigation
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          pendingTasksCount={pendingTasksCount}
+          ideasCount={ideas.length}
+          usefulInfoCount={usefulInfos.length}
+          trashCount={deletedTrashItems.length}
+        />
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+        {/* Main Container */}
+        <main
+          className="flex-1 min-w-0 w-full"
+          data-storage-status={storageStatus}
+        >
         {activeTab === 'dashboard' && (
           <DashboardView
             tasks={tasks}
@@ -1274,22 +1561,28 @@ export default function App() {
             onAddTask={handleAddTask}
             onMoveOverdueToToday={() => {
               const todayKey = getTodayKey();
-              setTasks((prev) =>
-                prev.map((t) =>
-                  t.targetDate < todayKey && !t.completed ? { ...t, targetDate: todayKey } : t
-                )
+              const overdue = tasks
+                .filter((t) => t.targetDate < todayKey && !t.completed)
+                .map((t) => taskToDomainEntity({ ...t, targetDate: todayKey }));
+              if (overdue.length === 0) return;
+              executeStorageMutation(
+                'انتقال کارهای عقب‌افتاده به امروز',
+                () => container.tasks.upsertTasksBatch(overdue),
+                () => showToast('کارهای مانده به امروز منتقل شدند.')
               );
-              showToast('کارهای مانده به امروز منتقل شدند.');
             }}
             onMoveOverdueToTomorrow={() => {
               const todayKey = getTodayKey();
               const tomorrowKey = getTomorrowKey();
-              setTasks((prev) =>
-                prev.map((t) =>
-                  t.targetDate < todayKey && !t.completed ? { ...t, targetDate: tomorrowKey } : t
-                )
+              const overdue = tasks
+                .filter((t) => t.targetDate < todayKey && !t.completed)
+                .map((t) => taskToDomainEntity({ ...t, targetDate: tomorrowKey }));
+              if (overdue.length === 0) return;
+              executeStorageMutation(
+                'انتقال کارهای عقب‌افتاده به فردا',
+                () => container.tasks.upsertTasksBatch(overdue),
+                () => showToast('کارهای مانده به فردا منتقل شدند.')
               );
-              showToast('کارهای مانده به فردا منتقل شدند.');
             }}
             onSwitchTab={setActiveTab}
             onStartFocusOnTask={handleStartFocusOnTask}
@@ -1387,11 +1680,7 @@ export default function App() {
           <FocusTimerView
             tasks={tasks}
             focusSessions={focusSessions}
-            activeTaskId={activeFocusTaskId}
-            onLogFocusSession={(session) => {
-              setFocusSessions((prev) => [session, ...prev]);
-              showToast(`جلسه تمرکز ${toPersianNum(session.durationMinutes)} دقیقه‌ای ثبت شد!`, 'success');
-            }}
+            controller={pomodoroController}
           />
         )}
 
@@ -1425,6 +1714,8 @@ export default function App() {
             focusSessions={focusSessions}
             usefulInfos={usefulInfos}
             onRestoreData={handleRestoreData}
+            onRestoreEnvelope={handleRestoreEnvelope}
+            onRollbackLastRestore={handleRollbackLastRestore}
             deletedTrashItems={deletedTrashItems}
             onRestoreTrashItem={handleRestoreTrashItem}
             onPermanentDeleteTrashItem={handlePermanentDeleteTrashItem}
@@ -1439,12 +1730,14 @@ export default function App() {
             githubSyncError={githubSyncError}
           />
         )}
-      </main>
+        </main>
+      </div>
 
       {/* Persistent Global Mini-Timer Player across tabs */}
       <GlobalMiniTimer
         tasks={tasks}
         visible={activeTab !== 'pomodoro'}
+        controller={pomodoroController}
         onOpenFullTimer={() => setActiveTab('pomodoro')}
       />
 

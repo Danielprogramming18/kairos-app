@@ -4,6 +4,7 @@ import {
   computeActualElapsedMinutes,
   computeRemainingSeconds,
   createInitialTimerState,
+  evaluateTimerTick,
   pauseTimer,
   startTimer,
   transitionTimerPhase,
@@ -55,3 +56,24 @@ test('BUG-19: transitionTimerPhase enters long_break (20m) after 4 completed wor
   assert.equal(state.completedWorkCycles, 4);
   assert.equal(state.durationSeconds, 20 * 60);
 });
+
+test('FIX-09: evaluateTimerTick detects work completion across any tab and returns next break state', () => {
+  const t0 = 1_700_000_000_000;
+  const running = startTimer(createInitialTimerState(25, 't-1', 'کدنویسی ماژول'), t0);
+
+  // Midway through -> not completed
+  const midTick = evaluateTimerTick(running, t0 + 500_000);
+  assert.equal(midTick.completedWorkSession, false);
+  assert.equal(midTick.nextState, null);
+  assert.equal(midTick.remainingSeconds, 1000);
+
+  // At or past targetEndEpochMs -> completes work session and transitions to short_break
+  const endTick = evaluateTimerTick(running, t0 + 1500 * 1000);
+  assert.equal(endTick.completedWorkSession, true);
+  assert.equal(endTick.completedDurationMinutes, 25);
+  assert.ok(endTick.nextState);
+  assert.equal(endTick.nextState?.phase, 'short_break');
+  assert.equal(endTick.nextState?.completedWorkCycles, 1);
+  assert.equal(endTick.nextState?.isRunning, false);
+});
+

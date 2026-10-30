@@ -35,6 +35,7 @@ export interface TaskEntity extends AuditableEntity {
   reminderTime?: string | null; // 'HH:MM' 24h local time
   reminded?: boolean;
   projectId?: EntityId | null;
+  sourceId?: EntityId | null; // optional origin ID (e.g. converted from idea/assistant)
   category: string;
   tags: string[];
   subtasks: SubtaskEntity[];
@@ -61,6 +62,7 @@ export interface HabitEntity extends AuditableEntity {
   frequencyType: HabitFrequencyType;
   weeklyGoal: number; // 1..7
   targetDaysOfWeek?: number[]; // 0..6
+  startDate?: LocalDateKey; // 'YYYY-MM-DD'
   archived: boolean;
   /**
    * Denormalized map of 'YYYY-MM-DD' -> true for fast UI rendering and legacy compatibility.
@@ -128,10 +130,18 @@ export interface UserSettingsEntity {
   updatedAt: ISODateTimeString;
 }
 
+export interface MigrationInvalidRecordDetail {
+  collection: 'tasks' | 'habits' | 'ideas' | 'usefulInfos' | 'focusSessions' | 'trash';
+  index: number;
+  reason: string;
+  rawPreview: string;
+}
+
 export interface MigrationReport {
   migratedAt: ISODateTimeString;
   fromSchemaVersion: number;
   toSchemaVersion: number;
+  status?: 'migrated' | 'clean_first_run' | 'already_migrated' | 'failed';
   counts: {
     tasks: number;
     habits: number;
@@ -140,23 +150,32 @@ export interface MigrationReport {
     focusSessions: number;
   };
   skippedInvalidRecords: number;
+  corruptedKeys?: string[];
+  invalidRecords?: MigrationInvalidRecordDetail[];
+  verifiedCountsMatch?: boolean;
   recoverySnapshotKey: string;
+  errorMessage?: string;
+}
+
+export interface BackupPayloadV2 {
+  tasks: TaskEntity[];
+  habits: HabitEntity[];
+  habitEntries: HabitEntryEntity[];
+  notes: NoteEntity[];
+  focusSessions: FocusSessionEntity[];
+  settings?: UserSettingsEntity;
 }
 
 export interface BackupEnvelopeV2 {
+  appId?: 'kairos';
   app: 'Kairos';
+  formatVersion?: 2;
   schemaVersion: 2;
   exportedAt: ISODateTimeString;
   platform: 'web' | 'android_webview' | 'windows_desktop';
+  encrypted?: false;
   checksum: string;
-  payload: {
-    tasks: TaskEntity[];
-    habits: HabitEntity[];
-    habitEntries: HabitEntryEntity[];
-    notes: NoteEntity[];
-    focusSessions: FocusSessionEntity[];
-    settings?: UserSettingsEntity;
-  };
+  payload: BackupPayloadV2;
 }
 
 /**

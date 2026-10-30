@@ -3,12 +3,12 @@
 ## ۱. نمای کلی و اصول بنیادین
 «کایروس | دستیار هوشمند تمرکز» بر پایهٔ معماری تمیز (Clean Architecture / Ports & Adapters) و سیاست **۱۰۰٪ آفلاین-محور (Offline-First)** طراحی شده است:
 
-1. **مربع حقیقت محلی (Local Source of Truth):** تمام داده‌های کاربر به صورت پیش‌فرض و بدون نیاز به اینترنت روی دستگاه ذخیره می‌شوند:
-   - **وب / PWA:** پایگاه دادهٔ تراکنشی `IndexedDB` با موتور `Dexie` (`KairosWebDatabase`) همراه با مهاجرت امن و غیرمخرب از کلیدهای قدیمی `localStorage` (`nazmyar_*`).
-   - **اندروید (Sketchware WebView):** پایگاه دادهٔ بومی `SQLite` از طریق پل ارتباطی نسخه‌دار `window.KairosAndroidBridge`.
-   - **دسکتاپ ویندوز (Tauri v2 / WebView2 Host):** پایگاه دادهٔ بومی `SQLite` از طریق پل ارتباطی نسخه‌دار `window.__KAIROS_DESKTOP_BRIDGE__`.
+1. **منبع حقیقت محلی (Local Source of Truth):** تمام داده‌های کاربر به صورت پیش‌فرض و بدون نیاز به اینترنت روی دستگاه ذخیره می‌شوند:
+   - **وب / PWA و بستهٔ استاتیک اندروید (`android_webview_static`):** پایگاه دادهٔ تراکنشی `IndexedDB` با موتور `Dexie` (`KairosWebDatabase`) همراه با مهاجرت امن و غیرمخرب از کلیدهای قدیمی `localStorage` (`nazmyar_*`).
+   - **اندروید با پل بومی اختیاری (`android_webview_bridged`):** پایگاه دادهٔ بومی `SQLite` از طریق پل ارتباطی نسخه‌دار `window.KairosAndroidBridge`.
+   - **دسکتاپ ویندوز (`windows_desktop_bridged`):** پایگاه دادهٔ بومی `SQLite` از طریق پل ارتباطی نسخه‌دار `window.__KAIROS_DESKTOP_BRIDGE__`.
 2. **عدم وابستگی رابط کاربری به زیرساخت ذخیره‌سازی:** کامپوننت‌های React تنها از طریق `PlatformProvider` و قراردادهای `src/application/repositories.ts` با داده‌ها تعامل دارند.
-3. **جلوگیری از شکست خاموش (Zero Silent Fallback):** اگر پلتفرم روی حالت بومی (`android_webview` یا `windows_desktop`) اجرا شود ولی پل بومی در دسترس نباشد یا نسخهٔ آن ناسازگار باشد، برنامه خطای صریح و قابل تشخیص نمایش می‌دهد و هرگز بی‌صدا به حافظهٔ موقت سوییچ نمی‌کند.
+3. **جلوگیری از شکست خاموش (Zero Silent Fallback):** اگر پلتفرم صریحاً روی حالت پل بومی (`android_webview` یا `windows_desktop`) پیکربندی شود ولی پل بومی در دسترس نباشد یا نسخهٔ آن ناسازگار باشد، برنامه خطای صریح و قابل تشخیص نمایش می‌دهد و هرگز بی‌صدا به حافظهٔ موقت سوییچ نمی‌کند. در مقابل، در بستهٔ استاتیک Sketchware بدون پل بومی، ماژول `hostCapabilities.ts` حالت `android_webview_static` را تشخیص داده و از `IndexedDB` با `setDomStorageEnabled(true)` استفاده می‌کند.
 
 ---
 
@@ -17,21 +17,29 @@
 ```text
 src/
   domain/
-    models.ts              # موجودیت‌های استاندارد دامنه (TaskEntity, HabitEntity, HabitEntryEntity, NoteEntity, FocusSessionEntity, UserSettingsEntity)
+    models.ts                  # موجودیت‌های استاندارد دامنه (TaskEntity, HabitEntity, HabitEntryEntity, NoteEntity, FocusSessionEntity, UserSettingsEntity)
   application/
-    repositories.ts        # قراردادهای Repository و سرویس‌های پلتفرم (PlatformContainer)
+    repositories.ts            # قراردادهای Repository و سرویس‌های پلتفرم (PlatformContainer)
   infrastructure/
     bridge/
-      protocol.ts          # پروتکل پیام‌رسانی JSON نسخه‌دار (1.0.0) با اعتبارسنجی امنیتی، سایز و Origin
+      protocol.ts              # پروتکل پیام‌رسانی JSON نسخه‌دار (1.0.0) با اعتبارسنجی امنیتی، سایز و Origin
+      bridgeAdapters.test.ts   # آزمون‌های واحد و قرارداد برای آداپتورهای اندروید و ویندوز
     web/
-      dexieAdapter.ts      # پیاده‌سازی IndexedDB با Dexie + مهاجرت تراکنشی و غیرمخرب از localStorage
-      dexieAdapter.test.ts # آزمون‌های قرارداد و مهاجرت با fake-indexeddb
+      dexieAdapter.ts          # پیاده‌سازی IndexedDB با Dexie + مهاجرت تراکنشی و غیرمخرب از localStorage
+      dexieAdapter.test.ts     # آزمون‌های قرارداد، مهاجرت، بکاپ و Rollback با fake-indexeddb
     android/
-      androidBridgeAdapter.ts # آداپتور پل بومی Sketchware WebView
+      androidBridgeAdapter.ts  # آداپتور پل بومی Sketchware WebView
     desktop/
-      desktopBridgeAdapter.ts # آداپتور پل بومی دسکتاپ ویندوز
+      desktopBridgeAdapter.ts  # آداپتور پل بومی دسکتاپ ویندوز
   app/
-    PlatformContext.tsx    # تزریق وابستگی در زمان راه‌اندازی (Startup DI) و نگاشت مدل‌ها
+    PlatformContext.tsx        # تزریق وابستگی در زمان راه‌اندازی (Startup DI) و نگاشت بدون اتلاف مدل‌ها
+  utils/
+    pomodoroEngine.ts          # موتور سراسری و بدون انحراف تایمر تمرکز (Epoch-based)
+    habitStreaks.ts            # محاسبهٔ زنجیره، نرخ پنجرهٔ زمانی، startDate و روزهای هدف عادت‌ها
+    analyticsCalculator.ts     # موتور گزارش‌های تحلیلی مبتنی بر تاریخ واقعی انجام (completedAt)
+    backupCrypto.ts            # قالب رسمی BackupEnvelopeV2، اعتبارسنجی سخت‌گیرانه و رمزنگاری AES-256-GCM
+    hostCapabilities.ts        # بازرس قابلیت‌های محیط اجرا (Web / Sketchware Static / Bridged)
+    releaseReadiness.ts        # موتور خودآزمایی زندهٔ ۶ زیرسیستم حیاتی در زمان اجرا
 ```
 
 ---

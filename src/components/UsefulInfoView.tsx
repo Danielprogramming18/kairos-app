@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Bookmark,
   Plus,
@@ -66,6 +66,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<UsefulInfoCategory | 'all'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState<number>(50);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,10 +177,15 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+              <label
+                htmlFor="useful-info-title-input"
+                className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5"
+              >
                 عنوان اطلاعات مهم
               </label>
               <input
+                id="useful-info-title-input"
+                ref={titleInputRef}
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -189,10 +195,14 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+              <label
+                htmlFor="useful-info-category-select"
+                className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5"
+              >
                 دسته‌بندی
               </label>
               <select
+                id="useful-info-category-select"
                 value={category}
                 onChange={(e) => setCategory(e.target.value as UsefulInfoCategory)}
                 aria-label="دسته‌بندی اطلاعات کاربردی"
@@ -207,10 +217,14 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5">
+            <label
+              htmlFor="useful-info-content-textarea"
+              className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5"
+            >
               متن، جزئیات، کد یا لینک‌ها
             </label>
             <textarea
+              id="useful-info-content-textarea"
               rows={3}
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -291,14 +305,50 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
 
       {/* Cards Grid */}
       {filteredItems.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 p-12 rounded-3xl border border-slate-200/70 dark:border-slate-800 text-center space-y-2">
-          <Bookmark className="w-8 h-8 text-slate-400 mx-auto" />
-          <p className="text-sm font-bold text-slate-600 dark:text-slate-300">
-            موردی در بخش اطلاعات کاربردی یافت نشد.
-          </p>
-          <p className="text-xs text-slate-400">
-            از فرم بالا می‌توانید اولین یادداشت، لینک، دستور یا اطلاعات مهم خود را ذخیره کنید.
-          </p>
+        <div
+          data-testid="notes-empty-state"
+          className="bg-white dark:bg-slate-900 p-12 rounded-3xl border border-slate-200/70 dark:border-slate-800 text-center space-y-3"
+        >
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 mx-auto flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+            <Bookmark className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
+              {items.length === 0
+                ? 'هنوز هیچ یادداشت یا مرجع کاربردی ثبت نشده است'
+                : 'موردی با فیلتر یا جستجوی فعلی در اطلاعات کاربردی یافت نشد'}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+              {items.length === 0
+                ? 'دستورات، لینک‌های پرکاربرد، چک‌لیست‌ها یا نکات مهم خود را ذخیره کنید تا همیشه آفلاین در دسترس باشند.'
+                : 'می‌توانید فیلتر دسته‌بندی یا عبارت جستجو را پاک کنید یا یک یادداشت جدید بسازید.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                titleInputRef.current?.focus();
+              }}
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              ثبت یادداشت کاربردی جدید
+            </button>
+            {(selectedCategory !== 'all' || searchQuery.trim() !== '') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCategory('all');
+                  setSearchQuery('');
+                }}
+                className="inline-flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                پاک کردن فیلترها
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -339,6 +389,11 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
                           type="button"
                           onClick={() => onUpdateItem(item.id, { pinned: !item.pinned })}
                           title={item.pinned ? 'برداشتن سنجاق' : 'سنجاق کردن به بالا'}
+                          aria-label={
+                            item.pinned
+                              ? `برداشتن سنجاق «${item.title}»`
+                              : `سنجاق کردن «${item.title}»`
+                          }
                           className={`p-1.5 rounded-xl transition cursor-pointer ${
                             item.pinned
                               ? 'bg-amber-500/15 text-amber-500'
@@ -351,6 +406,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
                           type="button"
                           onClick={() => handleStartEdit(item)}
                           title="ویرایش"
+                          aria-label={`ویرایش یادداشت «${item.title}»`}
                           className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 transition cursor-pointer"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
@@ -359,6 +415,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
                           type="button"
                           onClick={() => onDeleteItem(item.id)}
                           title="حذف"
+                          aria-label={`حذف یادداشت «${item.title}»`}
                           className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-rose-500 transition cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

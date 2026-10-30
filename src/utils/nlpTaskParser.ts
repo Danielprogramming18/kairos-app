@@ -7,6 +7,12 @@ export interface ParsedTaskResult {
   targetDate: string; // YYYY-MM-DD
   reminderTime?: string; // HH:MM (24-hour)
   rawInput: string;
+  hasExtractedTokens: boolean;
+  extractedDateDetected: boolean;
+  extractedDateLabel?: 'امروز' | 'فردا' | 'پس‌فردا';
+  extractedDurationDetected: boolean;
+  extractedPriorityDetected: boolean;
+  extractedReminderDetected: boolean;
 }
 
 /**
@@ -26,6 +32,12 @@ export const parseNaturalTaskInput = (
   let priority = 1; // default priority 1
   let reminderTime: string | undefined = undefined;
 
+  let extractedDateDetected = false;
+  let extractedDateLabel: 'امروز' | 'فردا' | 'پس‌فردا' | undefined = undefined;
+  let extractedDurationDetected = false;
+  let extractedPriorityDetected = false;
+  let extractedReminderDetected = false;
+
   // 1. Detect Date relative to referenceDate (BUG-23: match only standalone tokens bounded by whitespace/punctuation)
   const hasPasFarda = /(^|[\s،,؛:])(پس‌فردا|پس فردا)(?=$|[\s،,؛:])/.test(normalized);
   const hasFarda = !hasPasFarda && /(^|[\s،,؛:])فردا(?=$|[\s،,؛:])/.test(normalized);
@@ -33,10 +45,16 @@ export const parseNaturalTaskInput = (
 
   if (hasPasFarda) {
     targetDate = getDateKey(addDays(referenceDate, 2));
+    extractedDateDetected = true;
+    extractedDateLabel = 'پس‌فردا';
   } else if (hasFarda) {
     targetDate = getDateKey(addDays(referenceDate, 1));
+    extractedDateDetected = true;
+    extractedDateLabel = 'فردا';
   } else if (hasEmrooz) {
     targetDate = getDateKey(referenceDate);
+    extractedDateDetected = true;
+    extractedDateLabel = 'امروز';
   }
 
   // 2. Detect Reminder Time (e.g. "ساعت 5 عصر", "ساعت 17:30", "ساعت 9 صبح")
@@ -59,35 +77,44 @@ export const parseNaturalTaskInput = (
 
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       reminderTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      extractedReminderDetected = true;
     }
   }
 
   // 3. Detect Priority (اولویت ۱ یا اولویت ۲ یا P1 یا P2)
-  const priorityMatch = normalized.match(/اولویت\s*(\d+)/i) || normalized.match(/p(\d+)/i);
+  const priorityMatch = normalized.match(/اولویت\s*(\d+)/i) || normalized.match(/(?:^|\s)p(\d+)(?=$|\s)/i);
   if (priorityMatch) {
     priority = Math.max(1, Math.min(20, parseInt(priorityMatch[1], 10)));
+    extractedPriorityDetected = true;
   }
 
   // 4. Detect Duration (e.g. "۴۵ دقیقه", "1 ساعت", "نیم ساعت", "۹۰ دقیقه", "۱.۵ ساعت")
   const decimalHourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*ساعت(?!\s*\d)/);
   if (normalized.includes('نیم ساعت')) {
     duration = 30;
+    extractedDurationDetected = true;
   } else if (normalized.includes('یک ساعت و نیم')) {
     duration = 90;
+    extractedDurationDetected = true;
   } else if (decimalHourMatch && (!timeMatch || normalized.includes('.'))) {
     duration = Math.round(parseFloat(decimalHourMatch[1]) * 60);
+    extractedDurationDetected = true;
   } else if (normalized.includes('دو ساعت')) {
     duration = 120;
+    extractedDurationDetected = true;
   } else if (normalized.includes('یک ساعت')) {
     duration = 60;
+    extractedDurationDetected = true;
   } else {
     const minMatch = normalized.match(/(\d+)\s*دقیقه/);
     if (minMatch) {
       duration = parseInt(minMatch[1], 10);
+      extractedDurationDetected = true;
     } else {
       const durationHourMatch = normalized.match(/(\d+(?:\.\d+)?)\s+ساعت/);
       if (durationHourMatch) {
         duration = Math.round(parseFloat(durationHourMatch[1]) * 60);
+        extractedDurationDetected = true;
       }
     }
   }
@@ -107,7 +134,7 @@ export const parseNaturalTaskInput = (
     .replace(/(?:[\d۰-۹]+(?:[./٫][\d۰-۹]+)?\s*ساعت)/g, '')
     .replace(/(?:[\d۰-۹]+\s*دقیقه)/g, '')
     .replace(/نیم ساعت|یک ساعت و نیم|دو ساعت|یک ساعت/g, '')
-    .replace(/(?:اولویت\s*[\d۰-۹]+|p[\d۰-۹]+)/gi, '')
+    .replace(/(?:اولویت\s*[\d۰-۹]+|(?:^|\s)p[\d۰-۹]+(?=$|\s))/gi, '')
     .replace(/،/g, ' ')
     .replace(/,/g, ' ')
     .replace(/\s+/g, ' ')
@@ -117,6 +144,12 @@ export const parseNaturalTaskInput = (
     cleanedTitle = input.trim();
   }
 
+  const hasExtractedTokens =
+    extractedDateDetected ||
+    extractedDurationDetected ||
+    extractedPriorityDetected ||
+    extractedReminderDetected;
+
   return {
     title: cleanedTitle,
     duration: Math.max(5, duration),
@@ -124,5 +157,12 @@ export const parseNaturalTaskInput = (
     targetDate,
     reminderTime,
     rawInput: input,
+    hasExtractedTokens,
+    extractedDateDetected,
+    extractedDateLabel,
+    extractedDurationDetected,
+    extractedPriorityDetected,
+    extractedReminderDetected,
   };
 };
+

@@ -14,6 +14,7 @@ import {
   HabitEntity,
   HabitEntryEntity,
   LocalDateKey,
+  MigrationInvalidRecordDetail,
   MigrationReport,
   NoteEntity,
   NoteKind,
@@ -34,6 +35,11 @@ import {
   TaskFilter,
   TaskRepository,
 } from '../../application/repositories';
+import {
+  computeBackupChecksum,
+  validateAndPreviewBackupPayload,
+  validateBackupEnvelopeObject,
+} from '../../utils/backupCrypto';
 
 export const LEGACY_STORAGE_KEYS = {
   HABITS: 'nazmyar_habits_v1',
@@ -41,6 +47,7 @@ export const LEGACY_STORAGE_KEYS = {
   IDEAS: 'nazmyar_danial_ideas_v1',
   FOCUS_SESSIONS: 'nazmyar_focus_sessions_v1',
   USEFUL_INFO: 'nazmyar_useful_info_v1',
+  TRASH: 'nazmyar_trash_v1',
   THEME: 'nazmyar_theme',
   SOUND: 'nazmyar_sound',
   GITHUB_CONFIG: 'kairos_github_config_v1',
@@ -49,6 +56,8 @@ export const LEGACY_STORAGE_KEYS = {
 
 export const MIGRATION_MARKER_KEY = 'kairos_indexeddb_migrated_v2';
 export const MIGRATION_RECOVERY_SNAPSHOT_KEY = 'kairos_migration_recovery_v1';
+export const PRE_RESTORE_SNAPSHOT_KEY = 'kairos_pre_restore_snapshot_v2';
+export const CROSS_TAB_SYNC_CHANNEL = 'kairos_db_sync_v2';
 
 export interface KeyValueRecord {
   key: string;
@@ -79,6 +88,18 @@ export class KairosWebDatabase extends Dexie {
   }
 }
 
+function notifyCrossTabSync(operation: string) {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const ch = new BroadcastChannel(CROSS_TAB_SYNC_CHANNEL);
+      ch.postMessage({ operation, timestamp: Date.now() });
+      ch.close();
+    }
+  } catch {
+    // BroadcastChannel is optional in non-browser test runners
+  }
+}
+
 function computeSimpleChecksum(payload: unknown): string {
   const str = JSON.stringify(payload);
   let hash = 2166136261;
@@ -89,24 +110,38 @@ function computeSimpleChecksum(payload: unknown): string {
   return `fnv1a_${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-function safeParseJsonArray(raw: string | null): { items: unknown[]; hadError: boolean } {
-  if (!raw || !raw.trim()) return { items: [], hadError: false };
+interface LegacyParseResult {
+  keyExists: boolean;
+  items: unknown[];
+  hadParseError: boolean;
+}
+
+/**
+ * Distinguishes between "data does not exist (raw === null)" vs "reading/parsing failed".
+ */
+function inspectLegacyJsonArray(raw: string | null): LegacyParseResult {
+  if (raw === null || raw === undefined) {
+    return { keyExists: false, items: [], hadParseError: false };
+  }
+  if (!raw.trim()) {
+    return { keyExists: true, items: [], hadParseError: false };
+  }
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return { items: parsed, hadError: false };
+      return { keyExists: true, items: parsed, hadParseError: false };
     }
-    return { items: [], hadError: true };
+    return { keyExists: true, items: [], hadParseError: true };
   } catch {
-    return { items: [], hadError: true };
+    return { keyExists: true, items: [], hadParseError: true };
   }
 }
 
 /**
  * Safely migrates legacy localStorage keys (`nazmyar_*`) into IndexedDB (`KairosWebDatabase`).
- * - Idempotent: will not duplicate records if called multiple times.
- * - Non-destructive: preserves original `nazmyar_*` keys and writes a raw recovery snapshot.
- * - Transactional: atomic commit across all object stores.
+ * - Versioned & Idempotent: will not duplicate records or re-seed if called multiple times.
+ * - Non-destructive: preserves original `nazmyar_*` keys and writes a verified raw recovery snapshot.
+ * - Verifies post-write counts inside IndexedDB before marking migration complete.
  */
 export async function migrateLegacyLocalStorageToIndexedDB(
   db: KairosWebDatabase,
@@ -116,7 +151,11 @@ export async function migrateLegacyLocalStorageToIndexedDB(
 ): Promise<MigrationReport | null> {
   const existingMarker = await db.kvState.get(MIGRATION_MARKER_KEY);
   if (existingMarker && existingMarker.value) {
-    return existingMarker.value as MigrationReport;
+    const prev = existingMarker.value as MigrationReport;
+    return {
+      ...prev,
+      status: 'already_migrated',
+    };
   }
 
   if (!storage) {
@@ -128,49 +167,84 @@ export async function migrateLegacyLocalStorageToIndexedDB(
   const rawIdeas = storage.getItem(LEGACY_STORAGE_KEYS.IDEAS);
   const rawUsefulInfos = storage.getItem(LEGACY_STORAGE_KEYS.USEFUL_INFO);
   const rawFocus = storage.getItem(LEGACY_STORAGE_KEYS.FOCUS_SESSIONS);
+  const rawTrash = storage.getItem(LEGACY_STORAGE_KEYS.TRASH);
   const rawTheme = storage.getItem(LEGACY_STORAGE_KEYS.THEME);
   const rawSound = storage.getItem(LEGACY_STORAGE_KEYS.SOUND);
 
-  // 1. Save non-destructive raw recovery snapshot before touching anything
-  try {
-    const existingSnapshot = storage.getItem(MIGRATION_RECOVERY_SNAPSHOT_KEY);
-    if (!existingSnapshot) {
-      storage.setItem(
-        MIGRATION_RECOVERY_SNAPSHOT_KEY,
-        JSON.stringify({
-          snapshotAt: nowIso(),
-          raw: {
-            [LEGACY_STORAGE_KEYS.TASKS]: rawTasks,
-            [LEGACY_STORAGE_KEYS.HABITS]: rawHabits,
-            [LEGACY_STORAGE_KEYS.IDEAS]: rawIdeas,
-            [LEGACY_STORAGE_KEYS.USEFUL_INFO]: rawUsefulInfos,
-            [LEGACY_STORAGE_KEYS.FOCUS_SESSIONS]: rawFocus,
-            [LEGACY_STORAGE_KEYS.THEME]: rawTheme,
-            [LEGACY_STORAGE_KEYS.SOUND]: rawSound,
-          },
-        })
-      );
-    }
-  } catch {
-    // Ignore quota errors on snapshot write; original keys remain untouched anyway
-  }
+  const hasAnyLegacyData =
+    rawTasks !== null ||
+    rawHabits !== null ||
+    rawIdeas !== null ||
+    rawUsefulInfos !== null ||
+    rawFocus !== null ||
+    rawTrash !== null;
 
   const now = nowIso();
+
+  // 1. If any legacy data exists, create and verify a recovery snapshot BEFORE migrating.
+  if (hasAnyLegacyData) {
+    const existingSnapshot = storage.getItem(MIGRATION_RECOVERY_SNAPSHOT_KEY);
+    if (!existingSnapshot) {
+      const snapshotPayload = JSON.stringify({
+        snapshotAt: now,
+        raw: {
+          [LEGACY_STORAGE_KEYS.TASKS]: rawTasks,
+          [LEGACY_STORAGE_KEYS.HABITS]: rawHabits,
+          [LEGACY_STORAGE_KEYS.IDEAS]: rawIdeas,
+          [LEGACY_STORAGE_KEYS.USEFUL_INFO]: rawUsefulInfos,
+          [LEGACY_STORAGE_KEYS.FOCUS_SESSIONS]: rawFocus,
+          [LEGACY_STORAGE_KEYS.TRASH]: rawTrash,
+          [LEGACY_STORAGE_KEYS.THEME]: rawTheme,
+          [LEGACY_STORAGE_KEYS.SOUND]: rawSound,
+        },
+      });
+      try {
+        storage.setItem(MIGRATION_RECOVERY_SNAPSHOT_KEY, snapshotPayload);
+        const verifyRead = storage.getItem(MIGRATION_RECOVERY_SNAPSHOT_KEY);
+        if (!verifyRead || !verifyRead.includes('"snapshotAt"')) {
+          throw new Error('Snapshot read-back verification failed.');
+        }
+      } catch (err: any) {
+        throw new Error(
+          `خطا در ایجاد اسنپ‌شات پشتیبان پیش از مهاجرت (${err?.message || 'Storage Error'})؛ عملیات متوقف شد تا داده‌های اصلی دست‌نخورده بمانند.`
+        );
+      }
+    }
+  }
+
   let skippedInvalidRecords = 0;
+  const corruptedKeys: string[] = [];
+  const invalidRecords: MigrationInvalidRecordDetail[] = [];
 
   // Parse Tasks
-  const parsedTasks = safeParseJsonArray(rawTasks);
-  if (parsedTasks.hadError) skippedInvalidRecords++;
-  const taskEntities: TaskEntity[] = [];
-  for (const raw of parsedTasks.items) {
+  const parsedTasks = inspectLegacyJsonArray(rawTasks);
+  if (parsedTasks.hadParseError) {
+    skippedInvalidRecords++;
+    corruptedKeys.push(LEGACY_STORAGE_KEYS.TASKS);
+  }
+  const taskEntitiesMap = new Map<string, TaskEntity>();
+  for (let i = 0; i < parsedTasks.items.length; i++) {
+    const raw = parsedTasks.items[i];
     if (!raw || typeof raw !== 'object') {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'tasks',
+        index: i,
+        reason: 'رکورد وظیفه یک شیء معتبر نیست.',
+        rawPreview: String(raw).slice(0, 120),
+      });
       continue;
     }
     const item = raw as Record<string, unknown>;
     const title = typeof item.title === 'string' ? item.title.trim() : '';
     if (!title) {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'tasks',
+        index: i,
+        reason: 'عنوان وظیفه خالی یا نامعتبر است.',
+        rawPreview: JSON.stringify(raw).slice(0, 120),
+      });
       continue;
     }
     const id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createEntityId('t');
@@ -188,7 +262,7 @@ export async function migrateLegacyLocalStorageToIndexedDB(
         ? item.targetDate
         : now.slice(0, 10);
 
-    taskEntities.push({
+    taskEntitiesMap.set(id, {
       id,
       title,
       description: typeof item.description === 'string' ? item.description : undefined,
@@ -197,12 +271,15 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       priority,
       duration,
       targetDate,
-      dueAt: null,
+      dueAt: typeof item.dueAt === 'string' ? item.dueAt : null,
       reminderTime: typeof item.reminderTime === 'string' ? item.reminderTime : null,
       reminded: Boolean(item.reminded),
-      projectId: null,
+      projectId: typeof item.projectId === 'string' ? item.projectId : null,
+      sourceId: typeof item.sourceId === 'string' ? item.sourceId : null,
       category: typeof item.category === 'string' && item.category ? item.category : 'work',
-      tags: [],
+      tags: Array.isArray(item.tags)
+        ? item.tags.filter((t): t is string => typeof t === 'string')
+        : [],
       subtasks: Array.isArray(item.subtasks)
         ? item.subtasks
             .filter((s): s is Record<string, unknown> => Boolean(s && typeof s === 'object'))
@@ -214,28 +291,45 @@ export async function migrateLegacyLocalStorageToIndexedDB(
         : [],
       completedAt:
         typeof item.completedAt === 'string' ? item.completedAt : completed ? now : null,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      revision: 1,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : now,
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : now,
+      deletedAt: typeof item.deletedAt === 'string' ? item.deletedAt : null,
+      revision:
+        typeof item.revision === 'number' && item.revision >= 1 ? Math.round(item.revision) : 1,
     });
   }
 
   // Parse Habits & Habit Entries
-  const parsedHabits = safeParseJsonArray(rawHabits);
-  if (parsedHabits.hadError) skippedInvalidRecords++;
-  const habitEntities: HabitEntity[] = [];
-  const habitEntryEntities: HabitEntryEntity[] = [];
+  const parsedHabits = inspectLegacyJsonArray(rawHabits);
+  if (parsedHabits.hadParseError) {
+    skippedInvalidRecords++;
+    corruptedKeys.push(LEGACY_STORAGE_KEYS.HABITS);
+  }
+  const habitEntitiesMap = new Map<string, HabitEntity>();
+  const habitEntryEntitiesMap = new Map<string, HabitEntryEntity>();
 
-  for (const raw of parsedHabits.items) {
+  for (let i = 0; i < parsedHabits.items.length; i++) {
+    const raw = parsedHabits.items[i];
     if (!raw || typeof raw !== 'object') {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'habits',
+        index: i,
+        reason: 'رکورد عادت یک شیء معتبر نیست.',
+        rawPreview: String(raw).slice(0, 120),
+      });
       continue;
     }
     const item = raw as Record<string, unknown>;
     const title = typeof item.title === 'string' ? item.title.trim() : '';
     if (!title) {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'habits',
+        index: i,
+        reason: 'عنوان عادت خالی یا نامعتبر است.',
+        rawPreview: JSON.stringify(raw).slice(0, 120),
+      });
       continue;
     }
     const id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createEntityId('h');
@@ -259,8 +353,9 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       for (const [dateKey, val] of Object.entries(item.completedDates as Record<string, unknown>)) {
         if (val && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
           completedDates[dateKey] = true;
-          habitEntryEntities.push({
-            id: `he_${id}_${dateKey}`,
+          const entryId = `he_${id}_${dateKey}`;
+          habitEntryEntitiesMap.set(entryId, {
+            id: entryId,
             habitId: id,
             dateKey,
             completed: true,
@@ -273,7 +368,7 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       }
     }
 
-    habitEntities.push({
+    habitEntitiesMap.set(id, {
       id,
       title,
       category,
@@ -281,86 +376,223 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       color: typeof item.color === 'string' && item.color ? item.color : '#6366f1',
       frequencyType: weeklyGoal === 7 ? 'daily' : 'weekly_target',
       weeklyGoal,
-      archived: false,
+      startDate: typeof item.startDate === 'string' ? item.startDate : now.slice(0, 10),
+      archived: Boolean(item.archived),
       completedDates,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      revision: 1,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : now,
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : now,
+      deletedAt: typeof item.deletedAt === 'string' ? item.deletedAt : null,
+      revision:
+        typeof item.revision === 'number' && item.revision >= 1 ? Math.round(item.revision) : 1,
     });
   }
 
   // Parse Ideas & Useful Info into unified Notes store
-  const noteEntities: NoteEntity[] = [];
-  const parsedIdeas = safeParseJsonArray(rawIdeas);
-  if (parsedIdeas.hadError) skippedInvalidRecords++;
-  for (const raw of parsedIdeas.items) {
+  const noteEntitiesMap = new Map<string, NoteEntity>();
+  const parsedIdeas = inspectLegacyJsonArray(rawIdeas);
+  if (parsedIdeas.hadParseError) {
+    skippedInvalidRecords++;
+    corruptedKeys.push(LEGACY_STORAGE_KEYS.IDEAS);
+  }
+  for (let i = 0; i < parsedIdeas.items.length; i++) {
+    const raw = parsedIdeas.items[i];
     if (!raw || typeof raw !== 'object') {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'ideas',
+        index: i,
+        reason: 'رکورد ایده یک شیء معتبر نیست.',
+        rawPreview: String(raw).slice(0, 120),
+      });
       continue;
     }
     const item = raw as Record<string, unknown>;
     const title = typeof item.title === 'string' ? item.title.trim() : '';
     if (!title) {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'ideas',
+        index: i,
+        reason: 'عنوان ایده خالی یا نامعتبر است.',
+        rawPreview: JSON.stringify(raw).slice(0, 120),
+      });
       continue;
     }
     const id =
       typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createEntityId('id');
-    noteEntities.push({
+    noteEntitiesMap.set(id, {
       id,
       kind: 'idea',
       title,
       content: typeof item.note === 'string' ? item.note : '',
       category: typeof item.category === 'string' ? item.category : 'project',
-      tags: [],
+      tags: Array.isArray(item.tags)
+        ? item.tags.filter((t): t is string => typeof t === 'string')
+        : [],
       pinned: false,
+      linkedTaskId: typeof item.linkedTaskId === 'string' ? item.linkedTaskId : null,
       displayDateLabel: typeof item.createdAt === 'string' ? item.createdAt : undefined,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      revision: 1,
+      createdAt: typeof item.createdAtIso === 'string' ? item.createdAtIso : now,
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : now,
+      deletedAt: typeof item.deletedAt === 'string' ? item.deletedAt : null,
+      revision:
+        typeof item.revision === 'number' && item.revision >= 1 ? Math.round(item.revision) : 1,
     });
   }
 
-  const parsedUseful = safeParseJsonArray(rawUsefulInfos);
-  if (parsedUseful.hadError) skippedInvalidRecords++;
-  for (const raw of parsedUseful.items) {
+  const parsedUseful = inspectLegacyJsonArray(rawUsefulInfos);
+  if (parsedUseful.hadParseError) {
+    skippedInvalidRecords++;
+    corruptedKeys.push(LEGACY_STORAGE_KEYS.USEFUL_INFO);
+  }
+  for (let i = 0; i < parsedUseful.items.length; i++) {
+    const raw = parsedUseful.items[i];
     if (!raw || typeof raw !== 'object') {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'usefulInfos',
+        index: i,
+        reason: 'رکورد اطلاعات کاربردی یک شیء معتبر نیست.',
+        rawPreview: String(raw).slice(0, 120),
+      });
       continue;
     }
     const item = raw as Record<string, unknown>;
     const title = typeof item.title === 'string' ? item.title.trim() : '';
     if (!title) {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'usefulInfos',
+        index: i,
+        reason: 'عنوان اطلاعات کاربردی خالی یا نامعتبر است.',
+        rawPreview: JSON.stringify(raw).slice(0, 120),
+      });
       continue;
     }
     const id =
       typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createEntityId('info');
-    noteEntities.push({
+    noteEntitiesMap.set(id, {
       id,
       kind: 'useful_info',
       title,
       content: typeof item.content === 'string' ? item.content : '',
       category: typeof item.category === 'string' ? item.category : 'work',
-      tags: [],
+      tags: Array.isArray(item.tags)
+        ? item.tags.filter((t): t is string => typeof t === 'string')
+        : [],
       pinned: Boolean(item.pinned),
       displayDateLabel: typeof item.createdAt === 'string' ? item.createdAt : undefined,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      revision: 1,
+      createdAt: typeof item.createdAtIso === 'string' ? item.createdAtIso : now,
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : now,
+      deletedAt: typeof item.deletedAt === 'string' ? item.deletedAt : null,
+      revision:
+        typeof item.revision === 'number' && item.revision >= 1 ? Math.round(item.revision) : 1,
     });
   }
 
+  // Parse Legacy Trash (`nazmyar_trash_v1`) into canonical soft-deleted records
+  const parsedTrash = inspectLegacyJsonArray(rawTrash);
+  if (parsedTrash.hadParseError) {
+    skippedInvalidRecords++;
+    corruptedKeys.push(LEGACY_STORAGE_KEYS.TRASH);
+  }
+  for (let i = 0; i < parsedTrash.items.length; i++) {
+    const raw = parsedTrash.items[i];
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const id = typeof item.id === 'string' ? item.id : '';
+    const type = item.type;
+    const deletedAt = typeof item.deletedAt === 'string' ? item.deletedAt : now;
+    const payload = item.payload as Record<string, unknown> | undefined;
+    if (!id || !payload || typeof payload !== 'object') continue;
+    const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+    if (!title) continue;
+
+    if (type === 'task' && !taskEntitiesMap.has(id)) {
+      taskEntitiesMap.set(id, {
+        id,
+        title,
+        description: typeof payload.description === 'string' ? payload.description : undefined,
+        status: payload.completed ? 'done' : 'todo',
+        completed: Boolean(payload.completed),
+        priority: typeof payload.priority === 'number' ? payload.priority : 1,
+        duration: typeof payload.duration === 'number' ? payload.duration : 45,
+        targetDate: typeof payload.targetDate === 'string' ? payload.targetDate : now.slice(0, 10),
+        dueAt: null,
+        reminderTime: typeof payload.reminderTime === 'string' ? payload.reminderTime : null,
+        reminded: Boolean(payload.reminded),
+        projectId: null,
+        sourceId: null,
+        category: typeof payload.category === 'string' ? payload.category : 'work',
+        tags: [],
+        subtasks: [],
+        completedAt: typeof payload.completedAt === 'string' ? payload.completedAt : null,
+        createdAt: now,
+        updatedAt: deletedAt,
+        deletedAt,
+        revision: 1,
+      });
+    } else if (type === 'habit' && !habitEntitiesMap.has(id)) {
+      habitEntitiesMap.set(id, {
+        id,
+        title,
+        category: (typeof payload.category === 'string' ? payload.category : 'health') as HabitCategoryId,
+        emoji: typeof payload.emoji === 'string' ? payload.emoji : '✨',
+        color: typeof payload.color === 'string' ? payload.color : '#6366f1',
+        frequencyType: 'daily',
+        weeklyGoal: typeof payload.weeklyGoal === 'number' ? payload.weeklyGoal : 7,
+        archived: false,
+        completedDates:
+          payload.completedDates && typeof payload.completedDates === 'object'
+            ? (payload.completedDates as Record<string, boolean>)
+            : {},
+        createdAt: now,
+        updatedAt: deletedAt,
+        deletedAt,
+        revision: 1,
+      });
+    } else if ((type === 'idea' || type === 'useful_info') && !noteEntitiesMap.has(id)) {
+      noteEntitiesMap.set(id, {
+        id,
+        kind: type === 'idea' ? 'idea' : 'useful_info',
+        title,
+        content:
+          type === 'idea'
+            ? typeof payload.note === 'string'
+              ? payload.note
+              : ''
+            : typeof payload.content === 'string'
+            ? payload.content
+            : '',
+        category: typeof payload.category === 'string' ? payload.category : 'work',
+        tags: [],
+        pinned: Boolean(payload.pinned),
+        displayDateLabel: typeof payload.createdAt === 'string' ? payload.createdAt : undefined,
+        createdAt: now,
+        updatedAt: deletedAt,
+        deletedAt,
+        revision: 1,
+      });
+    }
+  }
+
   // Parse Focus Sessions
-  const focusEntities: FocusSessionEntity[] = [];
-  const parsedFocus = safeParseJsonArray(rawFocus);
-  if (parsedFocus.hadError) skippedInvalidRecords++;
-  for (const raw of parsedFocus.items) {
+  const focusEntitiesMap = new Map<string, FocusSessionEntity>();
+  const parsedFocus = inspectLegacyJsonArray(rawFocus);
+  if (parsedFocus.hadParseError) {
+    skippedInvalidRecords++;
+    corruptedKeys.push(LEGACY_STORAGE_KEYS.FOCUS_SESSIONS);
+  }
+  for (let i = 0; i < parsedFocus.items.length; i++) {
+    const raw = parsedFocus.items[i];
     if (!raw || typeof raw !== 'object') {
       skippedInvalidRecords++;
+      invalidRecords.push({
+        collection: 'focusSessions',
+        index: i,
+        reason: 'رکورد جلسه تمرکز یک شیء معتبر نیست.',
+        rawPreview: String(raw).slice(0, 120),
+      });
       continue;
     }
     const item = raw as Record<string, unknown>;
@@ -374,35 +606,51 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       typeof item.timestamp === 'number' && Number.isFinite(item.timestamp)
         ? item.timestamp
         : Date.now();
-    const endedAt = new Date(ts).toISOString();
-    const startedAt = new Date(ts - durationMinutes * 60 * 1000).toISOString();
+    const endedAt = typeof item.endedAt === 'string' ? item.endedAt : new Date(ts).toISOString();
+    const startedAt =
+      typeof item.startedAt === 'string'
+        ? item.startedAt
+        : new Date(ts - durationMinutes * 60 * 1000).toISOString();
     const dateKey =
       typeof item.dateKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dateKey)
         ? item.dateKey
         : endedAt.slice(0, 10);
 
-    focusEntities.push({
+    focusEntitiesMap.set(id, {
       id,
       taskId: typeof item.taskId === 'string' ? item.taskId : null,
       taskTitle: typeof item.taskTitle === 'string' ? item.taskTitle : undefined,
-      phase: 'work',
-      plannedMinutes: durationMinutes,
+      phase:
+        item.phase === 'short_break' || item.phase === 'long_break' ? item.phase : 'work',
+      plannedMinutes:
+        typeof item.plannedMinutes === 'number' && item.plannedMinutes > 0
+          ? item.plannedMinutes
+          : durationMinutes,
       durationMinutes,
       dateKey,
       startedAt,
       endedAt,
-      completedNaturally: true,
-      createdAt: endedAt,
-      updatedAt: endedAt,
-      deletedAt: null,
-      revision: 1,
+      completedNaturally:
+        typeof item.completedNaturally === 'boolean' ? item.completedNaturally : true,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : endedAt,
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : endedAt,
+      deletedAt: typeof item.deletedAt === 'string' ? item.deletedAt : null,
+      revision:
+        typeof item.revision === 'number' && item.revision >= 1 ? Math.round(item.revision) : 1,
     });
   }
+
+  const taskEntities = Array.from(taskEntitiesMap.values());
+  const habitEntities = Array.from(habitEntitiesMap.values());
+  const habitEntryEntities = Array.from(habitEntryEntitiesMap.values());
+  const noteEntities = Array.from(noteEntitiesMap.values());
+  const focusEntities = Array.from(focusEntitiesMap.values());
 
   const report: MigrationReport = {
     migratedAt: now,
     fromSchemaVersion: 1,
     toSchemaVersion: 2,
+    status: hasAnyLegacyData ? 'migrated' : 'clean_first_run',
     counts: {
       tasks: taskEntities.length,
       habits: habitEntities.length,
@@ -411,6 +659,9 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       focusSessions: focusEntities.length,
     },
     skippedInvalidRecords,
+    corruptedKeys,
+    invalidRecords,
+    verifiedCountsMatch: true,
     recoverySnapshotKey: MIGRATION_RECOVERY_SNAPSHOT_KEY,
   };
 
@@ -437,6 +688,25 @@ export async function migrateLegacyLocalStorageToIndexedDB(
           calendarPreference: 'jalali',
           updatedAt: now,
         });
+      }
+
+      // Post-write count verification inside transaction before marking migration complete
+      const [writtenTasks, writtenHabits, writtenNotes, writtenFocus] = await Promise.all([
+        db.tasks.count(),
+        db.habits.count(),
+        db.notes.count(),
+        db.focusSessions.count(),
+      ]);
+
+      if (
+        writtenTasks < taskEntities.length ||
+        writtenHabits < habitEntities.length ||
+        writtenNotes < noteEntities.length ||
+        writtenFocus < focusEntities.length
+      ) {
+        throw new Error(
+          'عدم تطابق تعداد رکوردهای نوشته‌شده در IndexedDB پس از مهاجرت؛ تراکنش لغو شد.'
+        );
       }
 
       await db.kvState.put({
@@ -485,57 +755,106 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       },
 
       upsertTask: async (task: TaskEntity): Promise<TaskEntity> => {
-        const existing = await this.db.tasks.get(task.id);
-        const now = nowIso();
-        const next: TaskEntity = {
-          ...task,
-          status: task.completed ? 'done' : task.status === 'done' ? 'todo' : task.status || 'todo',
-          createdAt: existing?.createdAt ?? task.createdAt ?? now,
-          updatedAt: now,
-          deletedAt: task.deletedAt ?? null,
-          revision: (existing?.revision ?? 0) + 1,
-        };
-        await this.db.tasks.put(next);
+        const next = await this.db.transaction('rw', this.db.tasks, async () => {
+          const existing = await this.db.tasks.get(task.id);
+          const now = nowIso();
+          const nextRevision = Math.max(existing?.revision ?? 0, task.revision ?? 0) + 1;
+          const record: TaskEntity = {
+            ...existing,
+            ...task,
+            status: task.completed
+              ? 'done'
+              : task.status === 'done'
+              ? 'todo'
+              : task.status ?? existing?.status ?? 'todo',
+            projectId: task.projectId !== undefined ? task.projectId : existing?.projectId ?? null,
+            sourceId: task.sourceId !== undefined ? task.sourceId : existing?.sourceId ?? null,
+            tags: task.tags !== undefined ? task.tags : existing?.tags ?? [],
+            subtasks: task.subtasks !== undefined ? task.subtasks : existing?.subtasks ?? [],
+            completedAt: task.completed
+              ? task.completedAt ?? existing?.completedAt ?? now
+              : null,
+            createdAt: existing?.createdAt ?? task.createdAt ?? now,
+            updatedAt: now,
+            deletedAt: task.deletedAt !== undefined ? task.deletedAt : existing?.deletedAt ?? null,
+            revision: nextRevision,
+          };
+          await this.db.tasks.put(record);
+          return record;
+        });
+        notifyCrossTabSync('tasks.upsert');
         return next;
       },
 
       upsertTasksBatch: async (tasksToSave: TaskEntity[]): Promise<TaskEntity[]> => {
-        const now = nowIso();
-        const prepared = tasksToSave.map((t) => ({
-          ...t,
-          createdAt: t.createdAt || now,
-          updatedAt: now,
-          deletedAt: t.deletedAt ?? null,
-          revision: (t.revision || 0) + 1,
-        }));
-        await this.db.tasks.bulkPut(prepared);
-        return prepared;
+        const saved = await this.db.transaction('rw', this.db.tasks, async () => {
+          const now = nowIso();
+          const existingList = await this.db.tasks.bulkGet(tasksToSave.map((t) => t.id));
+          const prepared: TaskEntity[] = tasksToSave.map((t, idx): TaskEntity => {
+            const existing = existingList[idx];
+            const nextRevision = Math.max(existing?.revision ?? 0, t.revision ?? 0) + 1;
+            return {
+              ...existing,
+              ...t,
+              status: t.completed
+                ? 'done'
+                : t.status === 'done'
+                ? 'todo'
+                : t.status ?? existing?.status ?? 'todo',
+              projectId: t.projectId !== undefined ? t.projectId : existing?.projectId ?? null,
+              sourceId: t.sourceId !== undefined ? t.sourceId : existing?.sourceId ?? null,
+              tags: t.tags !== undefined ? t.tags : existing?.tags ?? [],
+              subtasks: t.subtasks !== undefined ? t.subtasks : existing?.subtasks ?? [],
+              completedAt: t.completed ? t.completedAt ?? existing?.completedAt ?? now : null,
+              createdAt: existing?.createdAt ?? t.createdAt ?? now,
+              updatedAt: now,
+              deletedAt: t.deletedAt !== undefined ? t.deletedAt : existing?.deletedAt ?? null,
+              revision: nextRevision,
+            };
+          });
+          await this.db.tasks.bulkPut(prepared);
+          return prepared;
+        });
+        notifyCrossTabSync('tasks.upsertBatch');
+        return saved;
       },
 
       softDeleteTask: async (id: EntityId): Promise<void> => {
-        const existing = await this.db.tasks.get(id);
-        if (!existing) return;
-        const now = nowIso();
-        await this.db.tasks.put({
-          ...existing,
-          deletedAt: now,
-          updatedAt: now,
-          revision: (existing.revision || 0) + 1,
+        await this.db.transaction('rw', this.db.tasks, async () => {
+          const existing = await this.db.tasks.get(id);
+          if (!existing) return;
+          const now = nowIso();
+          await this.db.tasks.put({
+            ...existing,
+            deletedAt: now,
+            updatedAt: now,
+            revision: (existing.revision || 0) + 1,
+          });
         });
+        notifyCrossTabSync('tasks.softDelete');
       },
 
       restoreTask: async (id: EntityId): Promise<TaskEntity | null> => {
-        const existing = await this.db.tasks.get(id);
-        if (!existing) return null;
-        const now = nowIso();
-        const restored: TaskEntity = {
-          ...existing,
-          deletedAt: null,
-          updatedAt: now,
-          revision: (existing.revision || 0) + 1,
-        };
-        await this.db.tasks.put(restored);
+        const restored = await this.db.transaction('rw', this.db.tasks, async () => {
+          const existing = await this.db.tasks.get(id);
+          if (!existing) return null;
+          const now = nowIso();
+          const record: TaskEntity = {
+            ...existing,
+            deletedAt: null,
+            updatedAt: now,
+            revision: (existing.revision || 0) + 1,
+          };
+          await this.db.tasks.put(record);
+          return record;
+        });
+        notifyCrossTabSync('tasks.restore');
         return restored;
+      },
+
+      hardDeleteTask: async (id: EntityId): Promise<void> => {
+        await this.db.tasks.delete(id);
+        notifyCrossTabSync('tasks.hardDelete');
       },
     };
 
@@ -551,16 +870,23 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       },
 
       upsertHabit: async (habit: HabitEntity): Promise<HabitEntity> => {
-        const existing = await this.db.habits.get(habit.id);
-        const now = nowIso();
-        const next: HabitEntity = {
-          ...habit,
-          createdAt: existing?.createdAt ?? habit.createdAt ?? now,
-          updatedAt: now,
-          deletedAt: habit.deletedAt ?? null,
-          revision: (existing?.revision ?? 0) + 1,
-        };
-        await this.db.habits.put(next);
+        const next = await this.db.transaction('rw', this.db.habits, async () => {
+          const existing = await this.db.habits.get(habit.id);
+          const now = nowIso();
+          const nextRevision = Math.max(existing?.revision ?? 0, habit.revision ?? 0) + 1;
+          const record: HabitEntity = {
+            ...existing,
+            ...habit,
+            startDate: habit.startDate ?? existing?.startDate ?? now.slice(0, 10),
+            createdAt: existing?.createdAt ?? habit.createdAt ?? now,
+            updatedAt: now,
+            deletedAt: habit.deletedAt !== undefined ? habit.deletedAt : existing?.deletedAt ?? null,
+            revision: nextRevision,
+          };
+          await this.db.habits.put(record);
+          return record;
+        });
+        notifyCrossTabSync('habits.upsert');
         return next;
       },
 
@@ -568,42 +894,49 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
         habitId: EntityId,
         dateKey: LocalDateKey
       ): Promise<HabitEntity | null> => {
-        return this.db.transaction('rw', [this.db.habits, this.db.habitEntries], async () => {
-          const habit = await this.db.habits.get(habitId);
-          if (!habit) return null;
-          const now = nowIso();
-          const entryId = `he_${habitId}_${dateKey}`;
-          const wasCompleted = Boolean(habit.completedDates[dateKey]);
-          const nextCompleted = !wasCompleted;
+        const updated = await this.db.transaction(
+          'rw',
+          [this.db.habits, this.db.habitEntries],
+          async () => {
+            const habit = await this.db.habits.get(habitId);
+            if (!habit) return null;
+            const now = nowIso();
+            const entryId = `he_${habitId}_${dateKey}`;
+            const existingEntry = await this.db.habitEntries.get(entryId);
+            const wasCompleted = Boolean(habit.completedDates[dateKey]);
+            const nextCompleted = !wasCompleted;
 
-          const updatedDates = { ...habit.completedDates };
-          if (nextCompleted) {
-            updatedDates[dateKey] = true;
-          } else {
-            delete updatedDates[dateKey];
+            const updatedDates = { ...habit.completedDates };
+            if (nextCompleted) {
+              updatedDates[dateKey] = true;
+            } else {
+              delete updatedDates[dateKey];
+            }
+
+            const updatedHabit: HabitEntity = {
+              ...habit,
+              completedDates: updatedDates,
+              updatedAt: now,
+              revision: (habit.revision || 0) + 1,
+            };
+
+            await this.db.habits.put(updatedHabit);
+            await this.db.habitEntries.put({
+              id: entryId,
+              habitId,
+              dateKey,
+              completed: nextCompleted,
+              createdAt: existingEntry?.createdAt ?? now,
+              updatedAt: now,
+              deletedAt: nextCompleted ? null : now,
+              revision: (existingEntry?.revision ?? 0) + 1,
+            });
+
+            return updatedHabit;
           }
-
-          const updatedHabit: HabitEntity = {
-            ...habit,
-            completedDates: updatedDates,
-            updatedAt: now,
-            revision: (habit.revision || 0) + 1,
-          };
-
-          await this.db.habits.put(updatedHabit);
-          await this.db.habitEntries.put({
-            id: entryId,
-            habitId,
-            dateKey,
-            completed: nextCompleted,
-            createdAt: now,
-            updatedAt: now,
-            deletedAt: nextCompleted ? null : now,
-            revision: 1,
-          });
-
-          return updatedHabit;
-        });
+        );
+        notifyCrossTabSync('habits.toggleDate');
+        return updated;
       },
 
       listHabitEntries: async (habitId?: EntityId): Promise<HabitEntryEntity[]> => {
@@ -614,52 +947,119 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       },
 
       softDeleteHabit: async (id: EntityId): Promise<void> => {
-        const existing = await this.db.habits.get(id);
-        if (!existing) return;
-        const now = nowIso();
-        await this.db.habits.put({
-          ...existing,
-          deletedAt: now,
-          updatedAt: now,
-          revision: (existing.revision || 0) + 1,
+        await this.db.transaction('rw', this.db.habits, async () => {
+          const existing = await this.db.habits.get(id);
+          if (!existing) return;
+          const now = nowIso();
+          await this.db.habits.put({
+            ...existing,
+            deletedAt: now,
+            updatedAt: now,
+            revision: (existing.revision || 0) + 1,
+          });
         });
+        notifyCrossTabSync('habits.softDelete');
+      },
+
+      restoreHabit: async (id: EntityId): Promise<HabitEntity | null> => {
+        const restored = await this.db.transaction('rw', this.db.habits, async () => {
+          const existing = await this.db.habits.get(id);
+          if (!existing) return null;
+          const now = nowIso();
+          const record: HabitEntity = {
+            ...existing,
+            deletedAt: null,
+            updatedAt: now,
+            revision: (existing.revision || 0) + 1,
+          };
+          await this.db.habits.put(record);
+          return record;
+        });
+        notifyCrossTabSync('habits.restore');
+        return restored;
+      },
+
+      hardDeleteHabit: async (id: EntityId): Promise<void> => {
+        await this.db.transaction('rw', [this.db.habits, this.db.habitEntries], async () => {
+          await this.db.habits.delete(id);
+          await this.db.habitEntries.where('habitId').equals(id).delete();
+        });
+        notifyCrossTabSync('habits.hardDelete');
       },
     };
 
     this.notes = {
       listNotes: async (kind?: NoteKind, includeDeleted = false): Promise<NoteEntity[]> => {
         const all = await this.db.notes.toArray();
-        return all.filter((n) => {
-          if (!includeDeleted && n.deletedAt) return false;
-          if (kind && n.kind !== kind) return false;
-          return true;
-        });
+        return all
+          .filter((n) => {
+            if (!includeDeleted && n.deletedAt) return false;
+            if (kind && n.kind !== kind) return false;
+            return true;
+          })
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       },
 
       upsertNote: async (note: NoteEntity): Promise<NoteEntity> => {
-        const existing = await this.db.notes.get(note.id);
-        const now = nowIso();
-        const next: NoteEntity = {
-          ...note,
-          createdAt: existing?.createdAt ?? note.createdAt ?? now,
-          updatedAt: now,
-          deletedAt: note.deletedAt ?? null,
-          revision: (existing?.revision ?? 0) + 1,
-        };
-        await this.db.notes.put(next);
+        const next = await this.db.transaction('rw', this.db.notes, async () => {
+          const existing = await this.db.notes.get(note.id);
+          const now = nowIso();
+          const nextRevision = Math.max(existing?.revision ?? 0, note.revision ?? 0) + 1;
+          const record: NoteEntity = {
+            ...existing,
+            ...note,
+            tags: note.tags !== undefined ? note.tags : existing?.tags ?? [],
+            linkedTaskId:
+              note.linkedTaskId !== undefined ? note.linkedTaskId : existing?.linkedTaskId ?? null,
+            displayDateLabel: note.displayDateLabel ?? existing?.displayDateLabel,
+            createdAt: existing?.createdAt ?? note.createdAt ?? now,
+            updatedAt: now,
+            deletedAt: note.deletedAt !== undefined ? note.deletedAt : existing?.deletedAt ?? null,
+            revision: nextRevision,
+          };
+          await this.db.notes.put(record);
+          return record;
+        });
+        notifyCrossTabSync('notes.upsert');
         return next;
       },
 
       softDeleteNote: async (id: EntityId): Promise<void> => {
-        const existing = await this.db.notes.get(id);
-        if (!existing) return;
-        const now = nowIso();
-        await this.db.notes.put({
-          ...existing,
-          deletedAt: now,
-          updatedAt: now,
-          revision: (existing.revision || 0) + 1,
+        await this.db.transaction('rw', this.db.notes, async () => {
+          const existing = await this.db.notes.get(id);
+          if (!existing) return;
+          const now = nowIso();
+          await this.db.notes.put({
+            ...existing,
+            deletedAt: now,
+            updatedAt: now,
+            revision: (existing.revision || 0) + 1,
+          });
         });
+        notifyCrossTabSync('notes.softDelete');
+      },
+
+      restoreNote: async (id: EntityId): Promise<NoteEntity | null> => {
+        const restored = await this.db.transaction('rw', this.db.notes, async () => {
+          const existing = await this.db.notes.get(id);
+          if (!existing) return null;
+          const now = nowIso();
+          const record: NoteEntity = {
+            ...existing,
+            deletedAt: null,
+            updatedAt: now,
+            revision: (existing.revision || 0) + 1,
+          };
+          await this.db.notes.put(record);
+          return record;
+        });
+        notifyCrossTabSync('notes.restore');
+        return restored;
+      },
+
+      hardDeleteNote: async (id: EntityId): Promise<void> => {
+        await this.db.notes.delete(id);
+        notifyCrossTabSync('notes.hardDelete');
       },
     };
 
@@ -672,15 +1072,22 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       },
 
       logFocusSession: async (session: FocusSessionEntity): Promise<FocusSessionEntity> => {
-        const now = nowIso();
-        const next: FocusSessionEntity = {
-          ...session,
-          createdAt: session.createdAt || now,
-          updatedAt: now,
-          deletedAt: null,
-          revision: (session.revision || 0) + 1,
-        };
-        await this.db.focusSessions.put(next);
+        const next = await this.db.transaction('rw', this.db.focusSessions, async () => {
+          const existing = await this.db.focusSessions.get(session.id);
+          const now = nowIso();
+          const nextRevision = Math.max(existing?.revision ?? 0, session.revision ?? 0) + 1;
+          const record: FocusSessionEntity = {
+            ...existing,
+            ...session,
+            createdAt: existing?.createdAt ?? session.createdAt ?? now,
+            updatedAt: now,
+            deletedAt: null,
+            revision: nextRevision,
+          };
+          await this.db.focusSessions.put(record);
+          return record;
+        });
+        notifyCrossTabSync('focus.logSession');
         return next;
       },
 
@@ -692,13 +1099,14 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       saveActiveTimerState: async (state: ActiveTimerState | null): Promise<void> => {
         if (!state) {
           await this.db.kvState.delete('active_timer_state');
-          return;
+        } else {
+          await this.db.kvState.put({
+            key: 'active_timer_state',
+            value: state,
+            updatedAt: nowIso(),
+          });
         }
-        await this.db.kvState.put({
-          key: 'active_timer_state',
-          value: state,
-          updatedAt: nowIso(),
-        });
+        notifyCrossTabSync('focus.saveActiveTimer');
       },
     };
 
@@ -732,213 +1140,291 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
           updatedAt: nowIso(),
         };
         await this.db.settings.put(updated);
+        notifyCrossTabSync('settings.save');
         return updated;
       },
     };
 
     this.backup = {
       exportBackup: async (): Promise<BackupEnvelopeV2> => {
-        const [tasks, habits, habitEntries, notes, focusSessions, settings] = await Promise.all([
-          this.tasks.listTasks({ includeDeleted: true }),
-          this.habits.listHabits(true),
-          this.habits.listHabitEntries(),
-          this.notes.listNotes(undefined, true),
-          this.focus.listFocusSessions(true),
-          this.settings.getSettings(),
-        ]);
-
-        const payload = {
-          tasks,
-          habits,
-          habitEntries,
-          notes,
-          focusSessions,
-          settings,
-        };
+        // Consistent snapshot read inside a single read-only transaction
+        const payload = await this.db.transaction(
+          'r',
+          [
+            this.db.tasks,
+            this.db.habits,
+            this.db.habitEntries,
+            this.db.notes,
+            this.db.focusSessions,
+            this.db.settings,
+          ],
+          async () => {
+            const [tasks, habits, habitEntries, notes, focusSessions, settings] = await Promise.all(
+              [
+                this.db.tasks.toArray(),
+                this.db.habits.toArray(),
+                this.db.habitEntries.toArray(),
+                this.db.notes.toArray(),
+                this.db.focusSessions.toArray(),
+                this.db.settings.get('default'),
+              ]
+            );
+            return {
+              tasks,
+              habits,
+              habitEntries,
+              notes,
+              focusSessions,
+              settings,
+            };
+          }
+        );
 
         return {
+          appId: 'kairos',
           app: 'Kairos',
+          formatVersion: 2,
           schemaVersion: 2,
           exportedAt: nowIso(),
           platform: 'web',
-          checksum: computeSimpleChecksum(payload),
+          encrypted: false,
+          checksum: computeBackupChecksum(payload),
           payload,
         };
       },
 
       validateBackupJson: async (rawJson: string): Promise<BackupValidationResult> => {
-        const errors: string[] = [];
-        let parsed: Record<string, unknown>;
-        try {
-          parsed = JSON.parse(rawJson);
-        } catch {
-          return { valid: false, errors: ['فایل انتخاب‌شده یک JSON معتبر نیست.'] };
-        }
-
-        if (!parsed || typeof parsed !== 'object') {
-          return { valid: false, errors: ['ساختار ریشهٔ فایل پشتیبان نامعتبر است.'] };
-        }
-
-        // Support both V2 envelope and legacy v4.0 data.json envelope
-        if (parsed.schemaVersion === 2 && parsed.payload && typeof parsed.payload === 'object') {
-          const payload = parsed.payload as Record<string, unknown>;
-          if (!Array.isArray(payload.tasks)) errors.push('آرایهٔ tasks در فایل پشتیبان وجود ندارد.');
-          if (!Array.isArray(payload.habits)) errors.push('آرایهٔ habits در فایل پشتیبان وجود ندارد.');
-          if (!Array.isArray(payload.notes)) errors.push('آرایهٔ notes در فایل پشتیبان وجود ندارد.');
-          if (errors.length > 0) return { valid: false, errors };
-          return {
-            valid: true,
-            errors: [],
-            envelope: parsed as unknown as BackupEnvelopeV2,
-          };
-        }
-
-        // Check Legacy v4.0 / direct object format
-        const legacyData =
-          parsed.data && typeof parsed.data === 'object'
-            ? (parsed.data as Record<string, unknown>)
-            : parsed;
-
-        if (!Array.isArray(legacyData.tasks) || !Array.isArray(legacyData.habits)) {
-          return {
-            valid: false,
-            errors: ['فایل پشتیبان فاقد لیست وظایف (tasks) یا عادت‌ها (habits) معتبر است.'],
-          };
-        }
-
-        const now = nowIso();
-        const convertedTasks: TaskEntity[] = (legacyData.tasks as Record<string, unknown>[])
-          .filter((t) => Boolean(t && typeof t === 'object' && typeof t.title === 'string'))
-          .map((t) => ({
-            id: typeof t.id === 'string' ? t.id : createEntityId('t'),
-            title: String(t.title),
-            description: typeof t.description === 'string' ? t.description : undefined,
-            status: t.completed ? 'done' : 'todo',
-            completed: Boolean(t.completed),
-            priority: typeof t.priority === 'number' ? t.priority : 1,
-            duration: typeof t.duration === 'number' ? t.duration : 45,
-            targetDate: typeof t.targetDate === 'string' ? t.targetDate : now.slice(0, 10),
-            reminderTime: typeof t.reminderTime === 'string' ? t.reminderTime : null,
-            reminded: Boolean(t.reminded),
-            category: typeof t.category === 'string' ? t.category : 'work',
-            tags: [],
-            subtasks: [],
-            completedAt: typeof t.completedAt === 'string' ? t.completedAt : null,
-            createdAt: now,
-            updatedAt: now,
-            deletedAt: null,
-            revision: 1,
-          }));
-
-        const convertedHabits: HabitEntity[] = (legacyData.habits as Record<string, unknown>[])
-          .filter((h) => Boolean(h && typeof h === 'object' && typeof h.title === 'string'))
-          .map((h) => ({
-            id: typeof h.id === 'string' ? h.id : createEntityId('h'),
-            title: String(h.title),
-            category: (typeof h.category === 'string' ? h.category : 'health') as HabitCategoryId,
-            emoji: typeof h.emoji === 'string' ? h.emoji : '✨',
-            color: typeof h.color === 'string' ? h.color : '#6366f1',
-            frequencyType: 'daily',
-            weeklyGoal: typeof h.weeklyGoal === 'number' ? h.weeklyGoal : 7,
-            archived: false,
-            completedDates:
-              h.completedDates && typeof h.completedDates === 'object'
-                ? (h.completedDates as Record<string, boolean>)
-                : {},
-            createdAt: now,
-            updatedAt: now,
-            deletedAt: null,
-            revision: 1,
-          }));
-
-        const convertedNotes: NoteEntity[] = [];
-        if (Array.isArray(legacyData.ideas)) {
-          for (const idea of legacyData.ideas as Record<string, unknown>[]) {
-            if (idea && typeof idea.title === 'string') {
-              convertedNotes.push({
-                id: typeof idea.id === 'string' ? idea.id : createEntityId('id'),
-                kind: 'idea',
-                title: idea.title,
-                content: typeof idea.note === 'string' ? idea.note : '',
-                category: typeof idea.category === 'string' ? idea.category : 'project',
-                tags: [],
-                pinned: false,
-                displayDateLabel: typeof idea.createdAt === 'string' ? idea.createdAt : undefined,
-                createdAt: now,
-                updatedAt: now,
-                deletedAt: null,
-                revision: 1,
-              });
-            }
-          }
-        }
-        if (Array.isArray(legacyData.usefulInfos)) {
-          for (const info of legacyData.usefulInfos as Record<string, unknown>[]) {
-            if (info && typeof info.title === 'string') {
-              convertedNotes.push({
-                id: typeof info.id === 'string' ? info.id : createEntityId('info'),
-                kind: 'useful_info',
-                title: info.title,
-                content: typeof info.content === 'string' ? info.content : '',
-                category: typeof info.category === 'string' ? info.category : 'work',
-                tags: [],
-                pinned: Boolean(info.pinned),
-                displayDateLabel: typeof info.createdAt === 'string' ? info.createdAt : undefined,
-                createdAt: now,
-                updatedAt: now,
-                deletedAt: null,
-                revision: 1,
-              });
-            }
-          }
-        }
-
-        const convertedFocus: FocusSessionEntity[] = Array.isArray(legacyData.focusSessions)
-          ? (legacyData.focusSessions as Record<string, unknown>[]).map((fs) => ({
-              id: typeof fs.id === 'string' ? fs.id : createEntityId('fs'),
-              taskId: typeof fs.taskId === 'string' ? fs.taskId : null,
-              taskTitle: typeof fs.taskTitle === 'string' ? fs.taskTitle : undefined,
-              phase: 'work',
-              plannedMinutes: typeof fs.durationMinutes === 'number' ? fs.durationMinutes : 25,
-              durationMinutes: typeof fs.durationMinutes === 'number' ? fs.durationMinutes : 25,
-              dateKey: typeof fs.dateKey === 'string' ? fs.dateKey : now.slice(0, 10),
-              startedAt: now,
-              endedAt: now,
-              completedNaturally: true,
-              createdAt: now,
-              updatedAt: now,
-              deletedAt: null,
-              revision: 1,
-            }))
-          : [];
-
-        const payload = {
-          tasks: convertedTasks,
-          habits: convertedHabits,
-          habitEntries: [],
-          notes: convertedNotes,
-          focusSessions: convertedFocus,
-        };
-
+        const preview = validateAndPreviewBackupPayload(rawJson, { verifyChecksum: true });
         return {
-          valid: true,
-          errors: [],
-          envelope: {
-            app: 'Kairos',
-            schemaVersion: 2,
-            exportedAt: now,
-            platform: 'web',
-            checksum: computeSimpleChecksum(payload),
-            payload,
-          },
+          valid: preview.valid,
+          errors: preview.errors,
+          envelope: preview.envelope,
+          encrypted: preview.encrypted,
+          migratedFromLegacy: preview.migratedFromLegacy,
         };
       },
 
       restoreBackup: async (
         envelope: BackupEnvelopeV2,
         strategy: 'replace' | 'merge'
-      ): Promise<{ restoredCounts: Record<string, number> }> => {
-        const { tasks, habits, habitEntries, notes, focusSessions, settings } = envelope.payload;
+      ): Promise<{ restoredCounts: Record<string, number>; snapshotKey: string }> => {
+        // 1. Strict validation of incoming envelope before touching any data
+        const validation = validateBackupEnvelopeObject(envelope, { verifyChecksum: true });
+        if (!validation.valid || !validation.envelope) {
+          throw new Error(
+            validation.errors.join(' | ') ||
+              validation.error ||
+              'ساختار داده‌های فایل پشتیبان نامعتبر است و عملیات بازیابی لغو شد.'
+          );
+        }
+
+        const validatedPayload = validation.envelope.payload;
+
+        // 2. Mandatory pre-restore snapshot creation & read-back verification
+        let preRestoreSnapshot: BackupEnvelopeV2;
+        try {
+          preRestoreSnapshot = await this.backup.exportBackup();
+          const snapNow = nowIso();
+          await this.db.kvState.put({
+            key: PRE_RESTORE_SNAPSHOT_KEY,
+            value: preRestoreSnapshot,
+            updatedAt: snapNow,
+          });
+          const verifiedRow = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
+          const verifiedEnvelope = verifiedRow?.value as BackupEnvelopeV2 | undefined;
+          if (
+            !verifiedEnvelope ||
+            verifiedEnvelope.checksum !== preRestoreSnapshot.checksum ||
+            !Array.isArray(verifiedEnvelope.payload?.tasks)
+          ) {
+            throw new Error('عدم تطابق اسنپ‌شات بازخوانی‌شده با داده‌های فعلی.');
+          }
+          if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+              window.localStorage.setItem(
+                'kairos_pre_restore_snapshot_v1',
+                JSON.stringify(preRestoreSnapshot)
+              );
+            } catch {
+              // Secondary localStorage mirror is optional if quota is full; IndexedDB kvState is authoritative
+            }
+          }
+        } catch (err: any) {
+          throw new Error(
+            `خطا در ایجاد و تأیید اسنپ‌شات امنیتی پیش از بازیابی (${
+              err?.message || 'خطای ذخیره‌سازی'
+            })؛ عملیات بازیابی برای حفاظت از داده‌های فعلی متوقف شد.`
+          );
+        }
+
+        // 3. Atomic transactional restore ('replace' or 'merge') with post-write verification
+        const finalCounts = await this.db.transaction(
+          'rw',
+          [
+            this.db.tasks,
+            this.db.habits,
+            this.db.habitEntries,
+            this.db.notes,
+            this.db.focusSessions,
+            this.db.settings,
+          ],
+          async () => {
+            const { tasks, habits, habitEntries, notes, focusSessions, settings } =
+              validatedPayload;
+
+            if (strategy === 'replace') {
+              await Promise.all([
+                this.db.tasks.clear(),
+                this.db.habits.clear(),
+                this.db.habitEntries.clear(),
+                this.db.notes.clear(),
+                this.db.focusSessions.clear(),
+              ]);
+
+              if (tasks.length > 0) await this.db.tasks.bulkPut(tasks);
+              if (habits.length > 0) await this.db.habits.bulkPut(habits);
+              if (habitEntries.length > 0) await this.db.habitEntries.bulkPut(habitEntries);
+              if (notes.length > 0) await this.db.notes.bulkPut(notes);
+              if (focusSessions.length > 0) await this.db.focusSessions.bulkPut(focusSessions);
+              if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+
+              const [wTasks, wHabits, wEntries, wNotes, wFocus] = await Promise.all([
+                this.db.tasks.count(),
+                this.db.habits.count(),
+                this.db.habitEntries.count(),
+                this.db.notes.count(),
+                this.db.focusSessions.count(),
+              ]);
+
+              if (
+                wTasks !== tasks.length ||
+                wHabits !== habits.length ||
+                wEntries !== habitEntries.length ||
+                wNotes !== notes.length ||
+                wFocus !== focusSessions.length
+              ) {
+                throw new Error(
+                  'عدم تطابق تعداد رکوردهای ذخیره‌شده در تراکنش بازیابی؛ عملیات به حالت اول بازگردانده شد.'
+                );
+              }
+
+              return {
+                tasks: wTasks,
+                habits: wHabits,
+                habitEntries: wEntries,
+                notes: wNotes,
+                focusSessions: wFocus,
+              };
+            } else {
+              // Merge strategy: preserve existing records and merge by ID (newer revision/updatedAt wins)
+              const [curTasks, curHabits, curEntries, curNotes, curFocus] = await Promise.all([
+                this.db.tasks.toArray(),
+                this.db.habits.toArray(),
+                this.db.habitEntries.toArray(),
+                this.db.notes.toArray(),
+                this.db.focusSessions.toArray(),
+              ]);
+
+              const mergeEntityMap = <
+                T extends { id: string; revision: number; updatedAt: string }
+              >(
+                existingList: T[],
+                incomingList: T[],
+                customMerge?: (existing: T, incoming: T) => T
+              ): T[] => {
+                const map = new Map<string, T>();
+                for (const item of existingList) {
+                  map.set(item.id, item);
+                }
+                for (const inc of incomingList) {
+                  const ex = map.get(inc.id);
+                  if (!ex) {
+                    map.set(inc.id, inc);
+                  } else if (customMerge) {
+                    map.set(inc.id, customMerge(ex, inc));
+                  } else {
+                    const incWins =
+                      (inc.revision || 1) > (ex.revision || 1) ||
+                      ((inc.revision || 1) === (ex.revision || 1) &&
+                        inc.updatedAt >= ex.updatedAt);
+                    const winner = incWins ? inc : ex;
+                    map.set(inc.id, {
+                      ...winner,
+                      revision: Math.max(ex.revision || 1, inc.revision || 1) + 1,
+                    });
+                  }
+                }
+                return Array.from(map.values());
+              };
+
+              const mergedTasks = mergeEntityMap(curTasks, tasks);
+              const mergedHabits = mergeEntityMap(curHabits, habits, (ex, inc) => {
+                const incWins =
+                  (inc.revision || 1) > (ex.revision || 1) ||
+                  ((inc.revision || 1) === (ex.revision || 1) && inc.updatedAt >= ex.updatedAt);
+                const base = incWins ? inc : ex;
+                return {
+                  ...base,
+                  completedDates: {
+                    ...(ex.completedDates || {}),
+                    ...(inc.completedDates || {}),
+                  },
+                  revision: Math.max(ex.revision || 1, inc.revision || 1) + 1,
+                };
+              });
+              const mergedEntries = mergeEntityMap(curEntries, habitEntries);
+              const mergedNotes = mergeEntityMap(curNotes, notes);
+              const mergedFocus = mergeEntityMap(curFocus, focusSessions);
+
+              if (mergedTasks.length > 0) await this.db.tasks.bulkPut(mergedTasks);
+              if (mergedHabits.length > 0) await this.db.habits.bulkPut(mergedHabits);
+              if (mergedEntries.length > 0) await this.db.habitEntries.bulkPut(mergedEntries);
+              if (mergedNotes.length > 0) await this.db.notes.bulkPut(mergedNotes);
+              if (mergedFocus.length > 0) await this.db.focusSessions.bulkPut(mergedFocus);
+              if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+
+              return {
+                tasks: mergedTasks.length,
+                habits: mergedHabits.length,
+                habitEntries: mergedEntries.length,
+                notes: mergedNotes.length,
+                focusSessions: mergedFocus.length,
+              };
+            }
+          }
+        );
+
+        notifyCrossTabSync('backup.restore');
+
+        return {
+          restoredCounts: finalCounts,
+          snapshotKey: PRE_RESTORE_SNAPSHOT_KEY,
+        };
+      },
+
+      hasPreRestoreSnapshot: async (): Promise<{ exists: boolean; createdAt?: string }> => {
+        const row = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
+        if (!row || !row.value) return { exists: false };
+        return { exists: true, createdAt: row.updatedAt };
+      },
+
+      rollbackLastRestore: async (): Promise<{ restoredCounts: Record<string, number> }> => {
+        const row = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
+        if (!row || !row.value) {
+          throw new Error('اسنپ‌شات پیش از بازیابی یافت نشد.');
+        }
+
+        const snapshotEnvelope = row.value as BackupEnvelopeV2;
+        const validation = validateBackupEnvelopeObject(snapshotEnvelope, {
+          verifyChecksum: true,
+        });
+        if (!validation.valid || !validation.envelope) {
+          throw new Error('اسنپ‌شات ذخیره شده نامعتبر یا آسیب‌دیده است.');
+        }
+
+        const { tasks, habits, habitEntries, notes, focusSessions, settings } =
+          validation.envelope.payload;
+
         await this.db.transaction(
           'rw',
           [
@@ -950,30 +1436,30 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
             this.db.settings,
           ],
           async () => {
-            if (strategy === 'replace') {
-              await Promise.all([
-                this.db.tasks.clear(),
-                this.db.habits.clear(),
-                this.db.habitEntries.clear(),
-                this.db.notes.clear(),
-                this.db.focusSessions.clear(),
-              ]);
-            }
+            await Promise.all([
+              this.db.tasks.clear(),
+              this.db.habits.clear(),
+              this.db.habitEntries.clear(),
+              this.db.notes.clear(),
+              this.db.focusSessions.clear(),
+            ]);
+
             if (tasks.length > 0) await this.db.tasks.bulkPut(tasks);
             if (habits.length > 0) await this.db.habits.bulkPut(habits);
-            if (habitEntries && habitEntries.length > 0) {
-              await this.db.habitEntries.bulkPut(habitEntries);
-            }
+            if (habitEntries.length > 0) await this.db.habitEntries.bulkPut(habitEntries);
             if (notes.length > 0) await this.db.notes.bulkPut(notes);
             if (focusSessions.length > 0) await this.db.focusSessions.bulkPut(focusSessions);
-            if (settings) await this.db.settings.put(settings);
+            if (settings) await this.db.settings.put({ ...settings, id: 'default' });
           }
         );
+
+        notifyCrossTabSync('backup.rollback');
 
         return {
           restoredCounts: {
             tasks: tasks.length,
             habits: habits.length,
+            habitEntries: habitEntries.length,
             notes: notes.length,
             focusSessions: focusSessions.length,
           },

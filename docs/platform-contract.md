@@ -92,10 +92,10 @@
 
 ## ۵. لیست عملیات‌های مجاز (`BridgeOperation`)
 - `bridge.handshake`
-- `tasks.list`, `tasks.getById`, `tasks.upsert`, `tasks.upsertBatch`, `tasks.softDelete`, `tasks.restore`
-- `habits.list`, `habits.getById`, `habits.upsert`, `habits.toggleDate`, `habits.listEntries`, `habits.softDelete`
-- `notes.list`, `notes.upsert`, `notes.softDelete`
+- `tasks.list`, `tasks.getById`, `tasks.upsert`, `tasks.upsertBatch`, `tasks.softDelete`, `tasks.restore`, `tasks.hardDelete`
+- `habits.list`, `habits.getById`, `habits.upsert`, `habits.toggleDate`, `habits.listEntries`, `habits.softDelete`, `habits.restore`, `habits.hardDelete`
+- `notes.list`, `notes.upsert`, `notes.softDelete`, `notes.restore`, `notes.hardDelete`
 - `focus.listSessions`, `focus.logSession`, `focus.getActiveTimer`, `focus.saveActiveTimer`
 - `settings.get`, `settings.save`
-- `backup.export`, `backup.restore`
+- `backup.export`, `backup.restore`, `backup.hasPreRestoreSnapshot`, `backup.rollback`
 - `notifications.getPermission`, `notifications.requestPermission`, `notifications.scheduleReminder`, `notifications.cancelReminder`

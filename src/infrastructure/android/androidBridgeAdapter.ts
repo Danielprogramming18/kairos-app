@@ -39,6 +39,10 @@ import {
   TaskFilter,
   TaskRepository,
 } from '../../application/repositories';
+import {
+  validateAndPreviewBackupPayload,
+  validateBackupEnvelopeObject,
+} from '../../utils/backupCrypto';
 
 export interface SketchwareAndroidJavascriptInterface {
   postMessage(rawRequestJson: string): string | void;
@@ -188,6 +192,8 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
         this.transport.invoke<{ id: EntityId }, void>('tasks.softDelete', { id }),
       restoreTask: (id: EntityId) =>
         this.transport.invoke<{ id: EntityId }, TaskEntity | null>('tasks.restore', { id }),
+      hardDeleteTask: (id: EntityId) =>
+        this.transport.invoke<{ id: EntityId }, void>('tasks.hardDelete', { id }),
     };
 
     this.habits = {
@@ -210,6 +216,10 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
         }),
       softDeleteHabit: (id: EntityId) =>
         this.transport.invoke<{ id: EntityId }, void>('habits.softDelete', { id }),
+      restoreHabit: (id: EntityId) =>
+        this.transport.invoke<{ id: EntityId }, HabitEntity | null>('habits.restore', { id }),
+      hardDeleteHabit: (id: EntityId) =>
+        this.transport.invoke<{ id: EntityId }, void>('habits.hardDelete', { id }),
     };
 
     this.notes = {
@@ -222,6 +232,10 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
         this.transport.invoke<{ note: NoteEntity }, NoteEntity>('notes.upsert', { note }),
       softDeleteNote: (id: EntityId) =>
         this.transport.invoke<{ id: EntityId }, void>('notes.softDelete', { id }),
+      restoreNote: (id: EntityId) =>
+        this.transport.invoke<{ id: EntityId }, NoteEntity | null>('notes.restore', { id }),
+      hardDeleteNote: (id: EntityId) =>
+        this.transport.invoke<{ id: EntityId }, void>('notes.hardDelete', { id }),
     };
 
     this.focus = {
@@ -260,21 +274,37 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
       exportBackup: () =>
         this.transport.invoke<Record<string, never>, BackupEnvelopeV2>('backup.export', {}),
       validateBackupJson: async (rawJson: string): Promise<BackupValidationResult> => {
-        try {
-          const parsed = JSON.parse(rawJson);
-          if (!parsed || typeof parsed !== 'object') {
-            return { valid: false, errors: ['ساختار فایل پشتیبان نامعتبر است.'] };
-          }
-          return { valid: true, errors: [], envelope: parsed as BackupEnvelopeV2 };
-        } catch {
-          return { valid: false, errors: ['فایل JSON معتبر نیست.'] };
-        }
+        const preview = validateAndPreviewBackupPayload(rawJson, { verifyChecksum: true });
+        return {
+          valid: preview.valid,
+          errors: preview.errors,
+          envelope: preview.envelope,
+          encrypted: preview.encrypted,
+          migratedFromLegacy: preview.migratedFromLegacy,
+        };
       },
-      restoreBackup: (envelope: BackupEnvelopeV2, strategy: 'replace' | 'merge') =>
-        this.transport.invoke<
+      restoreBackup: async (envelope: BackupEnvelopeV2, strategy: 'replace' | 'merge') => {
+        const validation = validateBackupEnvelopeObject(envelope, { verifyChecksum: true });
+        if (!validation.valid || !validation.envelope) {
+          throw new Error(
+            validation.errors.join(' | ') || 'فایل پشتیبان نامعتبر است و عملیات بازیابی لغو شد.'
+          );
+        }
+        return this.transport.invoke<
           { envelope: BackupEnvelopeV2; strategy: 'replace' | 'merge' },
-          { restoredCounts: Record<string, number> }
-        >('backup.restore', { envelope, strategy }),
+          { restoredCounts: Record<string, number>; snapshotKey?: string }
+        >('backup.restore', { envelope: validation.envelope, strategy });
+      },
+      hasPreRestoreSnapshot: () =>
+        this.transport.invoke<Record<string, never>, { exists: boolean; createdAt?: string }>(
+          'backup.hasPreRestoreSnapshot',
+          {}
+        ),
+      rollbackLastRestore: () =>
+        this.transport.invoke<Record<string, never>, { restoredCounts: Record<string, number> }>(
+          'backup.rollback',
+          {}
+        ),
     };
 
     this.notifications = {

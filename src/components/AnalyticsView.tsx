@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { BarChart3, CheckCircle, Clock, Trophy, Copy, Check, TrendingUp } from 'lucide-react';
 import { Task, Habit, FocusSession } from '../types';
 import { toPersianNum, getWeekDays } from '../utils/persianDate';
-import { calculateStreaks } from '../utils/habitStreaks';
+import { computeWeeklyAnalyticsSummary } from '../utils/analyticsCalculator';
 
 interface AnalyticsViewProps {
   tasks: Task[];
@@ -18,57 +18,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const [copied, setCopied] = useState(false);
   const weekDays = getWeekDays(0);
 
-  // Compute 7-day stats
-  let totalTasksCompleted = 0;
-  let totalPossibleHabits = 0;
-  let totalHabitsDone = 0;
-  let totalFocusMinutes = 0;
+  const {
+    totalTasksCompleted,
+    totalHabitsDone,
+    habitSuccessRate,
+    totalFocusMinutes,
+    focusHours,
+    focusRemainingMins,
+    topStreak,
+    topStreakHabit,
+    dailyBreakdown,
+  } = computeWeeklyAnalyticsSummary(tasks, habits, focusSessions, weekDays);
 
-  const dailyBreakdown = weekDays.map((d) => {
-    const doneTasksInDay = tasks.filter((t) => t.targetDate === d.key && t.completed);
-    totalTasksCompleted += doneTasksInDay.length;
-
-    let dayHabitsDone = 0;
-    if (!d.isFuture) {
-      habits.forEach((h) => {
-        totalPossibleHabits++;
-        if (h.completedDates[d.key]) {
-          totalHabitsDone++;
-          dayHabitsDone++;
-        }
-      });
-    }
-
-    const daySessions = focusSessions.filter((s) => s.dateKey === d.key);
-    const dayFocusMins = daySessions.reduce((sum, s) => sum + s.durationMinutes, 0);
-    totalFocusMinutes += dayFocusMins;
-
-    return {
-      ...d,
-      doneTasksCount: doneTasksInDay.length,
-      dayHabitsDone,
-      dayFocusMins,
-    };
-  });
-
-  const habitSuccessRate =
-    totalPossibleHabits > 0
-      ? Math.min(100, Math.round((totalHabitsDone / totalPossibleHabits) * 100))
-      : 0;
-
-  // Best streak currently (respecting weeklyGoal)
-  let topStreak = 0;
-  let topStreakHabit = '—';
-  habits.forEach((h) => {
-    const s = calculateStreaks(h.completedDates, new Date(), h.weeklyGoal);
-    if (s.current > topStreak) {
-      topStreak = s.current;
-      topStreakHabit = h.title;
-    }
-  });
-
-  const focusHours = Math.floor(totalFocusMinutes / 60);
-  const focusRemainingMins = totalFocusMinutes % 60;
   const maxDayFocus = Math.max(60, ...dailyBreakdown.map((d) => d.dayFocusMins));
 
   // Generate Report Text (Unified Kairos branding)

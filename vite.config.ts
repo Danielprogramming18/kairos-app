@@ -18,7 +18,7 @@ export default defineConfig(() => {
           id: './',
           name: 'کایروس | دستیار هوشمند تمرکز',
           short_name: 'کایروس',
-          description: 'دستیار شخصی و هوشمند برای مدیریت کارها، تمرکز عمیق، عادت‌ها، اطلاعات کاربردی و همگام‌سازی با GitHub',
+          description: 'کایروس؛ دستیار شخصی و آفلاین-محور برای مدیریت کارها، برنامه‌ریزی روزانه، پیگیری عادت‌ها، یادداشت‌ها و تمرکز عمیق.',
           theme_color: '#4f46e5',
           background_color: '#0f172a',
           display: 'standalone',
@@ -49,36 +49,6 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          runtimeCaching: [
-            {
-              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'google-fonts-cache',
-                expiration: {
-                  maxEntries: 10,
-                  maxAgeSeconds: 60 * 60 * 24 * 365,
-                },
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
-              },
-            },
-            {
-              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'gstatic-fonts-cache',
-                expiration: {
-                  maxEntries: 10,
-                  maxAgeSeconds: 60 * 60 * 24 * 365,
-                },
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
-              },
-            },
-          ],
         },
         devOptions: {
           enabled: false,
@@ -87,8 +57,11 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
+    },
+    build: {
+      chunkSizeWarningLimit: 1200,
     },
     server: {
       hmr: false,

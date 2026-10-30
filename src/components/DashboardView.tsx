@@ -78,6 +78,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const totalMinutes = todayTasks.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
   const doneMinutes = todayCompletedTasks.reduce((sum, t) => sum + (Number(t.duration) || 0), 0);
 
+  const [useSmartExtract, setUseSmartExtract] = useState(true);
+  const liveParsed = nlpInput.trim() ? parseNaturalTaskInput(nlpInput) : null;
+
   // Handle Natural Language submission (100% Local & Instant for GitHub Pages)
   const handleNlpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,12 +91,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const localParsed = parseNaturalTaskInput(trimmed);
 
     onAddTask({
-      title: localParsed.title,
+      title: useSmartExtract ? localParsed.title : trimmed,
       description: 'ثبت‌شده با پردازشگر زبان طبیعی کایروس',
-      priority: localParsed.priority,
-      duration: localParsed.duration,
-      targetDate: localParsed.targetDate,
-      reminderTime: localParsed.reminderTime,
+      priority: useSmartExtract ? localParsed.priority : 1,
+      duration: useSmartExtract ? localParsed.duration : 45,
+      targetDate: useSmartExtract ? localParsed.targetDate : todayKey,
+      reminderTime: useSmartExtract ? localParsed.reminderTime : undefined,
       category: 'work',
     });
     setNlpInput('');
@@ -103,22 +106,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-6">
       {/* 1. Quick NLP Input Bar */}
-      <section className="bg-gradient-to-r from-indigo-900/40 via-violet-900/30 to-slate-900/50 p-5 sm:p-6 rounded-3xl border border-indigo-500/20 shadow-sm backdrop-blur-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3">
+      <section className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600/30 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-              <Sparkles className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200/60 dark:border-indigo-500/30 shrink-0">
+              <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
+              <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 ثبت سریع مأموریت با زبان طبیعی (NLP)
               </h3>
-              <p className="text-xs text-slate-300">
-                با هر جمله‌ای بنویس؛ سیستم زمان، اولویت و روز را تشخیص می‌دهد.
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                با هر جمله‌ای بنویس؛ سیستم زمان، اولویت و روز را پیش از ثبت به تو نشان می‌دهد.
               </p>
             </div>
           </div>
-          <div className="hidden sm:flex items-center gap-2 text-[11px] text-slate-300">
+          <div className="hidden sm:flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
             <span>مثال: «فردا ساعت ۵ عصر، ۴۵ دقیقه HTML تمرین کنم اولویت ۱»</span>
           </div>
         </div>
@@ -129,11 +132,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               type="text"
               value={nlpInput}
               onChange={(e) => setNlpInput(e.target.value)}
-              placeholder="مثلاً: فردا ۴۵ دقیقه تمرین فتوشاپ اولویت ۱..."
-              className="w-full px-4 py-3 rounded-2xl bg-white/10 dark:bg-slate-950/60 border border-white/20 dark:border-slate-800 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="مثلاً: فردا ساعت ۵ عصر ۴۵ دقیقه تمرین فتوشاپ اولویت ۱..."
+              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             {nlpInput && (
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded-md border border-indigo-500/30">
+              <div className="hidden sm:block absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-500/30">
                 اینتر بزنید ↵
               </div>
             )}
@@ -141,24 +144,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             type="submit"
             disabled={isSubmittingNlp || !nlpInput.trim()}
-            className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition shrink-0"
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center gap-2 transition shrink-0 cursor-pointer"
           >
             <span>{isSubmittingNlp ? 'پردازش...' : 'ثبت هوشمند'}</span>
             <Send className="w-4 h-4" />
           </button>
         </form>
+
+        {/* Live NLP Preview Chips before saving (FIX-09) */}
+        {liveParsed && (
+          <div
+            data-testid="dashboard-nlp-preview"
+            className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                پیش‌نمایش استخراج:
+              </span>
+              <span className="px-2.5 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold">
+                عنوان: {useSmartExtract ? liveParsed.title : nlpInput.trim()}
+              </span>
+              {useSmartExtract && (
+                <>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold">
+                    تاریخ: {liveParsed.extractedDateLabel || 'امروز'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold tabular-nums">
+                    مدت: {toPersianNum(liveParsed.duration)} دقیقه
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold tabular-nums">
+                    اولویت {toPersianNum(liveParsed.priority)}
+                  </span>
+                  {liveParsed.reminderTime && (
+                    <span className="px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-700 dark:text-violet-300 font-bold tabular-nums">
+                      یادآور: {toPersianNum(liveParsed.reminderTime)}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setUseSmartExtract((prev) => !prev)}
+              className="px-2.5 py-1 rounded-lg bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer"
+            >
+              {useSmartExtract ? 'ثبت به صورت متن خام بدون تجزیه' : 'فعال‌سازی تجزیه هوشمند'}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 2. Overdue Alert Banner if any */}
       {overdueTasks.length > 0 && (
         <section className="bg-amber-500/10 border border-amber-500/30 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <h4 className="text-xs sm:text-sm font-bold text-amber-600 dark:text-amber-400">
+              <h4 className="text-xs sm:text-sm font-bold text-amber-700 dark:text-amber-300 tabular-nums">
                 {toPersianNum(overdueTasks.length)} مأموریت از روزهای قبل باقی مانده است!
               </h4>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
                 بدون عذاب وجدان می‌توانی آنها را به امروز یا فردا منتقل کنی تا ذهنت آرام بماند.
               </p>
             </div>
@@ -166,13 +212,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={onMoveOverdueToToday}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 transition shadow-sm"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 transition cursor-pointer"
             >
               انتقال به امروز
             </button>
             <button
               onClick={onMoveOverdueToTomorrow}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition cursor-pointer"
             >
               انتقال به فردا
             </button>
@@ -183,24 +229,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* 3. 4 Main KPI Cards */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Today's Missions Progress */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               پیشرفت مأموریت‌های امروز
             </span>
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+            <div className="flex items-baseline gap-2 tabular-nums">
+              <h2 className="text-2xl font-black text-slate-900 dark:text-white">
                 {toPersianNum(todayCompletedTasks.length)} از {toPersianNum(todayTasks.length)}
               </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
                 {toPersianNum(tasksPercent)}٪
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
               {toPersianNum(doneMinutes)} از {toPersianNum(totalMinutes)} دقیقه انجام شده
             </p>
           </div>
-          <div className="relative w-14 h-14 flex items-center justify-center">
+          <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
             <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
               <path
                 className="text-slate-100 dark:text-slate-800"
@@ -210,7 +256,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 strokeWidth="3.8"
               />
               <path
-                className="text-indigo-500 transition-all duration-700 ease-out"
+                className="text-indigo-600 dark:text-indigo-500 transition-all duration-500 ease-out"
                 strokeDasharray={`${tasksPercent}, 100`}
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                 fill="none"
@@ -219,50 +265,52 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 strokeLinecap="round"
               />
             </svg>
-            <Target className="w-5 h-5 text-indigo-500 absolute" />
+            <Target className="w-5 h-5 text-indigo-600 dark:text-indigo-400 absolute" />
           </div>
         </div>
 
         {/* Card 2: The One Thing (Priority 1) */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="space-y-1 min-w-0 pr-1">
-            <span className="text-xs font-bold text-rose-500 flex items-center gap-1">
-              <Zap className="w-3.5 h-3.5 fill-rose-500" />
-              اولویت ۱ (The One Thing)
+            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+              <Zap className="w-3.5 h-3.5" />
+              اولویت ۱ (مهم‌ترین کار)
             </span>
-            <h2 className="text-sm font-black text-slate-800 dark:text-white truncate">
+            <h2 className="text-sm font-black text-slate-900 dark:text-white truncate">
               {topTask ? topTask.title : 'هنوز ثبت نشده'}
             </h2>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
               {topTask
                 ? topTask.completed
-                  ? 'انجام شد ✅'
+                  ? 'انجام شد ✓'
                   : `سهمیه: ${toPersianNum(topTask.duration)} دقیقه`
                 : 'تمرکز اصلی روز'}
             </p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0">
-            <Zap className="w-6 h-6" />
+          <div className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+            <Zap className="w-5 h-5" />
           </div>
         </div>
 
         {/* Card 3: Today's Habits Progress */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               عادت‌های تکمیل‌شده امروز
             </span>
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+            <div className="flex items-baseline gap-2 tabular-nums">
+              <h2 className="text-2xl font-black text-slate-900 dark:text-white">
                 {toPersianNum(completedHabitsToday)} از {toPersianNum(totalHabits)}
               </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
                 {toPersianNum(habitsPercent)}٪
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">بالاترین زنجیره: {toPersianNum(maxStreak)} روز</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+              بالاترین زنجیره: {toPersianNum(maxStreak)} روز
+            </p>
           </div>
-          <div className="relative w-14 h-14 flex items-center justify-center">
+          <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
             <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
               <path
                 className="text-slate-100 dark:text-slate-800"
@@ -272,7 +320,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 strokeWidth="3.8"
               />
               <path
-                className="text-emerald-500 transition-all duration-700 ease-out"
+                className="text-emerald-600 dark:text-emerald-500 transition-all duration-500 ease-out"
                 strokeDasharray={`${habitsPercent}, 100`}
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                 fill="none"
@@ -281,26 +329,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 strokeLinecap="round"
               />
             </svg>
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 absolute" />
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 absolute" />
           </div>
         </div>
 
         {/* Card 4: Best Streak & Motivation */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               زنجیره پیوستگی
             </span>
-            <div className="flex items-baseline gap-1.5">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+            <div className="flex items-baseline gap-1.5 tabular-nums">
+              <h2 className="text-2xl font-black text-slate-900 dark:text-white">
                 {toPersianNum(maxStreak)}
               </h2>
-              <span className="text-xs font-bold text-amber-500">روز متوالی</span>
+              <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                روز متوالی
+              </span>
             </div>
-            <p className="text-[11px] text-slate-400">«استمرار کلید نتایج بزرگ است»</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              «استمرار کلید نتایج بزرگ است»
+            </p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-            <Flame className="w-6 h-6" />
+          <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <Flame className="w-5 h-5" />
           </div>
         </div>
       </section>

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { Habit, HabitCategory } from '../types';
 import { toPersianNum, getWeekDays, getDateKey, getTodayKey } from '../utils/persianDate';
-import { calculateStreaks } from '../utils/habitStreaks';
+import { calculateHabitWindowRate, calculateStreaks } from '../utils/habitStreaks';
 
 export const HABIT_CATEGORIES: Record<
   string,
@@ -50,8 +50,9 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
 
   const todayKey = getTodayKey();
   const weekDays = getWeekDays(weekOffset);
+  const weekKeys = weekDays.map((d) => d.key);
 
-  // 1. KPI Computations
+  // 1. KPI Computations (FIX-09: respects startDate and weeklyGoal)
   const totalHabits = habits.length;
   const completedToday = habits.filter((h) => h.completedDates[todayKey]).length;
   const todayPercent = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
@@ -62,7 +63,9 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
   let maxBestHabitTitle = '—';
 
   habits.forEach((h) => {
-    const s = calculateStreaks(h.completedDates, new Date(), h.weeklyGoal);
+    const s = calculateStreaks(h.completedDates, new Date(), h.weeklyGoal, {
+      startDate: h.startDate,
+    });
     if (s.current > maxCurrentStreak) {
       maxCurrentStreak = s.current;
       maxCurrentHabitTitle = `${h.emoji} ${h.title}`;
@@ -76,12 +79,9 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
   let totalPossibleWeek = 0;
   let totalDoneWeek = 0;
   habits.forEach((h) => {
-    weekDays.forEach((d) => {
-      if (!d.isFuture) {
-        totalPossibleWeek++;
-        if (h.completedDates[d.key]) totalDoneWeek++;
-      }
-    });
+    const rate = calculateHabitWindowRate(h, weekKeys, todayKey);
+    totalDoneWeek += rate.doneCount;
+    totalPossibleWeek += rate.expectedCount;
   });
   const weeklyRate =
     totalPossibleWeek > 0
@@ -106,10 +106,10 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               تکمیل شده امروز
             </span>
             <div className="flex items-baseline gap-2">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+              <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(completedToday)} از {toPersianNum(totalHabits)}
               </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 tabular-nums">
                 {toPersianNum(todayPercent)}٪
               </span>
             </div>
@@ -145,7 +145,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               بهترین زنجیره فعلی
             </span>
             <div className="flex items-baseline gap-1.5">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+              <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(maxCurrentStreak)}
               </h2>
               <span className="text-xs font-semibold text-amber-500">روز متوالی</span>
@@ -166,7 +166,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               رکورد بلندترین زنجیره
             </span>
             <div className="flex items-baseline gap-1.5">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+              <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(maxBestStreak)}
               </h2>
               <span className="text-xs font-semibold text-indigo-500">روز</span>
@@ -187,10 +187,10 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
               عملکرد ۷ روز گذشته
             </span>
             <div className="flex items-baseline gap-1.5">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+              <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(weeklyRate)}٪
               </h2>
-              <span className="text-xs text-slate-400">({toPersianNum(totalDoneWeek)} ثبت)</span>
+              <span className="text-xs text-slate-400 tabular-nums">({toPersianNum(totalDoneWeek)} ثبت)</span>
             </div>
             <p className="text-[11px] text-slate-400">میانگین تحقق اهداف هفتگی</p>
           </div>
@@ -300,13 +300,12 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                 .map(([catKey, catInfo]) => {
                   const catHabits = habits.filter((h) => h.category === catKey);
                   const count = catHabits.length;
-                  const activeDays = weekDays.filter((d) => !d.isFuture);
                   let done = 0;
-                  const totalPossible = count * Math.max(activeDays.length, 1);
+                  let totalPossible = 0;
                   catHabits.forEach((h) => {
-                    activeDays.forEach((d) => {
-                      if (h.completedDates[d.key]) done++;
-                    });
+                    const wRate = calculateHabitWindowRate(h, weekKeys, todayKey);
+                    done += wRate.doneCount;
+                    totalPossible += wRate.expectedCount;
                   });
                   const rate =
                     totalPossible > 0
@@ -402,23 +401,28 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
 
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
               <button
+                type="button"
                 onClick={() => setWeekOffset(weekOffset - 1)}
                 title="هفته قبل"
-                className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                aria-label="هفته قبل"
+                className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
               <button
+                type="button"
                 onClick={() => setWeekOffset(0)}
-                className="px-3 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-indigo-500 transition"
+                className="px-3 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-indigo-500 transition cursor-pointer"
               >
                 امروز
               </button>
               <button
+                type="button"
                 onClick={() => setWeekOffset(weekOffset + 1)}
                 disabled={weekOffset >= 0}
                 title="هفته بعد"
-                className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition disabled:opacity-30 disabled:pointer-events-none"
+                aria-label="هفته بعد"
+                className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -459,11 +463,16 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                 const streaks = calculateStreaks(
                   habit.completedDates,
                   new Date(),
-                  habit.weeklyGoal
+                  habit.weeklyGoal,
+                  { startDate: habit.startDate }
                 );
                 const weekDoneCount = weekDays.filter((d) => habit.completedDates[d.key]).length;
                 const goal = habit.weeklyGoal || 7;
-                const goalPercent = Math.min(Math.round((weekDoneCount / goal) * 100), 100);
+                const windowRate = calculateHabitWindowRate(habit, weekKeys, todayKey);
+                const goalPercent =
+                  weekOffset === 0
+                    ? windowRate.ratePercent
+                    : Math.min(Math.round((weekDoneCount / goal) * 100), 100);
 
                 return (
                   <tr
@@ -580,16 +589,20 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
                     <td className="py-4 pr-2 text-left">
                       <div className="flex items-center justify-end gap-1 opacity-80 group-hover:opacity-100 transition">
                         <button
+                          type="button"
                           onClick={() => onOpenHabitModal(habit.id)}
                           title="ویرایش عادت"
-                          className="p-2 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition"
+                          aria-label={`ویرایش عادت «${habit.title}»`}
+                          className="p-2 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition cursor-pointer"
                         >
                           <Edit3 className="w-4 h-4" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => onOpenDeleteModal(habit.id, habit.title)}
                           title="حذف عادت"
-                          className="p-2 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition"
+                          aria-label={`حذف عادت «${habit.title}»`}
+                          className="p-2 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition cursor-pointer"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -602,25 +615,47 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
           </table>
 
           {filteredHabits.length === 0 && (
-            <div className="py-12 text-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400">
-                <Sparkles className="w-8 h-8" />
+            <div
+              data-testid="habits-empty-state"
+              className="py-12 px-4 text-center space-y-3 rounded-2xl bg-slate-50/70 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800 mt-3"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 mx-auto flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                <Sparkles className="w-7 h-7" />
               </div>
               <div className="space-y-1">
-                <h4 className="text-base font-bold text-slate-700 dark:text-slate-200">
-                  هیچ عادتی در این بخش یافت نشد!
+                <h4 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
+                  {habits.length === 0
+                    ? 'هنوز هیچ عادتی ثبت نشده است'
+                    : 'هیچ عادتی با فیلتر یا جستجوی فعلی مطابقت ندارد'}
                 </h4>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  برای شروع مسیر رشد فردی، اولین عادت روزانه خود را اضافه کنید.
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                  {habits.length === 0
+                    ? 'برای شروع مسیر رشد فردی، اولین عادت روزانه خود را با هدف هفتگی دلخواه ایجاد کنید.'
+                    : 'می‌توانید فیلتر دسته‌بندی یا عبارت جستجو را پاک کنید یا عادت جدیدی بسازید.'}
                 </p>
               </div>
-              <button
-                onClick={() => onOpenHabitModal()}
-                className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
-              >
-                <Plus className="w-4 h-4" />
-                افزودن عادت جدید
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenHabitModal()}
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  افزودن عادت جدید
+                </button>
+                {(selectedCategory !== 'all' || searchQuery.trim() !== '') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory('all');
+                      setSearchQuery('');
+                    }}
+                    className="inline-flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    پاک کردن فیلترها
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

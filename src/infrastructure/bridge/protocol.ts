@@ -20,15 +20,20 @@ export type BridgeOperation =
   | 'tasks.upsertBatch'
   | 'tasks.softDelete'
   | 'tasks.restore'
+  | 'tasks.hardDelete'
   | 'habits.list'
   | 'habits.getById'
   | 'habits.upsert'
   | 'habits.toggleDate'
   | 'habits.listEntries'
   | 'habits.softDelete'
+  | 'habits.restore'
+  | 'habits.hardDelete'
   | 'notes.list'
   | 'notes.upsert'
   | 'notes.softDelete'
+  | 'notes.restore'
+  | 'notes.hardDelete'
   | 'focus.listSessions'
   | 'focus.logSession'
   | 'focus.getActiveTimer'
@@ -37,6 +42,8 @@ export type BridgeOperation =
   | 'settings.save'
   | 'backup.export'
   | 'backup.restore'
+  | 'backup.hasPreRestoreSnapshot'
+  | 'backup.rollback'
   | 'notifications.getPermission'
   | 'notifications.requestPermission'
   | 'notifications.scheduleReminder'
@@ -50,15 +57,20 @@ export const ALLOWED_BRIDGE_OPERATIONS = new Set<BridgeOperation>([
   'tasks.upsertBatch',
   'tasks.softDelete',
   'tasks.restore',
+  'tasks.hardDelete',
   'habits.list',
   'habits.getById',
   'habits.upsert',
   'habits.toggleDate',
   'habits.listEntries',
   'habits.softDelete',
+  'habits.restore',
+  'habits.hardDelete',
   'notes.list',
   'notes.upsert',
   'notes.softDelete',
+  'notes.restore',
+  'notes.hardDelete',
   'focus.listSessions',
   'focus.logSession',
   'focus.getActiveTimer',
@@ -67,6 +79,8 @@ export const ALLOWED_BRIDGE_OPERATIONS = new Set<BridgeOperation>([
   'settings.save',
   'backup.export',
   'backup.restore',
+  'backup.hasPreRestoreSnapshot',
+  'backup.rollback',
   'notifications.getPermission',
   'notifications.requestPermission',
   'notifications.scheduleReminder',

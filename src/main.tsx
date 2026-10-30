@@ -1,4 +1,5 @@
 import {createRoot} from 'react-dom/client';
+import '@fontsource-variable/vazirmatn';
 import App from './App.tsx';
 import { PlatformProvider } from './app/PlatformContext.tsx';
 import './index.css';

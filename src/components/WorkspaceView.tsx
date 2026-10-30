@@ -128,10 +128,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               پیشرفت مأموریت‌های امروز
             </span>
             <div className="flex items-baseline gap-2">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+              <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(todayDone.length)} از {toPersianNum(todayTasks.length)}
               </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 tabular-nums">
                 {toPersianNum(todayPercent)}٪
               </span>
             </div>
@@ -190,12 +190,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               سهمیه زمانی امروز
             </span>
             <div className="flex items-baseline gap-1.5">
-              <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+              <h2 className="text-2xl font-black text-slate-800 dark:text-white tabular-nums">
                 {toPersianNum(totalMinutes)}
               </h2>
               <span className="text-xs font-semibold text-amber-500">دقیقه</span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-400 tabular-nums">
               {toPersianNum(doneMinutes)} دقیقه انجام شده
             </p>
           </div>
@@ -211,10 +211,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               درصد موفقیت کل کارها
             </span>
             <div className="flex items-baseline gap-1.5">
-              <h2 className="text-2xl font-black text-emerald-500">
+              <h2 className="text-2xl font-black text-emerald-500 tabular-nums">
                 {toPersianNum(overallRate)}٪
               </h2>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-400 tabular-nums">
                 ({toPersianNum(allDoneCount)} از {toPersianNum(tasks.length)})
               </span>
             </div>
@@ -370,8 +370,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   <div className="flex items-start gap-3.5 min-w-0 flex-1">
                     <button
                       type="button"
+                      aria-label={task.completed ? `بازگرداندن «${task.title}» به حالت ناتمام` : `تکمیل «${task.title}»`}
                       onClick={() => onToggleTask(task.id)}
-                      className={`mt-0.5 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-90 ${
+                      className={`mt-0.5 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-90 cursor-pointer ${
                         task.completed
                           ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25'
                           : 'bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-transparent hover:border-indigo-500'
@@ -482,17 +483,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                     )}
 
                     <button
+                      type="button"
                       onClick={() => onOpenTaskModal(task.id)}
                       title="ویرایش کار"
-                      className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                      aria-label={`ویرایش مأموریت «${task.title}»`}
+                      className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => onDeleteTask(task.id)}
                       title="حذف کار"
-                      className="p-2 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition"
+                      aria-label={`حذف مأموریت «${task.title}»`}
+                      className="p-2 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -514,32 +519,50 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             )}
 
             {displayTasks.length === 0 && (
-              <div className="py-12 text-center space-y-3">
-                <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400">
-                  <CheckCircle className="w-8 h-8" />
+              <div
+                data-testid="workspace-empty-state"
+                className="py-12 px-4 text-center space-y-3 rounded-2xl bg-slate-50/70 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 mx-auto flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <CheckCircle className="w-7 h-7" />
                 </div>
                 <div className="space-y-1">
-                  <h4 className="text-base font-bold text-slate-700 dark:text-slate-200">
-                    هیچ مأموریتی در این بخش ثبت نشده!
+                  <h4 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
+                    {filter === 'all'
+                      ? 'هنوز هیچ مأموریتی در میز کار ثبت نشده است'
+                      : 'هیچ مأموریتی با فیلتر انتخابی یافت نشد'}
                   </h4>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    با استفاده از «دستیار برنامه‌ریز» اولویت‌هایت را بچین یا مستقیم کار جدید اضافه کن.
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                    {filter === 'all'
+                      ? 'اولین مأموریت روزانه خود را ثبت کنید یا با دستیار برنامه‌ریز کارهای روز را اولویت‌بندی نمایید.'
+                      : 'می‌توانید فیلتر را به «همه کارها» تغییر دهید یا یک مأموریت جدید برای این بازه ثبت کنید.'}
                   </p>
                 </div>
-                <div className="flex items-center justify-center gap-2 pt-1">
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                   <button
-                    onClick={() => onSwitchTab('planner')}
-                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    رفتن به دستیار برنامه‌ریز
-                  </button>
-                  <button
+                    type="button"
                     onClick={() => onOpenTaskModal()}
-                    className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition"
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    ثبت دستی
+                    افزودن مأموریت جدید
+                  </button>
+                  {filter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setFilter('all')}
+                      className="inline-flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      نمایش همه کارها
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onSwitchTab('planner')}
+                    className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    رفتن به دستیار برنامه‌ریز
                   </button>
                 </div>
               </div>

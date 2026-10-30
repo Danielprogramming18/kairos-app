@@ -32,6 +32,7 @@ export interface TaskRepository {
   upsertTasksBatch(tasks: TaskEntity[]): Promise<TaskEntity[]>;
   softDeleteTask(id: EntityId): Promise<void>;
   restoreTask(id: EntityId): Promise<TaskEntity | null>;
+  hardDeleteTask(id: EntityId): Promise<void>;
 }
 
 export interface HabitRepository {
@@ -41,12 +42,16 @@ export interface HabitRepository {
   toggleHabitDate(habitId: EntityId, dateKey: LocalDateKey): Promise<HabitEntity | null>;
   listHabitEntries(habitId?: EntityId): Promise<HabitEntryEntity[]>;
   softDeleteHabit(id: EntityId): Promise<void>;
+  restoreHabit(id: EntityId): Promise<HabitEntity | null>;
+  hardDeleteHabit(id: EntityId): Promise<void>;
 }
 
 export interface NoteRepository {
   listNotes(kind?: NoteKind, includeDeleted?: boolean): Promise<NoteEntity[]>;
   upsertNote(note: NoteEntity): Promise<NoteEntity>;
   softDeleteNote(id: EntityId): Promise<void>;
+  restoreNote(id: EntityId): Promise<NoteEntity | null>;
+  hardDeleteNote(id: EntityId): Promise<void>;
 }
 
 export interface FocusRepository {
@@ -65,6 +70,8 @@ export interface BackupValidationResult {
   valid: boolean;
   errors: string[];
   envelope?: BackupEnvelopeV2;
+  encrypted?: boolean;
+  migratedFromLegacy?: boolean;
 }
 
 export interface BackupService {
@@ -73,7 +80,9 @@ export interface BackupService {
   restoreBackup(
     envelope: BackupEnvelopeV2,
     strategy: 'replace' | 'merge'
-  ): Promise<{ restoredCounts: Record<string, number> }>;
+  ): Promise<{ restoredCounts: Record<string, number>; snapshotKey?: string }>;
+  hasPreRestoreSnapshot?(): Promise<{ exists: boolean; createdAt?: string }>;
+  rollbackLastRestore?(): Promise<{ restoredCounts: Record<string, number> }>;
 }
 
 export interface NotificationService {

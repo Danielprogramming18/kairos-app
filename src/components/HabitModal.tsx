@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { Habit, HabitCategory } from '../types';
+import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 
 export const EMOJIS = [
   '🚿', '📚', '💻', '🎯', '🧹', '💧', '🎨', '💰',
@@ -60,14 +61,11 @@ export const HabitModal: React.FC<HabitModalProps> = ({
     }
   }, [habitToEdit, isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  const modalRef = useModalFocusTrap<HTMLDivElement>(
+    isOpen,
+    onClose,
+    '#habit-modal-title-input'
+  );
 
   if (!isOpen) return null;
 
@@ -95,7 +93,11 @@ export const HabitModal: React.FC<HabitModalProps> = ({
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
     >
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 relative">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 relative"
+      >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
           <h3
             id="habit-modal-title"
@@ -116,10 +118,14 @@ export const HabitModal: React.FC<HabitModalProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+            <label
+              htmlFor="habit-modal-title-input"
+              className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5"
+            >
               عنوان عادت *
             </label>
             <input
+              id="habit-modal-title-input"
               type="text"
               required
               value={title}

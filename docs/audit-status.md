@@ -3,13 +3,13 @@
 وضعیت‌های مجاز طبق استاندارد مهندسی پروژه:
 - `verified`: پیاده‌سازی و با آزمون خودکار یا مرورگر واقعی تأیید شده است.
 - `implemented`: پیاده‌سازی شده و در انتظار تکمیل آزمون‌های فاز بعدی است.
-- `pending`: برنامه‌ریزی‌شده برای فاز ۳.
+- `pending`: برنامه‌ریزی‌شده برای مراحل بعدی (مراحل ۲ تا ۷).
 - `blocked`: نیازمند کامپایلر/میزبان بومی خارج از محیط وب (Sketchware APK / Windows Tauri Host).
-- `deferred`: موکول‌شده به تصمیم نهایی کاربر.
+- `deferred`: موکول‌شده به تصمیم نهایی مالک پروژه.
 
 ---
 
-## ۱. جدول رهگیری ۴۸ باگ شناسایی‌شده (`BUG-01` تا `BUG-48`)
+## ۱. جدول رهگیری ۴۸ باگ قبلی (`BUG-01` تا `BUG-48`)
 
 | شناسه | اولویت | شرح خلاصه | وضعیت | توضیح فنی و محل اصلاح |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@
 | `BUG-02` | بحرانی | بازگشت تیک‌های برداشته‌شدهٔ عادت‌ها در ادغام OR | `verified` | همگام‌سازی خودکار پس‌زمینه غیرفعال شد و جدول `habitEntries` در IndexedDB منبع حقیقت محلی شد. |
 | `BUG-03` | بحرانی | عدم اعمال ویرایش روی فیلدهای موجود در `mergeById` | `verified` | ذخیره‌سازی محلی مبتنی بر `revision` و `updatedAt` در `dexieAdapter.ts` جایگزین سینک خودکار شد. |
 | `BUG-04` | بحرانی | نادیده گرفتن خطای JSON خراب در پاسخ GitHub و بازنویسی مخزن | `verified` | سینک خودکار در هنگام بالا آمدن برنامه متوقف شد (`src/App.tsx`). |
-| `BUG-05` | بالا | ذخیره‌سازی توکن GitHub به صورت متن ساده و ارسال خودکار شبکه | `verified` | ارسال خودکار شبکه در `src/App.tsx` کاملاً متوقف شد و برنامه ۱۰۰٪ آفلاین-محور است. |
+| `BUG-05` | بالا | ذخیره‌سازی توکن GitHub به صورت متن ساده و ارسال خودکار شبکه | `verified` | ارسال خودکار شبکه در `src/App.tsx` کاملاً متوقف شد و برنامه آفلاین-محور است. |
 | `BUG-06` | بالا | تغییر مقادیر پیش‌فرض وظایف `t1` و `t2` در هر بار بارگذاری | `verified` | بازنویسی اجباری `reminderTime` روی `t1` و `t2` در زمان راه‌اندازی از `src/App.tsx` حذف شد. |
 | `BUG-07` | بالا | محاسبهٔ نادرست درصد پیشرفت در صورت انجام شدن کارهای قدیمی/آینده | `verified` | در `DashboardView.tsx` و `WorkspaceView.tsx` کارهای انجام‌شدهٔ روزهای گذشته از مخرج امروز تفکیک و سقف درصد به ۱۰۰٪ محدود شد. |
 | `BUG-08` | متوسط | ناهماهنگی نام برند بین `index.html` و هدر | `verified` | نام برند در `index.html` و تمام متاتگ‌ها به «کایروس \| دستیار هوشمند تمرکز» یکپارچه شد. |
@@ -46,7 +46,7 @@
 | `BUG-31` | بالا | اعتبارسنجی ناقص فایل JSON هنگام بازیابی پشتیبان | `verified` | متد `validateBackupJson` در `dexieAdapter.ts` ساختار و نوع آرایه‌ها را به صورت کامل اعتبارسنجی می‌کند. |
 | `BUG-32` | بالا | نادیده گرفتن آرایهٔ خالی `usefulInfos: []` هنگام بازیابی | `verified` | شرط `data.usefulInfos.length > 0` در `src/App.tsx` به `Array.isArray(data.usefulInfos)` اصلاح شد. |
 | `BUG-33` | متوسط | عدم اعتبارسنجی رشته‌های زمان و تاریخ در فرم مودال وظیفه | `verified` | در `TaskModal.tsx` اعتبارسنجی الگوی تاریخ (`YYYY-MM-DD`)، ساعت (`HH:MM`)، اولویت (`1..20`) و مدت زمان (`5..480`) پیاده شد. |
-| `BUG-34` | متوسط | عدم نمایش هشدار در صورت پر شدن سهمیهٔ ذخیره‌سازی | `verified` | تابع `safeSetLocalStorage` در `src/App.tsx` در صورت پر شدن سهمیهٔ `localStorage` هشدار صریح نمایش می‌دهد و داده‌ها در IndexedDB حفظ می‌شوند. |
+| `BUG-34` | متوسط | عدم نمایش هشدار در صورت پر شدن سهمیهٔ ذخیره‌سازی | `verified` | بنر تشخیصی خطای ذخیره‌سازی به همراه دکمهٔ تلاش مجدد و خروجی اضطراری در `src/App.tsx` پیاده شد. |
 | `BUG-35` | بالا | مسدود بودن زوم کاربر (`user-scalable=no`) در `index.html` | `verified` | ویژگی‌های `maximum-scale=1.0, user-scalable=no` از `index.html` حذف شدند. |
 | `BUG-36` | متوسط | تحمیل فونت فارسی و جهت RTL روی بلوک‌های کد (`pre`, `.font-mono`) | `verified` | در `src/index.css` فونت Monospace و `direction: ltr; unicode-bidi: isolate;` برای کدها تفکیک شد. |
 | `BUG-37` | بالا | فقدان `role="dialog"`، `aria-modal` و کلید `Escape` در مودال‌ها | `verified` | در `HabitModal.tsx`، `TaskModal.tsx` و `DeleteModal.tsx` ویژگی‌های `role="dialog"`، `aria-modal="true"`، `aria-labelledby` و بسته شدن با `Escape` اضافه و در مرورگر تأیید شدند. |
@@ -54,10 +54,32 @@
 | `BUG-39` | پایین | ایجاد نمونهٔ جدید `AudioContext` یا عدم مدیریت خطای صدا | `verified` | در `soundEffects.ts` وضعیت `closed` بررسی و گره‌های صوتی پس از پایان (`osc.onended`) آزادسازی (`disconnect`) می‌شوند. |
 | `BUG-40` | متوسط | بررسی یادآورها فقط در دقیقهٔ دقیق و احتمال جا افتادن در پس‌زمینه | `verified` | در `src/App.tsx` یادآورهای کارهای امروز که ساعتشان گذشته یا فرا رسیده است (`reminderTime <= currentHHMM`) و هنوز اعلام نشده‌اند، اجرا می‌شوند. |
 | `BUG-41` | پایین | عدم پاک‌سازی تایمرهای `setTimeout` مربوط به Toast در هنگام unmount | `verified` | شناسه‌های تایمر Toast در `toastTimersRef` نگهداری و هنگام unmount پاک‌سازی می‌شوند (`src/App.tsx`). |
-| `BUG-42` | متوسط | سریال‌سازی همگام در `localStorage` در هر تغییر کوچک | `verified` | ذخیره‌سازی اصلی به تراکنش‌های غیرهمگام `IndexedDB` (`Dexie`) منتقل شد و `safeSetLocalStorage` بهینه گردید. |
+| `BUG-42` | متوسط | سریال‌سازی همگام در `localStorage` در هر تغییر کوچک | `verified` | ذخیره‌سازی همگام در `localStorage` کاملاً حذف شد و تمام تغییرات از طریق تراکنش‌های غیرهمگام `IndexedDB` (`Dexie`) انجام می‌شوند. |
 | `BUG-43` | پایین | رندر بدون صفحه‌بندی در لیست‌های بسیار بزرگ | `verified` | صفحه‌بندی گام‌به‌گام (`visibleCount = 50` + دکمهٔ «نمایش موارد بیشتر») در `WorkspaceView.tsx`، `UsefulInfoView.tsx` و `NotesAndIdeasView.tsx` پیاده شد. |
 | `BUG-44` | پایین | عدم وجود قابلیت بازگردانی (Undo) پس از حذف | `verified` | دکمهٔ «واگرد (Undo)» در اعلان Toast پس از حذف مأموریت، عادت، ایده و اطلاعات کاربردی اضافه شد و در مرورگر واقعی تأیید گردید (`src/App.tsx`). |
 | `BUG-45` | پایین | عدم پشتیبانی از میانبرهای صفحه‌کلید | `verified` | میانبرهای سراسری `Alt+N` (کار جدید)، `Alt+H` (عادت جدید)، `Alt+F` (تمرکز عمیق) و `Alt+D` (داشبورد) در `src/App.tsx` پیاده شدند. |
 | `BUG-46` | مسدود | اجرای مستقیم باینری APK اندروید در محیط ابری لینوکس | `blocked` | نیازمند ایمپورت بستهٔ خروجی در پروژهٔ Sketchware طبق راهنمای `/docs/ANDROID_HANDOFF.md`. |
 | `BUG-47` | مسدود | کامپایل مستقیم فایل `.exe` ویندوز در کانتینر لینوکس | `blocked` | نیازمند بیلد روی سیستم ویندوز با Tauri v2 طبق راهنمای `/docs/WINDOWS_HANDOFF.md`. |
-| `BUG-48` | پایین | عدم وجود اسنپ‌شات پشتیبان خودکار قبل از مهاجرت اسکیما | `verified` | تابع `migrateLegacyLocalStorageToIndexedDB` قبل از مهاجرت، اسنپ‌شات خام را در `kairos_migration_recovery_v1` ذخیره می‌کند. |
+| `BUG-48` | پایین | عدم وجود اسنپ‌شات پشتیبان خودکار قبل از مهاجرت اسکیما | `verified` | تابع `migrateLegacyLocalStorageToIndexedDB` قبل از مهاجرت، اسنپ‌شات خام را در `kairos_migration_recovery_v1` ذخیره و صحت خواندن مجدد آن را کنترل می‌کند. |
+
+---
+
+## ۲. جدول رهگیری موارد جدید ممیزی مهندسی (`FIX-01` تا `FIX-14`)
+
+| شناسه | مرحله | شرح خلاصه | وضعیت | توضیح فنی و شواهد آزمون |
+|---|---|---|---|---|
+| `FIX-01` | مرحله ۱ | یکپارچه‌سازی منبع داده در `App.tsx` و حذف نگهداری موازی در `localStorage` | `verified` | مقداردهی اولیه و `useEffect`های نوشتن در `localStorage` از `src/App.tsx` حذف شدند؛ `IndexedDB` (یا `Bridge`) تنها منبع حقیقت است. با آزمون مرورگر تأیید شد (`legacyLocalStorageNotes: null`). |
+| `FIX-02` | مرحله ۱ | اتصال کامل ایجاد/ویرایش/بارگذاری یادداشت‌ها، ایده‌ها، جلسات تمرکز و سطل زباله به Repository | `verified` | تابع `reloadAllFromRepository` و تمام اکشن‌های CRUD یادداشت‌ها، ایده‌ها، جلسات تمرکز و سطل زباله (`softDelete`, `restore`, `hardDelete`) به `container` متصل شدند و با آزمون مرورگر پس از رفرش تأیید گردیدند. |
+| `FIX-03` | مرحله ۱ | چرخهٔ تراکنشی `UI action → validation → repository transaction → result → UI update` | `verified` | تابع `executeStorageMutation` در `src/App.tsx` پیاده شد؛ اعلان موفقیت تنها پس از commit مخزن نمایش داده می‌شود. |
+| `FIX-04` | مرحله ۱ | مهاجرت امن با کنترل صحت اسنپ‌شات، شمارش رکوردهای نوشته‌شده و تفکیک اجرای اول از دیتابیس خالی | `verified` | در `dexieAdapter.ts` صحت اسنپ‌شات قبل از مهاجرت و تعداد رکوردها پس از نوشتن بررسی می‌شود؛ اجرای اول بدون کلید قدیمی وضعیت `clean_first_run` ثبت کرده و دادهٔ نمونه را خودکار تزریق نمی‌کند (`dexieAdapter.test.ts`). |
+| `FIX-05` | مرحله ۱ | حفظ کامل تمام فیلدهای Domain (`createdAt`, `updatedAt`, `revision`, `deletedAt`, `completedAt`, `projectId`, `tags`, `sourceId`, `startDate`) در مبدل‌های UI | `verified` | مبدل‌های بدون اتلاف در `src/app/PlatformContext.tsx` و تایپ‌ها در `src/types.ts` پیاده و با آزمون واحد تأیید شدند (`dexieAdapter.test.ts`). |
+| `FIX-06` | مرحله ۱ | سیاست همزمانی، افزایش واقعی `revision` فقط روی رکورد تغییریافته و همگام‌سازی بین تب‌ها | `verified` | افزایش `revision` در تراکنش‌های `dexieAdapter.ts` و کانال `BroadcastChannel('kairos_db_sync_v2')` پیاده و تست شد. |
+| `FIX-07` | مرحله ۱ | حذف `catch`های خالی و نمایش وضعیت ذخیره‌سازی (`initializing`/`saving`/`saved`/`error`) با قابلیت تلاش مجدد و خروجی اضطراری | `verified` | وضعیت `storageStatus`، بنر خطا، دکمهٔ «تلاش مجدد» و «خروجی اضطراری داده‌ها» در `src/App.tsx` پیاده شد. |
+| `FIX-08` | مرحله ۲ | یکسان‌سازی قالب canonical بکاپ بین UI و Repository، اعتبارسنجی سخت‌گیرانهٔ تمام فیلدها و آزمون‌های خرابی/Rollback | `verified` | قالب واحد `BackupEnvelopeV2`، اعتبارسنج مشترک (`validateAndPreviewBackupPayload` / `validateBackupEnvelopeObject`) با بررسی Checksum، تاریخ، اعداد منفی، شناسه‌های تکراری، اسنپ‌شات اجباری در `kairos_pre_restore_snapshot_v2`، بازیابی اتمیک (`replace` و `merge`) و `rollbackLastRestore` پیاده و با ۳۶ آزمون واحد/قرارداد و آزمون مرورگر تأیید شد. |
+| `FIX-09` | مرحله ۳ | استخراج موتور سراسری تایمر مستقل از صفحه و تکمیل منطق عادت‌ها، آمار `completedAt` و پیش‌نمایش ثبت سریع NLP | `verified` | هوک سراسری `useGlobalPomodoro` در ریشهٔ `App.tsx`، تابع `evaluateTimerTick`، محاسبهٔ نرخ عادت با `calculateHabitWindowRate` و `startDate`/`targetDaysOfWeek`، محاسبهٔ آمار بر اساس تاریخ واقعی انجام کار (`completedAt`) در `analyticsCalculator.ts` و پیش‌نمایش زندهٔ توکن‌های NLP در `DashboardView` و `TaskModal` پیاده و با ۴۱ آزمون واحد و آزمون مرورگر تأیید شد. |
+| `FIX-10` | مرحله ۴ | پیاده‌سازی Semantic Design Tokens، جهت هنری آرام و بدون گرادیان‌های اغراق‌آمیز، و ناوبری سایدبار/موبایل یکپارچه | `verified` | متغیرهای معنایی CSS (`--bg-app`, `--bg-surface-1`, `--bg-surface-2`, `--text-primary`, `--border-subtle`, `--accent-primary`) برای هر دو پوستهٔ روشن و تیره، قواعد `tabular-nums` و `:focus-visible` در `src/index.css`، هدر آرام یکپارچه در `Header.tsx` و سایدبار عمودی RTL دسکتاپ + نوار ۵تایی موبایل در `Navigation.tsx` و `App.tsx` پیاده و با آزمون مرورگر در دو رزولوشن دسکتاپ (`1440x900`) و موبایل (`390x844`) تأیید شد. |
+| `FIX-11` | مرحله ۵ | بازطراحی صفحات (امروز، کارها، تمرکز، عادت‌ها، یادداشت‌ها، گزارش‌ها، تنظیمات) و دسترس‌پذیری کامل کیبورد/Focus Trap | `verified` | هوک دسترس‌پذیری `useModalFocusTrap` (`src/utils/useModalFocusTrap.ts`) روی تمام مودال‌ها (`TaskModal`, `HabitModal`, `DeleteModal` و شیت موبایل `Navigation`) پیاده شد (انتقال فوکوس اولیه، تلهٔ فوکوس چرخشی با `Tab`/`Shift+Tab`، بسته شدن با `Escape` و بازگرداندن فوکوس به دکمهٔ فراخواننده). همچنین تمام صفحات داخلی با وضعیت‌های خالی عمل‌گرا (Actionable Empty States)، `tabular-nums` و برچسب‌های `aria-label` ارتقا یافتند و با ۴۵ آزمون واحد و آزمون مرورگر واقعی تأیید گردیدند. |
+| `FIX-12` | مرحله ۶ و ۷ | بسته‌بندی کاملاً آفلاین (فونت محلی، حذف مسیر قدیمی GitHub Sync از تجربهٔ اصلی، بررسی capabilities میزبان و خودآزمایی زیرسیستم‌ها) | `verified` | بستهٔ فونت محلی `@fontsource-variable/vazirmatn` در `dist/assets/*.woff2` باندل شد؛ لینک‌های خارجی Google Fonts حذف شدند؛ ماژول تشخیص قابلیت‌های میزبان (`src/utils/hostCapabilities.ts`) و موتور خودآزمایی زندهٔ ۶ زیرسیستم (`src/utils/releaseReadiness.ts` و `[data-testid="self-diagnostic-card"]`) در `BackupAndSyncView.tsx` پیاده شد؛ هشدارهای بیلد Vite (`import.meta.dirname`) رفع گردید و با ۵۷ آزمون واحد/قرارداد (شامل `bridgeAdapters.test.ts`) و پیمایش مرورگر واقعی در هر ۱۰ مسیر برنامه تأیید شد. |
+| `FIX-13` | مرحله ۶ و ۷ | ساخت و تست واقعی APK اندروید در محیط Sketchware | `blocked` | بستهٔ استاتیک ۱۰۰٪ آفلاین (`dist/`)، آزمون‌های قرارداد `AndroidBridgePlatformAdapter` (`bridgeAdapters.test.ts`)، قطعه کدهای جاوای `WebSettings` در داخل برنامه (`[data-testid="platform-handoff-snippets"]`) و مستندات دوحالته در `/docs/ANDROID_HANDOFF.md` آمادهٔ تحویل است، اما کامپایل نهایی فایل باینری `.apk` نیازمند اجرای پروژه در محیط Sketchware روی دستگاه/سیستم توسعه‌دهندهٔ اندروید است (`اجرا نشده در این محیط`). |
+| `FIX-14` | مرحله ۶ و ۷ | ساخت و تست واقعی EXE ویندوز در محیط ویندوز | `blocked` | آداپتور دسکتاپ، آزمون‌های قرارداد `WindowsDesktopPlatformAdapter` (`bridgeAdapters.test.ts`)، دستورات بیلد داخل برنامه و مستندات `/docs/WINDOWS_HANDOFF.md` آماده است، اما کامپایل فایل اجرایی `.exe` نیازمند سیستم‌عامل ویندوز و زنجیرهٔ ابزار Rust/MSVC خارج از کانتینر لینوکس فعلی است (`اجرا نشده در این محیط`). |
+

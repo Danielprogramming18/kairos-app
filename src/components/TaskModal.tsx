@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, CheckSquare, Bell } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, CheckSquare, Bell, Sparkles, Clock, Calendar, Flag } from 'lucide-react';
 import { Task } from '../types';
 import {
   getTodayKey,
@@ -7,7 +7,10 @@ import {
   addDays,
   getDateKey,
   formatDateKeyToPersian,
+  toPersianNum,
 } from '../utils/persianDate';
+import { parseNaturalTaskInput } from '../utils/nlpTaskParser';
+import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -44,6 +47,29 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [targetDate, setTargetDate] = useState<string>(defaultDateKey || todayKey);
   const [reminderTime, setReminderTime] = useState<string>('');
 
+  const nlpPreview = useMemo(() => {
+    if (!title.trim()) return null;
+    const parsed = parseNaturalTaskInput(title);
+    return parsed.hasExtractedTokens ? parsed : null;
+  }, [title]);
+
+  const handleApplyNlpPreview = () => {
+    if (!nlpPreview) return;
+    setTitle(nlpPreview.title);
+    if (nlpPreview.extractedDateDetected) {
+      setTargetDate(nlpPreview.targetDate);
+    }
+    if (nlpPreview.extractedDurationDetected) {
+      setDuration(nlpPreview.duration);
+    }
+    if (nlpPreview.extractedPriorityDetected) {
+      setPriority(nlpPreview.priority);
+    }
+    if (nlpPreview.extractedReminderDetected && nlpPreview.reminderTime) {
+      setReminderTime(nlpPreview.reminderTime);
+    }
+  };
+
   useEffect(() => {
     if (taskToEdit) {
       setTitle(taskToEdit.title);
@@ -62,14 +88,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     }
   }, [taskToEdit, isOpen, defaultDateKey, todayKey]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  const modalRef = useModalFocusTrap<HTMLDivElement>(
+    isOpen,
+    onClose,
+    '#task-modal-title-input'
+  );
 
   if (!isOpen) return null;
 
@@ -109,7 +132,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
     >
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5"
+      >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
           <h3
             id="task-modal-title"
@@ -130,17 +157,73 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              عنوان کار *
+            <label
+              htmlFor="task-modal-title-input"
+              className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5"
+            >
+              عنوان کار (پشتیبانی از تشخیص هوشمند زمان و تاریخ) *
             </label>
             <input
+              id="task-modal-title-input"
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثلاً: دیدن ۴۵ دقیقه دوره CSS یا طراحی بنر ایتا"
+              placeholder="مثلاً: فردا ساعت ۵ عصر ۴۵ دقیقه تمرین CSS اولویت ۱"
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
             />
+
+            {/* Live NLP Extraction Preview Banner (FIX-09) */}
+            {nlpPreview && (
+              <div
+                data-testid="nlp-extraction-preview"
+                className="mt-2.5 p-3 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/70 space-y-2 animate-fade-in"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-black text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    پیش‌نمایش استخراج هوشمند از متن:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleApplyNlpPreview}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold transition cursor-pointer"
+                  >
+                    اعمال مقادیر استخراج‌شده
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200">
+                    عنوان: {nlpPreview.title}
+                  </span>
+                  {nlpPreview.extractedDateDetected && (
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      {nlpPreview.extractedDateLabel}
+                    </span>
+                  )}
+                  {nlpPreview.extractedDurationDetected && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {toPersianNum(nlpPreview.duration)} دقیقه
+                    </span>
+                  )}
+                  {nlpPreview.extractedReminderDetected && nlpPreview.reminderTime && (
+                    <span className="px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-700 dark:text-violet-300 font-bold flex items-center gap-1">
+                      <Bell className="w-3 h-3" />
+                      ساعت {toPersianNum(nlpPreview.reminderTime)}
+                    </span>
+                  )}
+                  {nlpPreview.extractedPriorityDetected && (
+                    <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold flex items-center gap-1">
+                      <Flag className="w-3 h-3" />
+                      اولویت {toPersianNum(nlpPreview.priority)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>

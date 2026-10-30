@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateStreaks } from './habitStreaks';
+import { calculateHabitWindowRate, calculateStreaks } from './habitStreaks';
 
 test('calculateStreaks calculates zero streak for empty history', () => {
   const res = calculateStreaks({}, new Date('2026-10-25T12:00:00'));
@@ -61,3 +61,48 @@ test('BUG-27: calculateStreaks preserves streak across allowed rest days when we
   const resStrict = calculateStreaks(dict, today, 7);
   assert.equal(resStrict.current, 1);
 });
+
+test('FIX-09: calculateHabitWindowRate does not penalize days prior to habit startDate or future days', () => {
+  const weekKeys = [
+    '2026-10-24',
+    '2026-10-25',
+    '2026-10-26',
+    '2026-10-27',
+    '2026-10-28',
+    '2026-10-29',
+    '2026-10-30',
+  ];
+  const todayKey = '2026-10-28';
+
+  // Habit created on 2026-10-27 and completed on 10-27 and 10-28
+  const newlyCreatedHabit = {
+    startDate: '2026-10-27',
+    weeklyGoal: 7,
+    completedDates: {
+      '2026-10-27': true,
+      '2026-10-28': true,
+    },
+  };
+
+  const rate = calculateHabitWindowRate(newlyCreatedHabit, weekKeys, todayKey);
+  assert.equal(rate.doneCount, 2);
+  assert.equal(rate.expectedCount, 2);
+  assert.equal(rate.ratePercent, 100);
+});
+
+test('FIX-09: calculateStreaks respects custom targetDaysOfWeek without breaking on non-target days', () => {
+  // 2026-10-24 is Saturday (Persian index 0), 2026-10-26 is Monday (Persian index 2), 2026-10-28 is Wednesday (Persian index 4)
+  const today = new Date(2026, 9, 28); // 2026-10-28
+  const dict = {
+    '2026-10-24': true,
+    '2026-10-26': true,
+    '2026-10-28': true,
+  };
+  const res = calculateStreaks(dict, today, 3, {
+    startDate: '2026-10-24',
+    targetDaysOfWeek: [0, 2, 4],
+  });
+  assert.equal(res.current, 3);
+  assert.equal(res.best, 3);
+});
+

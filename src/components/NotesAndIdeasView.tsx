@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Lightbulb, Plus, Trash2, ArrowUpRight, Search, Edit3, X, Check } from 'lucide-react';
 import { Idea, IdeaCategory, Task } from '../types';
 import { toPersianNum } from '../utils/persianDate';
@@ -35,6 +35,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState<number>(50);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +114,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-2">
           <div className="md:col-span-5">
             <input
+              ref={titleInputRef}
               type="text"
               required
               value={title}
@@ -265,6 +267,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
                         type="button"
                         onClick={() => handleStartEdit(idea)}
                         title="ویرایش ایده"
+                        aria-label={`ویرایش ایده «${idea.title}»`}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-500 hover:bg-indigo-500/10 transition cursor-pointer"
                       >
                         <Edit3 className="w-4 h-4" />
@@ -274,6 +277,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
                       type="button"
                       onClick={() => onDeleteIdea(idea.id)}
                       title="حذف ایده"
+                      aria-label={`حذف ایده «${idea.title}»`}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -285,8 +289,50 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
           })}
 
           {filteredIdeas.length === 0 && (
-            <div className="col-span-full py-12 text-center text-xs text-slate-400">
-              هیچ ایده‌ای در این بخش پیدا نشد.
+            <div
+              data-testid="ideas-empty-state"
+              className="col-span-full py-12 px-4 text-center space-y-3 rounded-2xl bg-slate-50/70 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 mx-auto flex items-center justify-center text-amber-500">
+                <Lightbulb className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
+                  {ideas.length === 0
+                    ? 'بانک ایده‌های شما خالی است'
+                    : 'هیچ ایده‌ای با فیلتر یا جستجوی فعلی یافت نشد'}
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                  {ideas.length === 0
+                    ? 'ایده‌ها و جرقه‌های ذهنی خود را اینجا ثبت کنید تا هنگام تمرکز عمیق، ذهن شما آرام بماند.'
+                    : 'می‌توانید فیلتر دسته‌بندی یا عبارت جستجو را پاک کنید یا ایده جدیدی ثبت نمایید.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    titleInputRef.current?.focus();
+                  }}
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  ثبت اولین ایده
+                </button>
+                {(selectedCategory !== 'all' || searchQuery.trim() !== '') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory('all');
+                      setSearchQuery('');
+                    }}
+                    className="inline-flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    پاک کردن فیلترها
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

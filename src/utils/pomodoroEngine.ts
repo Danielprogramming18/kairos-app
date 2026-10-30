@@ -165,3 +165,53 @@ export function transitionTimerPhase(
     updatedAt: new Date(nowEpochMs).toISOString(),
   };
 }
+
+export interface TimerTickEvaluation {
+  remainingSeconds: number;
+  completedPhase: FocusSessionPhase | null;
+  completedWorkSession: boolean;
+  completedDurationMinutes: number;
+  nextState: ExtendedActiveTimerState | null;
+}
+
+/**
+ * Pure evaluator for the global root timer loop (FIX-09).
+ * Evaluates whether an active timer has reached 0 at `nowEpochMs` regardless of which UI tab is mounted.
+ */
+export function evaluateTimerTick(
+  state: ExtendedActiveTimerState,
+  nowEpochMs: number = Date.now(),
+  cyclesBeforeLongBreak = 4
+): TimerTickEvaluation {
+  const remainingSeconds = computeRemainingSeconds(state, nowEpochMs);
+  if (!state.isRunning || remainingSeconds > 0) {
+    return {
+      remainingSeconds,
+      completedPhase: null,
+      completedWorkSession: false,
+      completedDurationMinutes: 0,
+      nextState: null,
+    };
+  }
+
+  const completedWorkSession = state.phase === 'work';
+  const completedDurationMinutes = Math.max(
+    1,
+    Math.round((state.durationSeconds || state.selectedPresetMinutes * 60) / 60)
+  );
+  const nextState = transitionTimerPhase(
+    state,
+    completedWorkSession,
+    cyclesBeforeLongBreak,
+    nowEpochMs
+  );
+
+  return {
+    remainingSeconds: 0,
+    completedPhase: state.phase,
+    completedWorkSession,
+    completedDurationMinutes,
+    nextState,
+  };
+}
+

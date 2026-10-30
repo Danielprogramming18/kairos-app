@@ -8,6 +8,14 @@ export interface Habit {
   color: string;
   weeklyGoal: number; // 1 to 7
   completedDates: Record<string, boolean>; // 'YYYY-MM-DD' -> true
+  frequencyType?: 'daily' | 'weekly_target' | 'custom_days';
+  targetDaysOfWeek?: number[];
+  startDate?: string; // 'YYYY-MM-DD'
+  archived?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  revision?: number;
 }
 
 export type TaskPriority = 1 | 2 | 3 | 4 | 5 | number;
@@ -20,11 +28,20 @@ export interface Task {
   duration: number; // in minutes
   targetDate: string; // 'YYYY-MM-DD'
   completed: boolean;
+  status?: 'todo' | 'in_progress' | 'done' | 'archived';
   category?: string;
   reminderTime?: string; // 'HH:MM' in 24h format
   reminded?: boolean;
+  dueAt?: string | null;
+  projectId?: string | null;
+  sourceId?: string | null;
+  tags?: string[];
   subtasks?: { id: string; title: string; completed: boolean }[];
-  completedAt?: string;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  revision?: number;
 }
 
 export type IdeaCategory = 'project' | 'learning' | 'business' | 'personal';
@@ -34,7 +51,13 @@ export interface Idea {
   title: string;
   note?: string;
   category: IdeaCategory;
-  createdAt: string;
+  createdAt: string; // display label e.g. '۸ آبان' or ISO
+  createdAtIso?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  revision?: number;
+  tags?: string[];
+  linkedTaskId?: string | null;
 }
 
 export type UsefulInfoCategory = 'work' | 'links' | 'code' | 'personal';
@@ -45,8 +68,12 @@ export interface UsefulInfoItem {
   content: string;
   category: UsefulInfoCategory;
   pinned?: boolean;
-  createdAt: string;
+  createdAt: string; // display label e.g. '۸ آبان' or ISO
+  createdAtIso?: string;
   updatedAt?: string;
+  deletedAt?: string | null;
+  revision?: number;
+  tags?: string[];
 }
 
 export interface FocusSession {
@@ -54,8 +81,17 @@ export interface FocusSession {
   taskId?: string;
   taskTitle?: string;
   durationMinutes: number;
+  plannedMinutes?: number;
+  phase?: 'work' | 'short_break' | 'long_break';
   dateKey: string;
   timestamp: number;
+  startedAt?: string;
+  endedAt?: string;
+  completedNaturally?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  revision?: number;
 }
 
 export interface ChatMessage {
@@ -89,7 +125,7 @@ export interface GitHubSyncConfig {
   repo: string;
   path: string; // default 'data.json'
   branch: string; // default 'main'
-  token: string; // Fine-grained PAT stored ONLY in localStorage
+  token: string; // Fine-grained PAT stored ONLY in sessionStorage
   autoSync: boolean;
 }
 

@@ -123,7 +123,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div data-testid="calendar-view-container" className="space-y-6">
       {/* Top Bar: Year Title, Year Navigator, Month Selector Pills, and View Mode Switcher */}
       <section className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -133,11 +133,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base font-black text-slate-800 dark:text-white">
+                <h2 className="text-base font-black text-slate-800 dark:text-white tabular-nums">
                   تقویم جامع برنامه‌ریزی سال {toPersianNum(currentMonth.jYear)}
                 </h2>
                 {currentMonth.isLeapYear && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 tabular-nums">
                     سال کبیسه (اسفند ۳۰ روزه)
                   </span>
                 )}
@@ -150,12 +150,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
           <div className="flex flex-wrap items-center gap-2">
             {/* Year Navigation Controls (BUG-11) */}
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1 tabular-nums">
               <button
                 type="button"
                 onClick={() => setSelectedJYear((y) => y - 1)}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-900 transition flex items-center gap-1"
                 title="سال قبل"
+                aria-label={`رفتن به سال قبل (${toPersianNum(selectedJYear - 1)})`}
               >
                 <ChevronRight className="w-3.5 h-3.5" />
                 <span>{toPersianNum(selectedJYear - 1)}</span>
@@ -168,6 +169,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 onClick={() => setSelectedJYear((y) => y + 1)}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-900 transition flex items-center gap-1"
                 title="سال بعد"
+                aria-label={`رفتن به سال بعد (${toPersianNum(selectedJYear + 1)})`}
               >
                 <span>{toPersianNum(selectedJYear + 1)}</span>
                 <ChevronLeft className="w-3.5 h-3.5" />
@@ -401,7 +403,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   >
                     <div className="flex items-center justify-between w-full">
                       <span
-                        className={`text-sm sm:text-base font-black ${
+                        className={`text-sm sm:text-base font-black tabular-nums ${
                           isSelected
                             ? 'text-white'
                             : day.isToday
@@ -462,7 +464,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
 
           {/* Right Panel: Selected Day Summary & Direct Day Entry (5 cols) */}
-          <div className="lg:col-span-5 bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-5">
+          <div
+            data-testid="calendar-day-inspector"
+            className="lg:col-span-5 bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-3xl border border-slate-200/70 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-5"
+          >
             <div className="space-y-4">
               {/* Day Header */}
               <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -470,10 +475,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
                     خلاصه و جزئیات روز انتخاب‌شده
                   </span>
-                  <h3 className="text-base font-black text-slate-800 dark:text-white mt-0.5">
+                  <h3 className="text-base font-black text-slate-800 dark:text-white mt-0.5 tabular-nums">
                     {formatDateKeyToPersian(selectedDateKey)}
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-400 mt-0.5 tabular-nums">
                     {toPersianNum(selectedDayDoneCount)} از {toPersianNum(selectedDayTasks.length)} کار تکمیل شده • مجموع زمان:{' '}
                     {toPersianNum(selectedDayTotalMinutes)} دقیقه
                   </p>
@@ -505,11 +510,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 onSubmit={handleAddTaskForSelectedDay}
                 className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60 space-y-2.5"
               >
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                <label
+                  htmlFor="calendar-quick-task-title"
+                  className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"
+                >
                   <Plus className="w-4 h-4 text-indigo-500" />
                   <span>ثبت کار جدید در همین تاریخ:</span>
-                </div>
+                </label>
                 <input
+                  id="calendar-quick-task-title"
                   type="text"
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
@@ -518,34 +527,52 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 />
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">اولویت</label>
+                    <label
+                      htmlFor="calendar-quick-task-priority"
+                      className="block text-[10px] text-slate-400 mb-0.5"
+                    >
+                      اولویت
+                    </label>
                     <input
+                      id="calendar-quick-task-priority"
                       type="number"
                       min={1}
                       max={20}
                       value={newTaskPriority}
                       onChange={(e) => setNewTaskPriority(Number(e.target.value) || 1)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white tabular-nums"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">مدت (دقیقه)</label>
+                    <label
+                      htmlFor="calendar-quick-task-duration"
+                      className="block text-[10px] text-slate-400 mb-0.5"
+                    >
+                      مدت (دقیقه)
+                    </label>
                     <input
+                      id="calendar-quick-task-duration"
                       type="number"
                       min={5}
                       max={600}
                       value={newTaskDuration}
                       onChange={(e) => setNewTaskDuration(Number(e.target.value) || 45)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white tabular-nums"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">ساعت یادآور</label>
+                    <label
+                      htmlFor="calendar-quick-task-reminder"
+                      className="block text-[10px] text-slate-400 mb-0.5"
+                    >
+                      ساعت یادآور
+                    </label>
                     <input
+                      id="calendar-quick-task-reminder"
                       type="time"
                       value={newTaskReminder}
                       onChange={(e) => setNewTaskReminder(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white"
+                      className="w-full px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white tabular-nums"
                     />
                   </div>
                 </div>
@@ -560,12 +587,26 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
               {/* Tasks List for Selected Day */}
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                <h4 className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                <h4 className="text-xs font-bold text-slate-600 dark:text-slate-300 tabular-nums">
                   لیست کارهای این روز ({toPersianNum(selectedDayTasks.length)}):
                 </h4>
                 {selectedDayTasks.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
-                    کاری برای این تاریخ ثبت نشده است.
+                  <div
+                    data-testid="calendar-day-empty-state"
+                    className="py-5 px-4 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-2.5"
+                  >
+                    <p>کاری برای این تاریخ ثبت نشده است.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const input = document.getElementById('calendar-quick-task-title');
+                        input?.focus();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] hover:bg-indigo-500/20 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>ثبت اولین کار این روز</span>
+                    </button>
                   </div>
                 ) : (
                   selectedDayTasks.map((t) => (
@@ -581,6 +622,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         <button
                           type="button"
                           onClick={() => onToggleTask(t.id)}
+                          aria-label={t.completed ? `لغو انجام «${t.title}»` : `تیک زدن انجام «${t.title}»`}
                           className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition ${
                             t.completed
                               ? 'bg-emerald-500 text-white'
@@ -590,7 +632,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           {t.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                         </button>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 tabular-nums">
                             <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
                               اولویت {toPersianNum(t.priority)}
                             </span>
@@ -621,6 +663,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         onClick={() => onDeleteTask(t.id)}
                         className="p-1.5 text-slate-400 hover:text-rose-500 transition"
                         title="حذف کار"
+                        aria-label={`حذف کار «${t.title}»`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

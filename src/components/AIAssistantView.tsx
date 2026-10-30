@@ -245,11 +245,14 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 
       {/* Sub-tab 1: Local Smart Coach */}
       {activeSubTab === 'local_coach' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]">
+        <div
+          data-testid="local-coach-panel"
+          className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]"
+        >
           {/* Header */}
           <div className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center shadow-md">
+              <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
                 <Bot className="w-5 h-5" />
               </div>
               <div>
@@ -275,6 +278,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                 ])
               }
               title="پاک کردن تاریخچه گفت‌وگو"
+              aria-label="پاک کردن تاریخچه گفت‌وگو"
               className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 text-xs font-bold transition cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
@@ -369,7 +373,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                           <span>افزودن به میز کار</span>
                         </button>
                       </div>
-                      <div className="space-y-1.5 text-xs">
+                      <div className="space-y-1.5 text-xs tabular-nums">
                         {m.suggestedTasks.map((t, idx) => (
                           <div
                             key={idx}
@@ -399,6 +403,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
           >
             <input
               type="text"
+              aria-label="پیام به دستیار هوشمند کایروس"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="سؤال یا درخواست برنامه‌ریزی خود را بنویسید..."
@@ -407,7 +412,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
             <button
               type="submit"
               disabled={!inputMessage.trim()}
-              className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition shrink-0 cursor-pointer"
+              className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 shadow-sm transition shrink-0 cursor-pointer"
             >
               <span>ارسال</span>
               <Send className="w-4 h-4" />
@@ -540,6 +545,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
           >
             <input
               type="text"
+              aria-label="ورودی ویزارد اولویت‌بندی Ivy Lee"
               value={wizardInput}
               onChange={(e) => setWizardInput(e.target.value)}
               placeholder={
@@ -557,7 +563,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
             <button
               type="submit"
               disabled={wizardStep === 'ASK_MORE'}
-              className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition shrink-0 cursor-pointer"
+              className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 shadow-sm transition shrink-0 cursor-pointer"
             >
               <span>ارسال</span>
               <Send className="w-4 h-4" />
