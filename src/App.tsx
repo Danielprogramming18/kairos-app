@@ -54,6 +54,14 @@ import {
 import { BackupEnvelopeV2, createEntityId, nowIso, StorageConflictError } from './domain/models';
 import { CROSS_TAB_SYNC_CHANNEL } from './infrastructure/web/dexieAdapter';
 import { createPlainBackupEnvelope } from './utils/backupCrypto';
+import {
+  applyThemeToDocument,
+  migrateLegacyThemeSettings,
+  neutralizeLegacyLocalStorageTheme,
+  registerGlobalHostThemeBridge,
+  resolveDeviceTheme,
+  subscribeToDeviceThemeChanges,
+} from './utils/themeManager';
 
 const HASH_TO_TAB: Record<string, NavTabId> = {
   '#/today': 'dashboard',
@@ -179,42 +187,17 @@ export default function App() {
     };
   }, []);
 
-  // 3-Way Theme State ('light' | 'dark' | 'system')
-  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('dark');
-  const [isDark, setIsDark] = useState<boolean>(true);
+  // Automatic Device Theme Synchronization (prefers-color-scheme + Android WebView Host Bridge)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
-  const applyResolvedTheme = useCallback((pref: 'light' | 'dark' | 'system') => {
-    let resolvedDark = pref === 'dark';
-    if (pref === 'system' && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-      resolvedDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    setIsDark(resolvedDark);
-    if (typeof document !== 'undefined') {
-      if (resolvedDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    }
-  }, []);
-
   useEffect(() => {
-    applyResolvedTheme(themePreference);
-    if (
-      themePreference !== 'system' ||
-      typeof window === 'undefined' ||
-      typeof window.matchMedia !== 'function'
-    ) {
-      return;
-    }
-    const mql = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => applyResolvedTheme('system');
-    if (typeof mql.addEventListener === 'function') {
-      mql.addEventListener('change', onChange);
-      return () => mql.removeEventListener('change', onChange);
-    }
-  }, [themePreference, applyResolvedTheme]);
+    registerGlobalHostThemeBridge();
+    neutralizeLegacyLocalStorageTheme();
+    applyThemeToDocument(resolveDeviceTheme());
+    return subscribeToDeviceThemeChanges((nextTheme) => {
+      applyThemeToDocument(nextTheme);
+    });
+  }, []);
 
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -349,18 +332,17 @@ export default function App() {
     setFocusSessions(activeFocusSessions);
     setDeletedTrashItems(trashList);
 
-    const savedTheme =
-      userSettings.theme === 'light' ||
-      userSettings.theme === 'dark' ||
-      userSettings.theme === 'system'
-        ? userSettings.theme
-        : 'dark';
-    setThemePreference(savedTheme);
-    applyResolvedTheme(savedTheme);
+    // Migrate/neutralize any legacy manual theme ('light' | 'dark') to 'system' while keeping all other settings intact
+    const themeMigration = migrateLegacyThemeSettings(userSettings);
+    neutralizeLegacyLocalStorageTheme();
+    if (themeMigration.migrated) {
+      container.settings.saveSettings({ theme: 'system' }).catch(() => {});
+    }
+    applyThemeToDocument(resolveDeviceTheme());
 
     setSoundEnabled(userSettings.soundEnabled);
     soundManager.setEnabled(userSettings.soundEnabled);
-  }, [container, applyResolvedTheme]);
+  }, [container]);
 
   // Startup Hydration
   const hasHydratedFromRepoRef = useRef<boolean>(false);
@@ -676,25 +658,6 @@ export default function App() {
       } catch {}
     }
     showToast('یادآور آزمایشی با موفقیت اجرا شد.', 'success');
-  };
-
-  const handleChangeThemePreference = (nextTheme: 'light' | 'dark' | 'system') => {
-    setThemePreference(nextTheme);
-    applyResolvedTheme(nextTheme);
-    executeStorageMutation(
-      'تغییر پوستهٔ ظاهر',
-      () => container.settings.saveSettings({ theme: nextTheme }),
-      () => {
-        try {
-          localStorage.setItem('nazmyar_theme', nextTheme);
-        } catch {}
-      }
-    );
-  };
-
-  const handleToggleTheme = () => {
-    const nextTheme = isDark ? 'light' : 'dark';
-    handleChangeThemePreference(nextTheme);
   };
 
   const handleToggleSound = () => {
@@ -1476,10 +1439,6 @@ export default function App() {
       {/* Header */}
       <Header
         pageTitle={PAGE_TITLES[activeTab] || 'امروز'}
-        isDark={isDark}
-        themePreference={themePreference}
-        onToggleTheme={handleToggleTheme}
-        onSelectThemePreference={handleChangeThemePreference}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
         onOpenNewTaskModal={() => handleOpenTaskModal(undefined, getTodayKey())}
@@ -1791,8 +1750,6 @@ export default function App() {
               onRestoreTrashItem={handleRestoreTrashItem}
               onPermanentDeleteTrashItem={handlePermanentDeleteTrashItem}
               onEmptyTrash={handleEmptyTrash}
-              themePreference={themePreference}
-              onChangeThemePreference={handleChangeThemePreference}
               soundEnabled={soundEnabled}
               onToggleSound={handleToggleSound}
               notificationPermission={notificationPermission}

@@ -1,9 +1,6 @@
 import React from 'react';
 import {
   Plus,
-  Sun,
-  Moon,
-  Monitor,
   Volume2,
   VolumeX,
   Timer,
@@ -16,10 +13,6 @@ export type ThemePreference = 'light' | 'dark' | 'system';
 
 interface HeaderProps {
   pageTitle: string;
-  isDark: boolean;
-  themePreference?: ThemePreference;
-  onToggleTheme: () => void;
-  onSelectThemePreference?: (pref: ThemePreference) => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
   onOpenNewTaskModal: () => void;
@@ -35,10 +28,6 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   pageTitle,
-  isDark,
-  themePreference = isDark ? 'dark' : 'light',
-  onToggleTheme,
-  onSelectThemePreference,
   soundEnabled,
   onToggleSound,
   onOpenNewTaskModal,
@@ -122,72 +111,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
-
-          {/* 3-Mode Theme Switcher (روشن / تاریک / هماهنگ با دستگاه) */}
-          {onSelectThemePreference ? (
-            <div
-              role="group"
-              aria-label="انتخاب پوستهٔ نمایش"
-              className="inline-flex items-center p-0.5 rounded-lg bg-surface-2 border border-token-subtle"
-            >
-              <button
-                type="button"
-                onClick={() => onSelectThemePreference('light')}
-                aria-label="پوستهٔ روشن"
-                aria-pressed={themePreference === 'light'}
-                title="پوستهٔ روشن"
-                className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer ${
-                  themePreference === 'light'
-                    ? 'bg-surface-1 text-indigo-600 shadow-2xs'
-                    : 'text-token-secondary hover:text-token-primary'
-                }`}
-              >
-                <Sun className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectThemePreference('dark')}
-                aria-label="پوستهٔ تاریک"
-                aria-pressed={themePreference === 'dark'}
-                title="پوستهٔ تاریک"
-                className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer ${
-                  themePreference === 'dark'
-                    ? 'bg-surface-1 text-indigo-500 shadow-2xs'
-                    : 'text-token-secondary hover:text-token-primary'
-                }`}
-              >
-                <Moon className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectThemePreference('system')}
-                aria-label="هماهنگ با دستگاه"
-                aria-pressed={themePreference === 'system'}
-                title="هماهنگ با تنظیمات دستگاه"
-                className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer ${
-                  themePreference === 'system'
-                    ? 'bg-surface-1 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                    : 'text-token-secondary hover:text-token-primary'
-                }`}
-              >
-                <Monitor className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              aria-label={isDark ? 'تغییر به پوستهٔ روشن' : 'تغییر به پوستهٔ تاریک'}
-              title={isDark ? 'پوستهٔ روشن' : 'پوستهٔ تاریک'}
-              className="p-2 rounded-lg bg-surface-2 border border-token-subtle text-token-primary hover:bg-surface-1 transition cursor-pointer"
-            >
-              {isDark ? (
-                <Sun className="w-4 h-4 text-amber-400" />
-              ) : (
-                <Moon className="w-4 h-4 text-slate-700" />
-              )}
-            </button>
-          )}
         </div>
       </div>
     </header>

@@ -1,8 +1,64 @@
 <!doctype html>
-<html lang="fa" dir="rtl" class="dark">
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        function resolveTheme() {
+          try {
+            var hostOverride = window.__KAIROS_HOST_THEME__;
+            if (hostOverride === 'dark' || hostOverride === 'light') {
+              return hostOverride;
+            }
+            var q = (window.location && (window.location.search || window.location.hash)) || '';
+            if (/[?&]hostTheme=dark\b/i.test(q)) return 'dark';
+            if (/[?&]hostTheme=light\b/i.test(q)) return 'light';
+            if (typeof window.matchMedia === 'function') {
+              var mql = window.matchMedia('(prefers-color-scheme: dark)');
+              if (mql && mql.media !== 'not all' && typeof mql.matches === 'boolean') {
+                return mql.matches ? 'dark' : 'light';
+              }
+            }
+          } catch (e) {}
+          return 'light';
+        }
+        function applyTheme(theme) {
+          var isDark = theme === 'dark';
+          var root = document.documentElement;
+          if (!root) return;
+          root.classList.toggle('dark', isDark);
+          root.setAttribute('data-theme', theme);
+          if (root.style) root.style.colorScheme = theme;
+        }
+        window.__KAIROS_SET_HOST_THEME__ = function (nextTheme) {
+          window.__KAIROS_HOST_THEME__ =
+            nextTheme === 'dark' || nextTheme === 'light' ? nextTheme : null;
+          var resolved = resolveTheme();
+          applyTheme(resolved);
+          try {
+            window.dispatchEvent(
+              new CustomEvent('kairos:host-theme-change', { detail: { theme: resolved } })
+            );
+          } catch (e) {}
+          return resolved;
+        };
+        applyTheme(resolveTheme());
+        try {
+          if (typeof window.matchMedia === 'function') {
+            var mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            var onMediaChange = function () {
+              applyTheme(resolveTheme());
+            };
+            if (typeof mediaQuery.addEventListener === 'function') {
+              mediaQuery.addEventListener('change', onMediaChange);
+            } else if (typeof mediaQuery.addListener === 'function') {
+              mediaQuery.addListener(onMediaChange);
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
     <title>کایروس | دستیار هوشمند تمرکز</title>
     <meta name="description" content="کایروس؛ دستیار شخصی و آفلاین-محور برای مدیریت کارها، برنامه‌ریزی روزانه، پیگیری عادت‌ها، یادداشت‌ها و تمرکز عمیق." />
     <meta property="og:title" content="کایروس | دستیار هوشمند تمرکز" />

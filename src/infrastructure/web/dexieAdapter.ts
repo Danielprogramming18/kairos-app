@@ -681,7 +681,7 @@ export async function migrateLegacyLocalStorageToIndexedDB(
       if (!existingSettings) {
         await db.settings.put({
           id: 'default',
-          theme: rawTheme === 'light' ? 'light' : 'dark',
+          theme: 'system',
           soundEnabled: rawSound !== 'false',
           pomodoroWorkMinutes: 45,
           pomodoroShortBreakMinutes: 10,
@@ -1152,7 +1152,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
         if (s) return s;
         const fallback: UserSettingsEntity = {
           id: 'default',
-          theme: 'dark',
+          theme: 'system',
           soundEnabled: true,
           pomodoroWorkMinutes: 45,
           pomodoroShortBreakMinutes: 10,

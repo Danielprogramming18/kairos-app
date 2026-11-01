@@ -13,9 +13,6 @@ import {
   ChevronDown,
   ChevronUp,
   History,
-  Sun,
-  Moon,
-  Monitor,
   Volume2,
   VolumeX,
   Bell,
@@ -76,9 +73,7 @@ interface BackupAndSyncViewProps {
   onRestoreTrashItem?: (item: DeletedTrashItem) => void;
   onPermanentDeleteTrashItem?: (id: string) => void;
   onEmptyTrash?: () => void;
-  // Appearance & Sound Preferences
-  themePreference?: 'light' | 'dark' | 'system';
-  onChangeThemePreference?: (theme: 'light' | 'dark' | 'system') => void;
+  // Sound & Notification Preferences
   soundEnabled?: boolean;
   onToggleSound?: () => void;
   notificationPermission?: NotificationPermission;
@@ -108,8 +103,6 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
   onRestoreTrashItem,
   onPermanentDeleteTrashItem,
   onEmptyTrash,
-  themePreference = 'dark',
-  onChangeThemePreference,
   soundEnabled = true,
   onToggleSound,
   notificationPermission = 'default',
@@ -347,116 +340,67 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* 0. Appearance, Sound & Notification Preferences */}
-      {onChangeThemePreference && (
-        <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h3 className="text-base font-black text-slate-800 dark:text-white">
-              ظاهر، صدا و یادآورها
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              شخصی‌سازی پوستهٔ نمایشی (روشن، تیره یا هماهنگ با سیستم‌عامل) و تنظیمات صوتی برنامه
-            </p>
+      {/* 0. Sound & Notification Preferences */}
+      <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
+        <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+          <h3 className="text-base font-black text-slate-800 dark:text-white">
+            صدا و یادآورها
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            تنظیمات افکت‌های صوتی و اعلان یادآورهای روزانه (پوستهٔ روشن و تاریک برنامه به‌طور خودکار از تنظیمات دستگاه پیروی می‌کند)
+          </p>
+        </div>
+
+        {/* Sound & Reminder Controls */}
+        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+            صدا و اعلان یادآورها
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Theme Selector */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 space-y-3">
-              <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                پوستهٔ نمایشی برنامه
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => onChangeThemePreference('light')}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                    themePreference === 'light'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  <Sun className="w-3.5 h-3.5" />
-                  <span>روشن</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeThemePreference('dark')}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                    themePreference === 'dark'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  <Moon className="w-3.5 h-3.5" />
-                  <span>تیره</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeThemePreference('system')}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                    themePreference === 'system'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  <Monitor className="w-3.5 h-3.5" />
-                  <span>سیستم</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Sound & Reminder Controls */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 flex flex-col justify-between gap-3">
-              <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                صدا و اعلان یادآورها
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {onToggleSound && (
-                  <button
-                    type="button"
-                    onClick={onToggleSound}
-                    className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {soundEnabled ? (
-                      <>
-                        <Volume2 className="w-4 h-4 text-indigo-500" />
-                        <span>صدای برنامه: فعال</span>
-                      </>
-                    ) : (
-                      <>
-                        <VolumeX className="w-4 h-4 text-slate-400" />
-                        <span>صدای برنامه: بی‌صدا</span>
-                      </>
-                    )}
-                  </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {onToggleSound && (
+              <button
+                type="button"
+                onClick={onToggleSound}
+                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
+              >
+                {soundEnabled ? (
+                  <>
+                    <Volume2 className="w-4 h-4 text-indigo-500" />
+                    <span>صدای برنامه: فعال</span>
+                  </>
+                ) : (
+                  <>
+                    <VolumeX className="w-4 h-4 text-slate-400" />
+                    <span>صدای برنامه: بی‌صدا</span>
+                  </>
                 )}
+              </button>
+            )}
 
-                {onRequestNotificationPermission && notificationPermission !== 'granted' && (
-                  <button
-                    type="button"
-                    onClick={onRequestNotificationPermission}
-                    className="px-3.5 py-2 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Bell className="w-3.5 h-3.5" />
-                    <span>فعال‌سازی اعلان مرورگر</span>
-                  </button>
-                )}
+            {onRequestNotificationPermission && notificationPermission !== 'granted' && (
+              <button
+                type="button"
+                onClick={onRequestNotificationPermission}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>فعال‌سازی اعلان مرورگر</span>
+              </button>
+            )}
 
-                {onTriggerTestNotification && (
-                  <button
-                    type="button"
-                    onClick={onTriggerTestNotification}
-                    className="px-3.5 py-2 rounded-xl bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Bell className="w-3.5 h-3.5 text-amber-500" />
-                    <span>آزمایش زنگ یادآور</span>
-                  </button>
-                )}
-              </div>
-            </div>
+            {onTriggerTestNotification && (
+              <button
+                type="button"
+                onClick={onTriggerTestNotification}
+                className="px-3.5 py-2 rounded-xl bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Bell className="w-3.5 h-3.5 text-amber-500" />
+                <span>آزمایش زنگ یادآور</span>
+              </button>
+            )}
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       {/* 1. Primary Offline Local Backup & Restore */}
       <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-6">

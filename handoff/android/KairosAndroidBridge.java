@@ -1,9 +1,11 @@
 package com.kairos.app;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.os.Build;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -94,11 +96,46 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         ws.setAllowFileAccess(true);
         ws.setAllowContentAccess(true);
         ws.setAllowFileAccessFromFileURLs(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ws.setForceDark(WebSettings.FORCE_DARK_AUTO);
+        }
+    }
+
+    /**
+     * Reads the Android device's current Day/Night configuration (UI_MODE_NIGHT_MASK)
+     * and returns "dark" or "light" (defaulting to "light" if undetectable).
+     */
+    public static String resolveAndroidDeviceTheme(Context context) {
+        if (context == null || context.getResources() == null) {
+            return "light";
+        }
+        Configuration config = context.getResources().getConfiguration();
+        if (config == null) {
+            return "light";
+        }
+        int nightModeFlags = config.uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        return (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) ? "dark" : "light";
+    }
+
+    /**
+     * Propagates the phone's current light/dark theme into the running Kairos WebView
+     * immediately without reloading the page, clearing forms, or stopping timers.
+     * Call this in WebViewClient.onPageFinished(...) and Activity.onConfigurationChanged(...).
+     */
+    public static void syncDeviceThemeToWebView(Context context, WebView webView) {
+        if (webView == null) return;
+        final String theme = resolveAndroidDeviceTheme(context);
+        final String js =
+            "(function(){window.__KAIROS_HOST_THEME__='" + theme + "';" +
+            "if(typeof window.__KAIROS_SET_HOST_THEME__==='function'){" +
+            "window.__KAIROS_SET_HOST_THEME__('" + theme + "');}})();";
+        webView.post(() -> webView.evaluateJavascript(js, null));
     }
 
     public static void attachToWebView(Context context, WebView webView) {
         configureWebViewForModeA(webView);
         webView.addJavascriptInterface(new KairosAndroidBridge(context), "KairosAndroidBridge");
+        syncDeviceThemeToWebView(context, webView);
     }
 
     @Override
@@ -348,10 +385,14 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             // Settings
             case "settings.get": {
                 Object existing = getRecord(db, "settings", "user_settings");
-                if (existing != JSONObject.NULL) return existing;
+                if (existing != JSONObject.NULL) {
+                    JSONObject saved = (JSONObject) existing;
+                    saved.put("theme", "system");
+                    return saved;
+                }
                 JSONObject defaults = new JSONObject();
                 defaults.put("id", "user_settings");
-                defaults.put("theme", "dark");
+                defaults.put("theme", "system");
                 defaults.put("soundEnabled", true);
                 defaults.put("pomodoroWorkMinutes", 25);
                 defaults.put("pomodoroShortBreakMinutes", 5);
