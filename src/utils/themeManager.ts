@@ -1,5 +1,6 @@
 import { UserSettingsEntity } from '../domain/models';
 
+export type ThemePreference = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
 
 export interface MediaQueryListLike {
@@ -27,9 +28,108 @@ declare global {
 
 export const HOST_THEME_CHANGE_EVENT = 'kairos:host-theme-change';
 export const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)';
+export const THEME_PREFERENCE_STORAGE_KEY = 'kairos_theme_preference';
+export const LEGACY_THEME_STORAGE_KEY = 'nazmyar_theme';
+
+export const THEME_PREFERENCE_OPTIONS: ReadonlyArray<{
+  value: ThemePreference;
+  labelFa: string;
+  descriptionFa: string;
+}> = [
+  {
+    value: 'light',
+    labelFa: 'روشن',
+    descriptionFa: 'مستقل از تنظیمات دستگاه، همیشه با نمای روشن نمایش داده شود',
+  },
+  {
+    value: 'dark',
+    labelFa: 'تاریک',
+    descriptionFa: 'مستقل از تنظیمات دستگاه، همیشه با نمای تاریک نمایش داده شود',
+  },
+  {
+    value: 'system',
+    labelFa: 'هماهنگ با دستگاه',
+    descriptionFa: 'پیروی خودکار و زنده از حالت روشن یا تاریک دستگاه',
+  },
+];
+
+export function getThemePreferenceLabelFa(preference: ThemePreference): string {
+  if (preference === 'light') return 'روشن';
+  if (preference === 'dark') return 'تاریک';
+  return 'هماهنگ با دستگاه';
+}
+
+export function getResolvedThemeLabelFa(resolved: ResolvedTheme): string {
+  return resolved === 'dark' ? 'تاریک' : 'روشن';
+}
 
 /**
- * Parses an optional host theme parameter (`?hostTheme=dark|light`) if provided by an Android WebView host.
+ * Normalizes any raw theme preference value into a valid ThemePreference.
+ * Fresh installs or unrecognized values default to 'system' («هماهنگ با دستگاه»).
+ */
+export function normalizeThemePreference(raw: unknown): ThemePreference {
+  if (raw === 'light' || raw === 'dark' || raw === 'system') {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed === 'light' || trimmed === 'dark' || trimmed === 'system') {
+      return trimmed;
+    }
+  }
+  return 'system';
+}
+
+/**
+ * Reads the persisted ThemePreference from localStorage (checking current and legacy keys).
+ * Defaults to 'system' if no valid preference has been saved.
+ */
+export function readStoredThemePreference(
+  storage: Pick<Storage, 'getItem'> | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : undefined
+): ThemePreference {
+  if (!storage) return 'system';
+  try {
+    const primary = storage.getItem(THEME_PREFERENCE_STORAGE_KEY);
+    if (primary === 'light' || primary === 'dark' || primary === 'system') {
+      return primary;
+    }
+    const legacyKeys = [LEGACY_THEME_STORAGE_KEY, 'kairos_theme', 'theme'];
+    for (const key of legacyKeys) {
+      const val = storage.getItem(key);
+      if (val === 'light' || val === 'dark' || val === 'system') {
+        return val;
+      }
+    }
+  } catch {
+    // Ignore storage access errors in restricted environments
+  }
+  return 'system';
+}
+
+/**
+ * Persists the user's selected ThemePreference to localStorage so initial page load
+ * can apply the exact theme before first paint without flash.
+ */
+export function persistThemePreferenceToStorage(
+  preference: ThemePreference,
+  storage: Pick<Storage, 'setItem'> | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : undefined
+): void {
+  if (!storage) return;
+  const normalized = normalizeThemePreference(preference);
+  try {
+    storage.setItem(THEME_PREFERENCE_STORAGE_KEY, normalized);
+    storage.setItem(LEGACY_THEME_STORAGE_KEY, normalized);
+  } catch {
+    // Ignore quota/security errors
+  }
+}
+
+/**
+ * Parses an optional host theme parameter (`?hostTheme=dark|light`) if provided by a native WebView host.
  */
 export function parseHostThemeFromUrl(search = '', hash = ''): ResolvedTheme | null {
   try {
@@ -50,12 +150,11 @@ export function parseHostThemeFromUrl(search = '', hash = ''): ResolvedTheme | n
 }
 
 /**
- * Pure, deterministic resolution of the active theme ('light' | 'dark').
+ * Pure, deterministic resolution of the system/device theme ('light' | 'dark').
  * Rules:
- * 1. Follows explicit Android WebView host override (`__KAIROS_HOST_THEME__` or `?hostTheme=`) if valid ('light' | 'dark').
- * 2. Follows standard web `prefers-color-scheme: dark` media query when supported.
- * 3. Defaults to 'light' when theme preference cannot be detected.
- * Never uses time-of-day, geolocation, sunrise/sunset, or saved manual overrides.
+ * 1. Follows explicit native host override (`__KAIROS_HOST_THEME__` or `?hostTheme=`) if valid ('light' | 'dark').
+ * 2. Follows standard `prefers-color-scheme: dark` media query when supported.
+ * 3. Defaults to 'light' when system theme preference cannot be detected.
  */
 export function resolveDeviceTheme(env?: ThemeEnvironmentLike): ResolvedTheme {
   const effectiveEnv: ThemeEnvironmentLike =
@@ -95,31 +194,66 @@ export function resolveDeviceTheme(env?: ThemeEnvironmentLike): ResolvedTheme {
     }
   }
 
-  // Requirement: In environments where theme preference is undetectable, default to 'light'.
+  // Requirement: If system preference cannot be detected, default to 'light'.
   return 'light';
 }
 
 /**
- * Applies the resolved theme ('light' | 'dark') to the DOM root (`<html>`) without reloading
- * or disturbing any form inputs, timers, or application state.
+ * Resolves the effective displayed theme ('light' | 'dark') given the user's selected
+ * ThemePreference ('light' | 'dark' | 'system') and the current device environment.
+ * Keeps selected mode and displayed theme strictly separate.
+ */
+export function resolveEffectiveTheme(
+  preference: ThemePreference,
+  env?: ThemeEnvironmentLike
+): ResolvedTheme {
+  const normalized = normalizeThemePreference(preference);
+  if (normalized === 'light') return 'light';
+  if (normalized === 'dark') return 'dark';
+  return resolveDeviceTheme(env);
+}
+
+/**
+ * Applies the resolved theme ('light' | 'dark') and optional selected preference attribute
+ * to the DOM root (`<html>`) without reloading or disturbing form inputs, timers, or state.
  */
 export function applyThemeToDocument(
   theme: ResolvedTheme,
-  doc: Document | undefined = typeof document !== 'undefined' ? document : undefined
+  docOrPreference?: Document | ThemePreference,
+  maybeDoc?: Document
 ): void {
+  let doc: Document | undefined;
+  let preference: ThemePreference | undefined;
+
+  if (
+    typeof docOrPreference === 'string' &&
+    (docOrPreference === 'light' || docOrPreference === 'dark' || docOrPreference === 'system')
+  ) {
+    preference = docOrPreference;
+    doc = maybeDoc ?? (typeof document !== 'undefined' ? document : undefined);
+  } else {
+    doc =
+      (docOrPreference as Document | undefined) ??
+      (typeof document !== 'undefined' ? document : undefined);
+  }
+
   if (!doc || !doc.documentElement) return;
   const isDark = theme === 'dark';
   doc.documentElement.classList.toggle('dark', isDark);
   doc.documentElement.setAttribute('data-theme', theme);
+  if (preference) {
+    doc.documentElement.setAttribute('data-theme-preference', preference);
+  }
   if (doc.documentElement.style) {
     doc.documentElement.style.colorScheme = theme;
   }
 }
 
 /**
- * Registers the global `window.__KAIROS_SET_HOST_THEME__(theme)` bridge function so an Android
- * WebView host can push configuration changes (`UI_MODE_NIGHT_YES` / `UI_MODE_NIGHT_NO`) live
- * without reloading the page.
+ * Registers the global `window.__KAIROS_SET_HOST_THEME__(theme)` bridge function so a native
+ * WebView host can push OS theme changes live without reloading the page.
+ * Importantly, if the user has selected a manual theme ('light' or 'dark'), host theme messages
+ * update the recorded device theme but NEVER overwrite the user's manual selection.
  */
 export function registerGlobalHostThemeBridge(
   win: Window | undefined = typeof window !== 'undefined' ? window : undefined,
@@ -132,30 +266,38 @@ export function registerGlobalHostThemeBridge(
     } else {
       win.__KAIROS_HOST_THEME__ = null;
     }
-    const resolved = resolveDeviceTheme({
+    const deviceTheme = resolveDeviceTheme({
       matchMedia: typeof win.matchMedia === 'function' ? win.matchMedia.bind(win) : undefined,
       hostThemeOverride: win.__KAIROS_HOST_THEME__,
       locationSearch: win.location?.search ?? '',
       locationHash: win.location?.hash ?? '',
     });
-    applyThemeToDocument(resolved, doc);
+
+    const attrPref = doc?.documentElement?.getAttribute('data-theme-preference');
+    const activePref: ThemePreference =
+      attrPref === 'light' || attrPref === 'dark' || attrPref === 'system'
+        ? attrPref
+        : readStoredThemePreference();
+    const effective = activePref === 'system' ? deviceTheme : activePref;
+    applyThemeToDocument(effective, activePref, doc);
+
     try {
       win.dispatchEvent(
-        new CustomEvent(HOST_THEME_CHANGE_EVENT, { detail: { theme: resolved } })
+        new CustomEvent(HOST_THEME_CHANGE_EVENT, { detail: { theme: deviceTheme } })
       );
     } catch {
       // CustomEvent dispatch optional in minimal test environments
     }
-    return resolved;
+    return effective;
   };
 }
 
 /**
- * Subscribes to live device theme changes (`prefers-color-scheme: dark` media query + Android host bridge event)
- * and invokes `onChange` immediately whenever the device theme switches.
+ * Subscribes to live device theme changes (`prefers-color-scheme: dark` media query + native host bridge event)
+ * and invokes `onChange` with the latest device theme ('light' | 'dark').
  */
 export function subscribeToDeviceThemeChanges(
-  onChange: (theme: ResolvedTheme) => void,
+  onChange: (deviceTheme: ResolvedTheme) => void,
   env?: ThemeEnvironmentLike,
   win: Window | undefined = typeof window !== 'undefined' ? window : undefined
 ): () => void {
@@ -164,7 +306,7 @@ export function subscribeToDeviceThemeChanges(
     (win && typeof win.matchMedia === 'function' ? win.matchMedia.bind(win) : undefined);
 
   const notifyLatest = () => {
-    const nextTheme = resolveDeviceTheme(
+    const nextDeviceTheme = resolveDeviceTheme(
       env ??
         (win
           ? {
@@ -175,7 +317,7 @@ export function subscribeToDeviceThemeChanges(
             }
           : {})
     );
-    onChange(nextTheme);
+    onChange(nextDeviceTheme);
   };
 
   const matchMediaFn = getMatchMedia();
@@ -237,54 +379,32 @@ export function subscribeToDeviceThemeChanges(
 }
 
 /**
- * Migrates/neutralizes any previously saved manual theme preference ('light' | 'dark') in UserSettingsEntity
- * to 'system' while preserving all other user settings (soundEnabled, pomodoro durations, calendarPreference, etc.).
+ * Safely normalizes/migrates theme settings in UserSettingsEntity without losing any other settings
+ * or overwriting valid legacy selections ('light', 'dark', 'system').
+ * If settings.theme is invalid or missing, falls back to any valid legacy localStorage preference or 'system'.
  */
-export function migrateLegacyThemeSettings(settings: UserSettingsEntity): {
+export function migrateLegacyThemeSettings(
+  settings: UserSettingsEntity,
+  storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : undefined
+): {
   settings: UserSettingsEntity;
   migrated: boolean;
 } {
-  if (settings.theme === 'system') {
+  const rawTheme = (settings as { theme?: unknown }).theme;
+  if (rawTheme === 'light' || rawTheme === 'dark' || rawTheme === 'system') {
+    persistThemePreferenceToStorage(rawTheme, storage);
     return { settings, migrated: false };
   }
+
+  const fallbackPref = readStoredThemePreference(storage);
+  persistThemePreferenceToStorage(fallbackPref, storage);
   return {
     settings: {
       ...settings,
-      theme: 'system',
+      theme: fallbackPref,
     },
     migrated: true,
   };
-}
-
-/**
- * Neutralizes legacy manual theme keys in localStorage (`nazmyar_theme`, `kairos_theme`, `theme`)
- * so old manual selections never override automatic device theme, while leaving all other keys untouched.
- */
-export function neutralizeLegacyLocalStorageTheme(
-  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined = typeof localStorage !==
-  'undefined'
-    ? localStorage
-    : undefined
-): boolean {
-  if (!storage) return false;
-  let changed = false;
-  try {
-    const legacyKeys = ['nazmyar_theme', 'kairos_theme', 'theme'];
-    for (const key of legacyKeys) {
-      const current = storage.getItem(key);
-      if (current !== null && current !== 'system') {
-        if (key === 'nazmyar_theme') {
-          storage.setItem(key, 'system');
-        } else if (typeof storage.removeItem === 'function') {
-          storage.removeItem(key);
-        } else {
-          storage.setItem(key, 'system');
-        }
-        changed = true;
-      }
-    }
-  } catch {
-    // Ignore storage access errors in restricted contexts
-  }
-  return changed;
 }

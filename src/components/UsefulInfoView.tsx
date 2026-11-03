@@ -259,7 +259,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Unified Sub-Tab Switcher (Notes & References vs Ideas) */}
       {hasIdeasSupport && (
-        <div className="flex items-center justify-between gap-3 bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm">
+        <div className="flex items-center justify-between gap-3 bg-surface-1 p-2 rounded-[18px] border border-token-subtle">
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -304,7 +304,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
       ) : (
         <>
           {/* Header & Quick Add Form */}
-          <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
+          <section className="bg-surface-1 p-6 sm:p-8 rounded-[18px] border border-token-subtle space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
@@ -444,7 +444,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
           </section>
 
           {/* Search & Category Filter Bar */}
-          <section className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm">
+          <section className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-surface-1 p-4 rounded-[18px] border border-token-subtle">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -493,7 +493,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
           {filteredItems.length === 0 ? (
             <div
               data-testid="notes-empty-state"
-              className="bg-white dark:bg-slate-900 p-12 rounded-2xl border border-slate-200/70 dark:border-slate-800 text-center space-y-3"
+              className="bg-surface-1 p-12 rounded-[18px] border border-token-subtle text-center space-y-3"
             >
               <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 mx-auto flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                 <Bookmark className="w-7 h-7" />
@@ -547,10 +547,10 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
                   return (
                     <div
                       key={item.id}
-                      className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border transition-all flex flex-col justify-between gap-4 shadow-sm ${
+                      className={`bg-surface-1 p-5 rounded-[18px] border transition-all flex flex-col justify-between gap-4 ${
                         item.pinned
                           ? 'border-amber-500/40 dark:border-amber-500/30 ring-1 ring-amber-500/10'
-                          : 'border-slate-200/70 dark:border-slate-800'
+                          : 'border-token-subtle'
                       }`}
                     >
                       <div className="space-y-3">

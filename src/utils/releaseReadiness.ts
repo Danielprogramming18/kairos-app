@@ -355,8 +355,7 @@ export function getPlatformHandoffSnippets(): {
     ].join('\n'),
     windowsBuildCommands: [
       'npm ci',
-      'npm run build   # تولید پوشهٔ استاتیک dist/ با مسیرهای نسبی ./ و فونت محلی',
-      'npx tauri build # نیازمند ویندوز + Rust + WebView2 برای ساخت فایل نصبی .exe/.msi',
+      'npm run desktop:build # اجرای npm run build + npx tauri build روی ویندوز (تولید Setup.exe و .msi در src-tauri/target/release/bundle/)',
     ].join('\n'),
   };
 }

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Task, FocusSession } from '../types';
 import { toPersianNum, getTodayKey } from '../utils/persianDate';
-import { getBreakDurationMinutes } from '../utils/pomodoroEngine';
+import { formatTimerClockLatin, getBreakDurationMinutes } from '../utils/pomodoroEngine';
 import { GlobalPomodoroController } from '../app/useGlobalPomodoro';
 import { DeepFocusView } from './DeepFocusView';
 
@@ -78,11 +78,7 @@ export const FocusTimerView: React.FC<FocusTimerViewProps> = ({
   const pendingTasks = tasks.filter((t) => !t.completed);
   const activeTask = tasks.find((t) => t.id === timerState.taskId);
 
-  const minutes = Math.floor(timeLeft / 60);
-  const seconds = timeLeft % 60;
-  const formattedTime = `${toPersianNum(String(minutes).padStart(2, '0'))}:${toPersianNum(
-    String(seconds).padStart(2, '0')
-  )}`;
+  const formattedTime = formatTimerClockLatin(timeLeft);
 
   const totalSeconds = Math.max(1, timerState.durationSeconds);
   const progressPercent = Math.min(
@@ -386,6 +382,7 @@ export const FocusTimerView: React.FC<FocusTimerViewProps> = ({
             {/* Big Clock Display */}
             <div className="py-2 space-y-2">
               <div
+                dir="ltr"
                 data-testid="focus-timer-clock"
                 className="text-6xl sm:text-7xl font-black tracking-wider font-mono text-token-primary tabular-nums select-none"
               >
@@ -416,7 +413,7 @@ export const FocusTimerView: React.FC<FocusTimerViewProps> = ({
             <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
               <button
                 type="button"
-                onClick={handleReset}
+                onClick={() => handleReset()}
                 title="بازنشانی تایمر"
                 aria-label="بازنشانی تایمر"
                 className="p-3 rounded-xl bg-surface-2 text-token-secondary hover:text-token-primary transition cursor-pointer"

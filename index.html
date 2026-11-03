@@ -5,7 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       (function () {
-        function resolveTheme() {
+        function readStoredPreference() {
+          try {
+            var keys = ['kairos_theme_preference', 'nazmyar_theme', 'kairos_theme', 'theme'];
+            for (var i = 0; i < keys.length; i++) {
+              var val = window.localStorage && window.localStorage.getItem(keys[i]);
+              if (val === 'light' || val === 'dark' || val === 'system') {
+                return val;
+              }
+            }
+          } catch (e) {}
+          return 'system';
+        }
+        function resolveDeviceTheme() {
           try {
             var hostOverride = window.__KAIROS_HOST_THEME__;
             if (hostOverride === 'dark' || hostOverride === 'light') {
@@ -23,32 +35,52 @@
           } catch (e) {}
           return 'light';
         }
-        function applyTheme(theme) {
-          var isDark = theme === 'dark';
+        function getActivePreference() {
+          var root = document.documentElement;
+          var attr = root && root.getAttribute('data-theme-preference');
+          if (attr === 'light' || attr === 'dark' || attr === 'system') {
+            return attr;
+          }
+          return readStoredPreference();
+        }
+        function resolveEffective(pref) {
+          if (pref === 'light') return 'light';
+          if (pref === 'dark') return 'dark';
+          return resolveDeviceTheme();
+        }
+        function applyTheme(resolved, pref) {
+          var isDark = resolved === 'dark';
           var root = document.documentElement;
           if (!root) return;
           root.classList.toggle('dark', isDark);
-          root.setAttribute('data-theme', theme);
-          if (root.style) root.style.colorScheme = theme;
+          root.setAttribute('data-theme', resolved);
+          if (pref) root.setAttribute('data-theme-preference', pref);
+          if (root.style) root.style.colorScheme = resolved;
         }
         window.__KAIROS_SET_HOST_THEME__ = function (nextTheme) {
           window.__KAIROS_HOST_THEME__ =
             nextTheme === 'dark' || nextTheme === 'light' ? nextTheme : null;
-          var resolved = resolveTheme();
-          applyTheme(resolved);
+          var deviceTheme = resolveDeviceTheme();
+          var activePref = getActivePreference();
+          var effective = resolveEffective(activePref);
+          applyTheme(effective, activePref);
           try {
             window.dispatchEvent(
-              new CustomEvent('kairos:host-theme-change', { detail: { theme: resolved } })
+              new CustomEvent('kairos:host-theme-change', { detail: { theme: deviceTheme } })
             );
           } catch (e) {}
-          return resolved;
+          return effective;
         };
-        applyTheme(resolveTheme());
+        var initialPref = readStoredPreference();
+        applyTheme(resolveEffective(initialPref), initialPref);
         try {
           if (typeof window.matchMedia === 'function') {
             var mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
             var onMediaChange = function () {
-              applyTheme(resolveTheme());
+              var currentPref = getActivePreference();
+              if (currentPref === 'system') {
+                applyTheme(resolveDeviceTheme(), 'system');
+              }
             };
             if (typeof mediaQuery.addEventListener === 'function') {
               mediaQuery.addEventListener('change', onMediaChange);

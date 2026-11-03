@@ -160,7 +160,7 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
   return (
     <div className="space-y-6">
       {/* 1. Fast Add / Edit Idea Form */}
-      <section className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-surface-1 p-6 rounded-[18px] border border-token-subtle space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
@@ -255,8 +255,8 @@ export const NotesAndIdeasView: React.FC<NotesAndIdeasViewProps> = ({
       </section>
 
       {/* 2. Filters & Search */}
-      <section className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+      <section className="bg-surface-1 p-6 rounded-[18px] border border-token-subtle space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-token-subtle">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
             {Object.entries(IDEA_CATEGORIES).map(([key, info]) => {
               const active = selectedCategory === key;

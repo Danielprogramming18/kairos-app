@@ -1,0 +1,106 @@
+name: Build Windows Installer (Kairos Setup.exe)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Target architecture (default: x86_64-pc-windows-msvc)'
+        required: false
+        default: 'x86_64-pc-windows-msvc'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-installer:
+    name: Build Windows NSIS Setup.exe & MSI
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust stable toolchain (MSVC x64)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.build_target || 'x86_64-pc-windows-msvc' }}
+
+      - name: Cache Rust Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Typecheck & Lint frontend
+        run: npm run lint
+
+      - name: Run unit test suite
+        run: npm test
+
+      - name: Build offline production frontend bundle (dist/)
+        run: npm run build
+
+      - name: Verify offline bundle integrity (dist/)
+        run: npx --yes tsx --test src/utils/offlineBundleVerifier.test.ts
+
+      - name: Build Tauri v2 Windows application and NSIS/MSI installers
+        shell: pwsh
+        run: |
+          npx --yes @tauri-apps/cli@^2.2.0 build --target ${{ inputs.build_target || 'x86_64-pc-windows-msvc' }}
+
+      - name: Generate SHA-256 checksums for built installers and executable
+        shell: pwsh
+        run: |
+          $targetArch = "${{ inputs.build_target || 'x86_64-pc-windows-msvc' }}"
+          $releaseDir = "src-tauri/target/$targetArch/release"
+          if (-not (Test-Path $releaseDir)) {
+            $releaseDir = "src-tauri/target/release"
+          }
+
+          $outDir = "windows-installer-artifacts"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          $exeFiles = Get-ChildItem -Path $releaseDir -Filter "*.exe" -File -ErrorAction SilentlyContinue
+          foreach ($f in $exeFiles) {
+            Copy-Item $f.FullName -Destination (Join-Path $outDir $f.Name)
+          }
+
+          $nsisFiles = Get-ChildItem -Path (Join-Path $releaseDir "bundle/nsis") -Filter "*-setup.exe" -File -ErrorAction SilentlyContinue
+          foreach ($f in $nsisFiles) {
+            Copy-Item $f.FullName -Destination (Join-Path $outDir $f.Name)
+          }
+
+          $msiFiles = Get-ChildItem -Path (Join-Path $releaseDir "bundle/msi") -Filter "*.msi" -File -ErrorAction SilentlyContinue
+          foreach ($f in $msiFiles) {
+            Copy-Item $f.FullName -Destination (Join-Path $outDir $f.Name)
+          }
+
+          $checksumFile = Join-Path $outDir "SHA256SUMS.txt"
+          Get-ChildItem -Path $outDir -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | ForEach-Object {
+            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -FilePath $checksumFile -Append -Encoding utf8
+          }
+
+          Write-Host "Generated artifacts and SHA256SUMS.txt:"
+          Get-Content $checksumFile
+
+      - name: Upload Windows Installer Artifacts (Setup.exe, MSI, SHA256SUMS.txt)
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-windows-x64-installer
+          path: |
+            windows-installer-artifacts/*-setup.exe
+            windows-installer-artifacts/*.msi
+            windows-installer-artifacts/kairos-desktop.exe
+            windows-installer-artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

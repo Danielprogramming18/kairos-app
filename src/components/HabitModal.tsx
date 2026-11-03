@@ -107,17 +107,17 @@ export const HabitModal: React.FC<HabitModalProps> = ({
       onClick={(e) => {
         if (e.target === e.currentTarget && !isSaving) onClose();
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 kairos-modal-backdrop animate-fade-in"
     >
       <div
         ref={modalRef}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 relative"
+        className="kairos-modal-panel max-w-md w-full p-6 space-y-5 relative"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="flex items-center justify-between border-b border-token-subtle pb-4">
           <h3
             id="habit-modal-title"
-            className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"
+            className="text-lg font-black text-token-primary flex items-center gap-2"
           >
             <Sparkles className="w-5 h-5 text-indigo-500" />
             <span>{habitToEdit ? 'ویرایش عادت' : 'ایجاد عادت جدید'}</span>
@@ -127,7 +127,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
             aria-label="بستن پنجره"
             onClick={onClose}
             disabled={isSaving}
-            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+            className="p-1.5 rounded-xl bg-surface-2 text-token-secondary hover:text-token-primary cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>

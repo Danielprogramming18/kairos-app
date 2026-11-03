@@ -155,7 +155,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       {/* 1. Desktop Right Sidebar (RTL Collapsible Architecture) */}
       <aside
         aria-label="ناوبری اصلی دسکتاپ"
-        className={`hidden lg:flex flex-col shrink-0 border-l border-token-subtle bg-surface-1 min-h-screen sticky top-0 select-none transition-all duration-200 ${
+        className={`hidden lg:flex flex-col shrink-0 border rounded-[18px] kairos-glass-chrome min-h-[calc(100vh-6rem)] sticky top-20 select-none transition-[width] duration-200 ${
           isCollapsed ? 'w-20' : 'w-60'
         }`}
       >
@@ -166,7 +166,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           }`}
         >
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-xs shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-xs shrink-0">
               ک
             </div>
             {!isCollapsed && (
@@ -303,7 +303,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       {/* 2. Mobile Bottom Navigation Bar (5 Primary Destinations) */}
       <nav
         aria-label="ناوبری پایین موبایل"
-        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-surface-1/95 backdrop-blur-md border-t border-token-subtle px-2 py-1.5 flex items-center justify-around"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 kairos-glass-chrome border-t px-2 py-1.5 flex items-center justify-around"
       >
         {mobilePrimaryItems.map((item) => {
           const Icon = item.icon;
@@ -357,12 +357,12 @@ export const Navigation: React.FC<NavigationProps> = ({
           onClick={(e) => {
             if (e.target === e.currentTarget) setMoreDrawerOpen(false);
           }}
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-end justify-center p-3"
+          className="lg:hidden fixed inset-0 z-50 kairos-modal-backdrop flex items-end justify-center p-3 animate-fade-in"
         >
           <div
             ref={moreSheetRef}
             tabIndex={-1}
-            className="w-full max-w-md bg-surface-1 border border-token-subtle rounded-2xl p-4 shadow-2xl space-y-3 mb-14"
+            className="w-full max-w-md kairos-modal-panel p-4 space-y-3 mb-14"
           >
             <div className="flex items-center justify-between pb-2 border-b border-token-subtle">
               <span className="text-xs font-bold text-token-primary">سایر بخش‌ها</span>

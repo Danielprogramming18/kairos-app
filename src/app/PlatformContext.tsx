@@ -33,8 +33,9 @@ export function detectRuntimePlatform(): 'web' | 'android_webview' | 'windows_de
       return 'android_webview';
     }
     if (
-      window.__KAIROS_DESKTOP_BRIDGE__ &&
-      typeof window.__KAIROS_DESKTOP_BRIDGE__.invoke === 'function'
+      (window.__KAIROS_DESKTOP_BRIDGE__ &&
+        typeof window.__KAIROS_DESKTOP_BRIDGE__.invoke === 'function') ||
+      (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function')
     ) {
       return 'windows_desktop';
     }

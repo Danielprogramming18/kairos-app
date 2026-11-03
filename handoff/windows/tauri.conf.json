@@ -12,23 +12,31 @@
   "app": {
     "windows": [
       {
-        "title": "کایروس — فضای کار شخصی و تمرکز",
+        "label": "main",
+        "title": "کایروس",
         "width": 1280,
         "height": 840,
-        "minWidth": 375,
-        "minHeight": 640,
+        "minWidth": 380,
+        "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
         "center": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
+    "icon": [
+      "../../src-tauri/icons/32x32.png",
+      "../../src-tauri/icons/128x128.png",
+      "../../src-tauri/icons/128x128@2x.png",
+      "../../src-tauri/icons/icon.png",
+      "../../src-tauri/icons/icon.ico"
+    ],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

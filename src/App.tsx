@@ -19,6 +19,7 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { BackupAndSyncView, DeletedTrashItem } from './components/BackupAndSyncView';
 import { GlobalMiniTimer } from './components/GlobalMiniTimer';
 import { useGlobalPomodoro } from './app/useGlobalPomodoro';
+import { formatTimerClockLatin, isFloatingTimerSessionActive } from './utils/pomodoroEngine';
 import { HabitModal } from './components/HabitModal';
 import { TaskModal } from './components/TaskModal';
 import { DeleteModal } from './components/DeleteModal';
@@ -56,11 +57,15 @@ import { CROSS_TAB_SYNC_CHANNEL } from './infrastructure/web/dexieAdapter';
 import { createPlainBackupEnvelope } from './utils/backupCrypto';
 import {
   applyThemeToDocument,
+  getThemePreferenceLabelFa,
   migrateLegacyThemeSettings,
-  neutralizeLegacyLocalStorageTheme,
+  persistThemePreferenceToStorage,
+  readStoredThemePreference,
   registerGlobalHostThemeBridge,
   resolveDeviceTheme,
+  ResolvedTheme,
   subscribeToDeviceThemeChanges,
+  ThemePreference,
 } from './utils/themeManager';
 
 const HASH_TO_TAB: Record<string, NavTabId> = {
@@ -187,17 +192,28 @@ export default function App() {
     };
   }, []);
 
-  // Automatic Device Theme Synchronization (prefers-color-scheme + Android WebView Host Bridge)
+  // Theme Selection ('light' | 'dark' | 'system') & Live Displayed Theme ('light' | 'dark')
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() =>
+    readStoredThemePreference()
+  );
+  const [deviceTheme, setDeviceTheme] = useState<ResolvedTheme>(() => resolveDeviceTheme());
+  const resolvedTheme: ResolvedTheme =
+    themePreference === 'system' ? deviceTheme : themePreference;
+
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   useEffect(() => {
     registerGlobalHostThemeBridge();
-    neutralizeLegacyLocalStorageTheme();
-    applyThemeToDocument(resolveDeviceTheme());
-    return subscribeToDeviceThemeChanges((nextTheme) => {
-      applyThemeToDocument(nextTheme);
+    setDeviceTheme(resolveDeviceTheme());
+    return subscribeToDeviceThemeChanges((nextDeviceTheme) => {
+      setDeviceTheme(nextDeviceTheme);
     });
   }, []);
+
+  useEffect(() => {
+    persistThemePreferenceToStorage(themePreference);
+    applyThemeToDocument(resolvedTheme, themePreference);
+  }, [themePreference, resolvedTheme]);
 
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -332,13 +348,14 @@ export default function App() {
     setFocusSessions(activeFocusSessions);
     setDeletedTrashItems(trashList);
 
-    // Migrate/neutralize any legacy manual theme ('light' | 'dark') to 'system' while keeping all other settings intact
+    // Migrate/normalize saved theme preference without losing any other settings or overwriting manual selection
     const themeMigration = migrateLegacyThemeSettings(userSettings);
-    neutralizeLegacyLocalStorageTheme();
     if (themeMigration.migrated) {
-      container.settings.saveSettings({ theme: 'system' }).catch(() => {});
+      container.settings
+        .saveSettings({ theme: themeMigration.settings.theme })
+        .catch(() => {});
     }
-    applyThemeToDocument(resolveDeviceTheme());
+    setThemePreference(themeMigration.settings.theme);
 
     setSoundEnabled(userSettings.soundEnabled);
     soundManager.setEnabled(userSettings.soundEnabled);
@@ -659,6 +676,27 @@ export default function App() {
     }
     showToast('یادآور آزمایشی با موفقیت اجرا شد.', 'success');
   };
+
+  const handleChangeThemePreference = useCallback(
+    (nextPref: ThemePreference) => {
+      setThemePreference(nextPref);
+      persistThemePreferenceToStorage(nextPref);
+      const nextResolved: ResolvedTheme =
+        nextPref === 'system' ? resolveDeviceTheme() : nextPref;
+      applyThemeToDocument(nextResolved, nextPref);
+
+      container.settings
+        .saveSettings({ theme: nextPref })
+        .then(() => {
+          showToast(`تم برنامه: ${getThemePreferenceLabelFa(nextPref)}`);
+        })
+        .catch((err: any) => {
+          setStorageStatus('error');
+          setStorageError(err?.message || 'خطا در ذخیرهٔ تنظیم تم در پایگاه‌داده.');
+        });
+    },
+    [container, showToast]
+  );
 
   const handleToggleSound = () => {
     const nextVal = !soundEnabled;
@@ -1424,21 +1462,20 @@ export default function App() {
     sync: 'تنظیمات',
   };
 
-  const timerMins = Math.floor(pomodoroController.timeLeft / 60);
-  const timerSecs = pomodoroController.timeLeft % 60;
-  const formattedHeaderTimer = `${toPersianNum(String(timerMins).padStart(2, '0'))}:${toPersianNum(
-    String(timerSecs).padStart(2, '0')
-  )}`;
-  const showHeaderTimerPill =
-    pomodoroController.timerState.isRunning ||
-    pomodoroController.elapsedSeconds > 0 ||
-    pomodoroController.timerState.phase !== 'work';
+  const formattedHeaderTimer = formatTimerClockLatin(pomodoroController.timeLeft);
+  const showHeaderTimerPill = isFloatingTimerSessionActive(
+    pomodoroController.timerState,
+    pomodoroController.timeLeft
+  );
 
   return (
     <div className="min-h-screen bg-app text-token-primary pb-24 lg:pb-16 selection:bg-indigo-500 selection:text-white transition-colors duration-200">
       {/* Header */}
       <Header
         pageTitle={PAGE_TITLES[activeTab] || 'امروز'}
+        themePreference={themePreference}
+        resolvedTheme={resolvedTheme}
+        onChangeThemePreference={handleChangeThemePreference}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
         onOpenNewTaskModal={() => handleOpenTaskModal(undefined, getTodayKey())}
@@ -1507,8 +1544,8 @@ export default function App() {
       {/* Optional Sample Data Banner on Clean First Run */}
       {isDatabaseCompletelyEmpty && !storageError && (
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-3">
-          <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
+          <div className="bg-surface-1 border border-token-subtle rounded-[18px] p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs text-token-secondary">
               <Database className="w-4 h-4 text-indigo-500 shrink-0" />
               <span>
                 پایگاه‌دادهٔ محلی کایروس روی این دستگاه آماده و خالی است. می‌توانید از صفر شروع
@@ -1518,7 +1555,7 @@ export default function App() {
             <button
               type="button"
               onClick={handleLoadSampleData}
-              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition cursor-pointer shrink-0"
+              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition cursor-pointer shrink-0 shadow-xs"
             >
               بارگذاری داده‌های نمونه (اختیاری)
             </button>
@@ -1750,6 +1787,9 @@ export default function App() {
               onRestoreTrashItem={handleRestoreTrashItem}
               onPermanentDeleteTrashItem={handlePermanentDeleteTrashItem}
               onEmptyTrash={handleEmptyTrash}
+              themePreference={themePreference}
+              resolvedTheme={resolvedTheme}
+              onChangeThemePreference={handleChangeThemePreference}
               soundEnabled={soundEnabled}
               onToggleSound={handleToggleSound}
               notificationPermission={notificationPermission}
@@ -1764,6 +1804,9 @@ export default function App() {
       <GlobalMiniTimer
         tasks={tasks}
         visible={activeTab !== 'pomodoro' && activeTab !== 'deep_focus'}
+        activeRouteKey={activeTab}
+        isModalOpen={isHabitModalOpen || isTaskModalOpen || deleteModalState.isOpen}
+        hasActiveToast={toasts.length > 0}
         controller={pomodoroController}
         onOpenFullTimer={() => setActiveTab('pomodoro')}
       />
@@ -1804,15 +1847,15 @@ export default function App() {
       <div
         role="status"
         aria-live="polite"
-        className="fixed bottom-20 lg:bottom-5 left-5 z-50 flex flex-col gap-2 pointer-events-none"
+        className="fixed bottom-20 lg:bottom-5 left-4 lg:left-6 z-50 flex flex-col gap-2 max-w-[calc(100vw-9.25rem)] sm:max-w-md pointer-events-none"
       >
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-3 pointer-events-auto transition-all duration-300 animate-fade-in ${
+            className={`px-4 py-3 rounded-[16px] text-xs font-bold flex items-center gap-3 pointer-events-auto transition-all duration-200 animate-fade-in border ${
               toast.type === 'success'
-                ? 'bg-emerald-600 text-white shadow-emerald-600/25'
-                : 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-slate-900/30'
+                ? 'bg-emerald-600/95 border-emerald-400/30 text-white shadow-lg'
+                : 'kairos-glass-popover text-token-primary'
             }`}
           >
             <span>{toast.text}</span>

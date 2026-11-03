@@ -71,6 +71,8 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     }
   };
 
+  const TASK_DRAFT_STORAGE_KEY = 'kairos_unsaved_task_draft_v1';
+
   useEffect(() => {
     setIsSaving(false);
     if (taskToEdit) {
@@ -81,14 +83,73 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setTargetDate(taskToEdit.targetDate || todayKey);
       setReminderTime(taskToEdit.reminderTime || '');
     } else {
-      setTitle('');
-      setDescription('');
-      setPriority(1);
-      setDuration(45);
-      setTargetDate(defaultDateKey || todayKey);
-      setReminderTime('');
+      let restoredDraft = false;
+      try {
+        const rawDraft = localStorage.getItem(TASK_DRAFT_STORAGE_KEY);
+        if (rawDraft) {
+          const draft = JSON.parse(rawDraft);
+          if (draft && typeof draft.title === 'string' && (draft.title.trim() || draft.description)) {
+            setTitle(draft.title);
+            setDescription(typeof draft.description === 'string' ? draft.description : '');
+            setPriority(Number(draft.priority) || 1);
+            setDuration(Number(draft.duration) || 45);
+            setTargetDate(draft.targetDate || defaultDateKey || todayKey);
+            setReminderTime(typeof draft.reminderTime === 'string' ? draft.reminderTime : '');
+            restoredDraft = true;
+          }
+        }
+      } catch {}
+
+      if (!restoredDraft) {
+        setTitle('');
+        setDescription('');
+        setPriority(1);
+        setDuration(45);
+        setTargetDate(defaultDateKey || todayKey);
+        setReminderTime('');
+      }
     }
   }, [taskToEdit, isOpen, defaultDateKey, todayKey]);
+
+  // Persist draft for new tasks and register beforeunload guard when modal has unsaved edits
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!taskToEdit) {
+      try {
+        if (title.trim() || description.trim()) {
+          localStorage.setItem(
+            TASK_DRAFT_STORAGE_KEY,
+            JSON.stringify({
+              title,
+              description,
+              priority,
+              duration,
+              targetDate,
+              reminderTime,
+            })
+          );
+        } else {
+          localStorage.removeItem(TASK_DRAFT_STORAGE_KEY);
+        }
+      } catch {}
+    }
+
+    const hasUnsavedChanges = taskToEdit
+      ? title.trim() !== taskToEdit.title ||
+        description.trim() !== (taskToEdit.description || '')
+      : Boolean(title.trim() || description.trim());
+
+    if (!hasUnsavedChanges) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isOpen, taskToEdit, title, description, priority, duration, targetDate, reminderTime]);
 
   const modalRef = useModalFocusTrap<HTMLDivElement>(
     isOpen,
@@ -123,6 +184,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         category: 'work',
       });
       if (ok !== false) {
+        if (!taskToEdit) {
+          try {
+            localStorage.removeItem(TASK_DRAFT_STORAGE_KEY);
+          } catch {}
+        }
         onClose();
       }
     } finally {
@@ -138,17 +204,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       onClick={(e) => {
         if (e.target === e.currentTarget && !isSaving) onClose();
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 kairos-modal-backdrop animate-fade-in"
     >
       <div
         ref={modalRef}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5"
+        className="kairos-modal-panel max-w-md w-full p-6 space-y-5"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="flex items-center justify-between border-b border-token-subtle pb-4">
           <h3
             id="task-modal-title"
-            className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"
+            className="text-lg font-black text-token-primary flex items-center gap-2"
           >
             <CheckSquare className="w-5 h-5 text-indigo-500" />
             <span>{taskToEdit ? 'ویرایش کار' : 'ثبت کار جدید'}</span>
@@ -158,7 +224,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             aria-label="بستن پنجره"
             onClick={onClose}
             disabled={isSaving}
-            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+            className="p-1.5 rounded-xl bg-surface-2 text-token-secondary hover:text-token-primary cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>

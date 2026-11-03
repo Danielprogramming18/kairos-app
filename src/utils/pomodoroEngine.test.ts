@@ -5,7 +5,10 @@ import {
   computeRemainingSeconds,
   createInitialTimerState,
   evaluateTimerTick,
+  formatTimerClockLatin,
+  isFloatingTimerSessionActive,
   pauseTimer,
+  resetTimer,
   startTimer,
   transitionTimerPhase,
 } from './pomodoroEngine';
@@ -98,4 +101,35 @@ test('FIX-16: createInitialTimerState supports arbitrary custom task durations (
   assert.equal(tick.completedAtEpochMs, t0 + 600_000);
   assert.equal(tick.completedSessionId, running.activeSessionId);
 });
+
+test('formatTimerClockLatin formats MM:SS and HH:MM:SS strictly with Latin digits', () => {
+  assert.equal(formatTimerClockLatin(0), '00:00');
+  assert.equal(formatTimerClockLatin(5), '00:05');
+  assert.equal(formatTimerClockLatin(9 * 60 + 5), '09:05');
+  assert.equal(formatTimerClockLatin(25 * 60), '25:00');
+  assert.equal(formatTimerClockLatin(59 * 60 + 59), '59:59');
+  assert.equal(formatTimerClockLatin(60 * 60), '01:00:00');
+  assert.equal(formatTimerClockLatin(90 * 60 + 7), '01:30:07');
+  assert.equal(/^[0-9:]+$/.test(formatTimerClockLatin(1499)), true);
+});
+
+test('isFloatingTimerSessionActive hides idle unstarted work and frozen 00:00, shows running/paused/break', () => {
+  const t0 = 1_700_000_000_000;
+  const idle = createInitialTimerState(25);
+  assert.equal(isFloatingTimerSessionActive(idle, 1500), false);
+
+  const running = startTimer(idle, t0);
+  assert.equal(isFloatingTimerSessionActive(running, 1495), true);
+  assert.equal(isFloatingTimerSessionActive(running, 0), false);
+
+  const paused = pauseTimer(running, t0 + 10_000);
+  assert.equal(isFloatingTimerSessionActive(paused, paused.remainingSecondsWhenPaused), true);
+
+  const afterReset = resetTimer(paused, t0 + 20_000);
+  assert.equal(isFloatingTimerSessionActive(afterReset, afterReset.remainingSecondsWhenPaused), false);
+
+  const breakPhase = transitionTimerPhase(running, true, 4, t0 + 1500_000);
+  assert.equal(isFloatingTimerSessionActive(breakPhase, breakPhase.remainingSecondsWhenPaused), true);
+});
+
 

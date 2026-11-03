@@ -17,6 +17,9 @@ import {
   VolumeX,
   Bell,
   Wrench,
+  Sun,
+  Moon,
+  Monitor,
 } from 'lucide-react';
 import {
   Habit,
@@ -42,6 +45,13 @@ import {
   getPlatformHandoffSnippets,
   SelfDiagnosticSummary,
 } from '../utils/releaseReadiness';
+import {
+  getResolvedThemeLabelFa,
+  getThemePreferenceLabelFa,
+  ResolvedTheme,
+  THEME_PREFERENCE_OPTIONS,
+  ThemePreference,
+} from '../utils/themeManager';
 
 export interface DeletedTrashItem {
   id: string;
@@ -73,7 +83,10 @@ interface BackupAndSyncViewProps {
   onRestoreTrashItem?: (item: DeletedTrashItem) => void;
   onPermanentDeleteTrashItem?: (id: string) => void;
   onEmptyTrash?: () => void;
-  // Sound & Notification Preferences
+  // Appearance, Sound & Notification Preferences
+  themePreference?: ThemePreference;
+  resolvedTheme?: ResolvedTheme;
+  onChangeThemePreference?: (pref: ThemePreference) => void;
   soundEnabled?: boolean;
   onToggleSound?: () => void;
   notificationPermission?: NotificationPermission;
@@ -103,6 +116,9 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
   onRestoreTrashItem,
   onPermanentDeleteTrashItem,
   onEmptyTrash,
+  themePreference = 'system',
+  resolvedTheme = 'light',
+  onChangeThemePreference,
   soundEnabled = true,
   onToggleSound,
   notificationPermission = 'default',
@@ -340,15 +356,81 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* 0. Sound & Notification Preferences */}
-      <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
-        <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-          <h3 className="text-base font-black text-slate-800 dark:text-white">
-            صدا و یادآورها
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            تنظیمات افکت‌های صوتی و اعلان یادآورهای روزانه (پوستهٔ روشن و تاریک برنامه به‌طور خودکار از تنظیمات دستگاه پیروی می‌کند)
-          </p>
+      {/* 0. Appearance (ظاهر) & Sound Preferences */}
+      <section className="bg-surface-1 p-6 sm:p-8 rounded-[18px] border border-token-subtle space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-token-subtle pb-4">
+          <div>
+            <h3 className="text-base font-black text-slate-800 dark:text-white">
+              ظاهر
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              نمای رنگی برنامه و تنظیمات صدا و یادآورهای روزانه را متناسب با ترجیح خود تنظیم کنید.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            <span
+              data-testid="settings-selected-theme-mode"
+              className="px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-bold"
+            >
+              حالت انتخابی: {getThemePreferenceLabelFa(themePreference)}
+            </span>
+            <span
+              data-testid="settings-displayed-theme"
+              className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold"
+            >
+              تم فعلاً نمایش‌داده‌شده: {getResolvedThemeLabelFa(resolvedTheme)}
+            </span>
+          </div>
+        </div>
+
+        {/* Theme Selection Cards (روشن / تاریک / هماهنگ با دستگاه) */}
+        <div
+          role="radiogroup"
+          aria-label="انتخاب تم"
+          data-testid="settings-theme-radiogroup"
+          className="grid grid-cols-1 sm:grid-cols-3 gap-3"
+        >
+          {THEME_PREFERENCE_OPTIONS.map((opt) => {
+            const isSelected = themePreference === opt.value;
+            const IconComp =
+              opt.value === 'light' ? Sun : opt.value === 'dark' ? Moon : Monitor;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                data-testid={`settings-theme-option-${opt.value}`}
+                onClick={() => onChangeThemePreference?.(opt.value)}
+                className={`p-4 rounded-xl border text-right transition flex flex-col justify-between gap-2 cursor-pointer ${
+                  isSelected
+                    ? 'bg-indigo-600/10 border-indigo-500 text-indigo-900 dark:text-indigo-100 shadow-xs'
+                    : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700/60 text-slate-700 dark:text-slate-200 hover:border-indigo-400/60'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-xs sm:text-sm font-black">
+                    <IconComp
+                      className={`w-4 h-4 shrink-0 ${
+                        isSelected
+                          ? 'text-indigo-600 dark:text-indigo-400'
+                          : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    />
+                    <span>{opt.labelFa}</span>
+                  </span>
+                  {isSelected && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-600 text-white">
+                      فعال
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  {opt.descriptionFa}
+                </p>
+              </button>
+            );
+          })}
         </div>
 
         {/* Sound & Reminder Controls */}
@@ -403,8 +485,8 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
       </section>
 
       {/* 1. Primary Offline Local Backup & Restore */}
-      <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <section className="bg-surface-1 p-6 sm:p-8 rounded-[18px] border border-token-subtle space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-token-subtle pb-4">
           <div>
             <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
               <Download className="w-5 h-5 text-indigo-500" />
@@ -730,7 +812,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
       </section>
 
       {/* 2. Recycle Bin / Soft-Deleted Items Recovery (سطل زباله) */}
-      <section className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-surface-1 p-6 sm:p-8 rounded-[18px] border border-token-subtle space-y-4">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
@@ -812,7 +894,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
       </section>
 
       {/* 3. Collapsible Technical & Developer Diagnostics Section (§15.7 & §18) */}
-      <section className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-surface-1 p-6 rounded-[18px] border border-token-subtle space-y-4">
         <button
           type="button"
           data-testid="toggle-developer-tools-btn"

@@ -679,9 +679,13 @@ export async function migrateLegacyLocalStorageToIndexedDB(
 
       const existingSettings = await db.settings.get('default');
       if (!existingSettings) {
+        const migratedTheme: 'light' | 'dark' | 'system' =
+          rawTheme === 'light' || rawTheme === 'dark' || rawTheme === 'system'
+            ? rawTheme
+            : 'system';
         await db.settings.put({
           id: 'default',
-          theme: 'system',
+          theme: migratedTheme,
           soundEnabled: rawSound !== 'false',
           pomodoroWorkMinutes: 45,
           pomodoroShortBreakMinutes: 10,

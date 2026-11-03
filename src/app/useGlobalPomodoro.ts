@@ -60,7 +60,7 @@ export interface GlobalPomodoroController {
   elapsedMinutes: number;
   pendingConfirmation: PendingTimerConfirmation | null;
   handleTogglePlay: () => void;
-  handleReset: () => void;
+  handleReset: (forceImmediateToIdle?: boolean) => void;
   handleSkip: () => void;
   handlePresetChange: (mins: number) => void;
   handleSelectTask: (taskId: string, suggestedDurationMinutes?: number) => void;
@@ -244,11 +244,18 @@ export function useGlobalPomodoro({
         evaluateNow();
       }
     };
+    const handleWindowResume = () => {
+      evaluateNow();
+    };
     document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleWindowResume);
+    window.addEventListener('pageshow', handleWindowResume);
 
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleWindowResume);
+      window.removeEventListener('pageshow', handleWindowResume);
     };
   }, [timerState.isRunning, logWorkSessionFromState]);
 
@@ -265,29 +272,52 @@ export function useGlobalPomodoro({
     setTimerState((prev) => (prev.isRunning ? pauseTimer(prev, now) : startTimer(prev, now)));
   }, []);
 
-  const applyImmediateReset = useCallback(() => {
+  const applyImmediateReset = useCallback((returnToIdleWork = false) => {
     const now = Date.now();
     setNowTick(now);
-    setTimerState((prev) => resetTimer(prev, now));
+    setTimerState((prev) => {
+      if (returnToIdleWork) {
+        const workDuration = getPhaseDurationSeconds(prev.selectedPresetMinutes, 'work');
+        return {
+          ...prev,
+          isRunning: false,
+          phase: 'work',
+          activeSessionId: null,
+          durationSeconds: workDuration,
+          remainingSecondsWhenPaused: workDuration,
+          startedAtEpochMs: null,
+          targetEndEpochMs: null,
+          updatedAt: new Date(now).toISOString(),
+        };
+      }
+      return resetTimer(prev, now);
+    });
     setPendingConfirmation(null);
   }, []);
 
-  const handleReset = useCallback(() => {
-    const now = Date.now();
-    const curElapsedSec = computeActualElapsedSeconds(timerState, now);
-    if (timerState.phase === 'work' && (timerState.isRunning || curElapsedSec >= 15)) {
-      const linkedTask = tasksRef.current.find((t) => t.id === timerState.taskId);
-      setPendingConfirmation({
-        kind: 'reset',
-        elapsedSeconds: curElapsedSec,
-        elapsedMinutes: computeActualElapsedMinutes(timerState, now),
-        currentTaskId: timerState.taskId || null,
-        currentTaskTitle: linkedTask?.title || timerState.taskTitle || 'تمرکز آزاد',
-      });
-      return;
-    }
-    applyImmediateReset();
-  }, [timerState, applyImmediateReset]);
+  const handleReset = useCallback(
+    (forceImmediateToIdle?: boolean | unknown) => {
+      if (forceImmediateToIdle === true) {
+        applyImmediateReset(true);
+        return;
+      }
+      const now = Date.now();
+      const curElapsedSec = computeActualElapsedSeconds(timerState, now);
+      if (timerState.phase === 'work' && (timerState.isRunning || curElapsedSec >= 15)) {
+        const linkedTask = tasksRef.current.find((t) => t.id === timerState.taskId);
+        setPendingConfirmation({
+          kind: 'reset',
+          elapsedSeconds: curElapsedSec,
+          elapsedMinutes: computeActualElapsedMinutes(timerState, now),
+          currentTaskId: timerState.taskId || null,
+          currentTaskTitle: linkedTask?.title || timerState.taskTitle || 'تمرکز آزاد',
+        });
+        return;
+      }
+      applyImmediateReset(false);
+    },
+    [timerState, applyImmediateReset]
+  );
 
   const applyImmediateSkip = useCallback(() => {
     const now = Date.now();

@@ -1,48 +1,20 @@
-# راهنمای تحویل و ساخت نسخهٔ دسکتاپ ویندوز (Windows Desktop Handoff)
+# راهنمای فنی میزبان دسکتاپ ویندوز (`docs/WINDOWS_HANDOFF.md`)
 
-این سند نحوهٔ بسته‌بندی «کایروس» به عنوان نرم‌افزار بومی ویندوز (`.exe` / `.msi`) با استفاده از **Tauri v2** و `WebView2` را شرح می‌دهد.
-
----
-
-## ۱. معماری ارتباطی دسکتاپ ویندوز
-در محیط دسکتاپ ویندوز، هستهٔ رابط کاربری از طریق `WindowsDesktopPlatformAdapter` (`src/infrastructure/desktop/desktopBridgeAdapter.ts`) و شیء `window.__KAIROS_DESKTOP_BRIDGE__` با میزبان Rust/Tauri و دیتابیس بومی `SQLite` ارتباط برقرار می‌کند.
+> برای راهنمای گام‌به‌گام نصب، پیش‌نیازها، مسیرهای دقیق خروجی، مهاجرت داده و دریافت فایل نصبی از GitHub Actions، فایل اصلی **[`/WINDOWS_INSTALL_GUIDE.md`](../WINDOWS_INSTALL_GUIDE.md)** در ریشهٔ پروژه را مطالعه کنید.
 
 ---
 
-## ۲. پیش‌نیازهای سیستم بیلد ویندوز
-از آنجا که محیط فعلی یک کانتینر لینوکس ابری است، کامپایل نهایی `.exe` باید روی سیستم ویندوز ۱۰ یا ۱۱ با ابزارهای زیر انجام شود:
-1. **Node.js LTS** (نسخه ۲۰ یا بالاتر)
-2. **Rust Toolchain** (`rustup` با هدف `x86_64-pc-windows-msvc`)
-3. **Microsoft Visual Studio C++ Build Tools**
-4. **Microsoft Edge WebView2 Runtime** (به‌طور پیش‌فرض روی ویندوز ۱۰/۱۱ نصب است)
+## ۱. معماری میزبان بومی دسکتاپ ویندوز (`/src-tauri/`)
+در نسخهٔ دسکتاپ ویندوز، کایروس یک برنامهٔ بومی **Tauri v2** است که در مسیر استاندارد `/src-tauri/` قرار دارد:
+- **`/src-tauri/Cargo.toml`**: وابستگی‌های Rust شامل `tauri = "2.2.0"`، پلاگین جلوگیری از اجرای چندباره (`tauri-plugin-single-instance`) و موتور پایگاه‌دادهٔ محلی `rusqlite = { version = "0.32.1", features = ["bundled"] }`.
+- **`/src-tauri/tauri.conf.json`**: پیکربندی پنجرهٔ دسکتاپ با عنوان فارسی `«کایروس»`، ابعاد پیش‌فرض `1280x840` (حداقل `960x640`)، بارگذاری آفلاین از `../dist`، سیاست امنیتی آفلاین (`CSP`) و تنظیمات نصاب‌های ویندوز (`nsis` با حالت `currentUser` و `msi`).
+- **`/src-tauri/src/db.rs`**: پیاده‌سازی کامل پایگاه‌دادهٔ محلی `SQLite` در مسیر `%LOCALAPPDATA%\com.kairos.workspace\data\kairos_v2.sqlite` (از طریق `app.path().app_local_data_dir()`) با حالت `WAL`، جدول `schema_migrations`، تراکنش‌های اتمیک، بررسی همزمانی خوش‌بینانه (`expectedRevision` و خطای `CONFLICT_STALE_REVISION`) و پشتیبانی از تمام ۳۵ عملیات تعریف‌شده در `BridgeProtocol 1.0.0`.
+- **`/src-tauri/src/lib.rs`**: ثبت قفل تک‌نمونه‌ای ویندوز (`single-instance` برای فوکوس روی پنجرهٔ موجود)، مقداردهی اولیهٔ پایگاه‌دادهٔ SQLite، تزریق خودکار پل `window.__KAIROS_DESKTOP_BRIDGE__` پیش از بارگذاری صفحه و هندلر فرمان `kairos_bridge_invoke`.
 
 ---
 
-## ۳. مراحل اتصال و ساخت فایل نصبی (`.exe`)
-1. ساخت دارایی‌های فرانت‌اند:
-   ```bash
-   npm install
-   npm run build
-   ```
-2. در اسکریپت مقداردهی اولیهٔ Tauri (`initialization_script` در `/handoff/windows/src-tauri/src/main.rs`)، پل زیر به‌صورت خودکار به `window.__KAIROS_DESKTOP_BRIDGE__` متصل می‌شود:
-   ```javascript
-   window.__KAIROS_DESKTOP_BRIDGE__ = {
-     invoke: async (rawRequestJson) => {
-       return await window.__TAURI_INTERNALS__.invoke('kairos_bridge_invoke', {
-         rawRequestJson,
-       });
-     },
-   };
-   ```
-3. اجرای دستور بیلد دسکتاپ روی ویندوز:
-   ```bash
-   npx tauri build
-   ```
-   فایل اجرایی در مسیر `src-tauri/target/release/bundle/` تولید خواهد شد.
-
----
-
-## ۴. فایل‌های آمادهٔ Tauri v2 در مخزن
-- فایل `/handoff/windows/tauri.conf.json` حاوی تنظیمات کامل پنجرهٔ راست‌به‌چپ (`کایروس — فضای کار شخصی و تمرکز`)، نسخهٔ همگام با پروژه (`2.1.0`)، سیاست امنیتی کاملاً آفلاین (`CSP`) و تنظیمات نصاب ویندوز (`nsis` و `msi` با پشتیبانی از زبان فارسی).
-- فایل `/handoff/windows/src-tauri/src/main.rs` حاوی پیاده‌سازی مرجع هندلر Rust (`kairos_bridge_invoke`) منطبق با پروتکل `1.0.0`، اعتبارسنجی نسخه، سقف ۵ مگابایت اندازهٔ پیام و بررسی همزمانی `expectedRevision`.
-
+## ۲. وضعیت ساخت باینری در این محیط
+از آنجا که محیط فعلی یک کانتینر لینوکس بدون کامپایلر Rust و بدون ابزارهای ویندوز است، **فایل نصب ویندوز در این محیط ساخته نشده است.**
+برای تولید فایل‌های نصبی:
+- **در GitHub Actions:** گردش‌کار `/.github/workflows/windows-installer.yml` را به‌صورت دستی (`workflow_dispatch`) اجرا کنید تا فایل `Kairos_2.1.0_x64-setup.exe` به همراه `SHA256SUMS.txt` ساخته و به عنوان Artifact آپلود شود.
+- **روی سیستم ویندوز ۱۰/۱۱ محلی:** دستور `npm run desktop:build` را اجرا کنید.

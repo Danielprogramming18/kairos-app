@@ -40,6 +40,7 @@ import {
   TaskRepository,
 } from '../../application/repositories';
 import {
+  computeBackupChecksum,
   validateAndPreviewBackupPayload,
   validateBackupEnvelopeObject,
 } from '../../utils/backupCrypto';
@@ -51,11 +52,31 @@ export interface WindowsDesktopBridgeHost {
 declare global {
   interface Window {
     __KAIROS_DESKTOP_BRIDGE__?: WindowsDesktopBridgeHost;
+    __TAURI_INTERNALS__?: {
+      invoke: (cmd: string, args?: Record<string, unknown>) => Promise<string>;
+    };
+  }
+}
+
+function ensureTauriDesktopBridgeBound(): void {
+  if (typeof window === 'undefined') return;
+  if (
+    !window.__KAIROS_DESKTOP_BRIDGE__ &&
+    window.__TAURI_INTERNALS__ &&
+    typeof window.__TAURI_INTERNALS__.invoke === 'function'
+  ) {
+    window.__KAIROS_DESKTOP_BRIDGE__ = {
+      invoke: (rawRequestJson: string) =>
+        window.__TAURI_INTERNALS__!.invoke('kairos_bridge_invoke', {
+          rawRequest: rawRequestJson,
+        }),
+    };
   }
 }
 
 export class WindowsDesktopBridgeTransport {
   public isAvailable(): boolean {
+    ensureTauriDesktopBridgeBound();
     return Boolean(
       typeof window !== 'undefined' &&
         window.__KAIROS_DESKTOP_BRIDGE__ &&
@@ -237,8 +258,25 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
     };
 
     this.backup = {
-      exportBackup: () =>
-        this.transport.invoke<Record<string, never>, BackupEnvelopeV2>('backup.export', {}),
+      exportBackup: async () => {
+        const env = await this.transport.invoke<Record<string, never>, BackupEnvelopeV2>(
+          'backup.export',
+          {}
+        );
+        if (env && env.payload) {
+          return {
+            ...env,
+            appId: 'kairos',
+            app: 'Kairos',
+            formatVersion: 2,
+            schemaVersion: 2,
+            platform: 'windows_desktop',
+            encrypted: false,
+            checksum: computeBackupChecksum(env.payload),
+          };
+        }
+        return env;
+      },
       validateBackupJson: async (rawJson: string): Promise<BackupValidationResult> => {
         const preview = validateAndPreviewBackupPayload(rawJson, { verifyChecksum: true });
         return {

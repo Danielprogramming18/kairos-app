@@ -2,18 +2,66 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --bg-app: #F8F9FA;
-  --bg-surface-1: #FFFFFF;
-  --bg-surface-2: #F1F3F5;
-  --bg-elevated: #FFFFFF;
-  --text-primary: #111827;
-  --text-secondary: #4B5563;
-  --text-muted: #6B7280;
-  --border-subtle: #E5E7EB;
-  --border-strong: #D1D5DB;
+  /* Base Canvas & Broad Ambient Luminance Shift (Milky Clean Light Theme — No Colored Blobs) */
+  --bg-app: #EDF1F7;
+  --bg-app-gradient:
+    radial-gradient(120% 85% at 50% 0%, rgba(255, 255, 255, 0.92) 0%, rgba(239, 243, 249, 0.55) 55%, rgba(226, 232, 242, 0.85) 100%),
+    linear-gradient(165deg, #F7F9FC 0%, #EDF1F7 52%, #E5EBF3 100%);
+
+  /* Main Panels (Lower-Intensity Milky Glass) & Crisp Uniform Rows */
+  --bg-surface-1: rgba(255, 255, 255, 0.78);
+  --bg-surface-1-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.73) 100%);
+  --bg-surface-1-solid: #FFFFFF;
+  --bg-surface-2: rgba(243, 246, 251, 0.93);
+  --bg-surface-2-hover: rgba(235, 240, 248, 0.97);
+  --bg-elevated: rgba(255, 255, 255, 0.94);
+
+  /* Priority Frosted Glass Surfaces (Header, Sidebar, Floating Timer, Popovers) */
+  --bg-glass-chrome: rgba(255, 255, 255, 0.72);
+  --bg-glass-chrome-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.66) 100%);
+  --bg-glass-popover: rgba(255, 255, 255, 0.91);
+  --bg-glass-popover-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 253, 0.88) 100%);
+  --bg-glass-modal: rgba(255, 255, 255, 0.93);
+  --bg-glass-floating: rgba(255, 255, 255, 0.84);
+  --bg-glass-floating-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.91) 0%, rgba(248, 250, 253, 0.79) 100%);
+  --bg-glass-secondary-btn: rgba(255, 255, 255, 0.68);
+  --bg-glass-secondary-btn-hover: rgba(255, 255, 255, 0.90);
+
+  /* Typography Contrast Tokens (Crisp & Unfaded) */
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #526077;
+
+  /* Refined Translucent Borders & Soft Top Edge Specular Reflection */
+  --border-subtle: rgba(15, 23, 42, 0.085);
+  --border-glass: rgba(15, 23, 42, 0.095);
+  --border-strong: rgba(15, 23, 42, 0.15);
+  --border-input: rgba(15, 23, 42, 0.14);
+  --divider-subtle: rgba(15, 23, 42, 0.065);
+  --surface-edge-top: rgba(255, 255, 255, 0.92);
+
+  /* Diffused Layer-Separating Shadows */
+  --shadow-chrome:
+    0 1px 3px rgba(15, 23, 42, 0.035),
+    0 8px 24px -6px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.94);
+  --shadow-card:
+    0 2px 5px rgba(15, 23, 42, 0.03),
+    0 12px 30px -8px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 0 var(--surface-edge-top);
+  --shadow-popover:
+    0 8px 20px -4px rgba(15, 23, 42, 0.09),
+    0 22px 44px -10px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.96);
+  --shadow-floating:
+    0 10px 26px -4px rgba(15, 23, 42, 0.12),
+    0 24px 48px -10px rgba(15, 23, 42, 0.18),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.95);
+
+  /* Brand & Status Accents */
   --accent-primary: #4F46E5;
   --accent-primary-hover: #4338CA;
-  --accent-subtle: rgba(79, 70, 229, 0.08);
+  --accent-subtle: rgba(79, 70, 229, 0.09);
   --status-success: #16A34A;
   --status-warning: #D97706;
   --status-danger: #DC2626;
@@ -21,18 +69,66 @@
 }
 
 .dark {
-  --bg-app: #111315;
-  --bg-surface-1: #181B1F;
-  --bg-surface-2: #20242A;
-  --bg-elevated: #20242A;
+  /* Base Canvas & Broad Ambient Luminance Shift (Smoky Charcoal — Never Navy/Purple) */
+  --bg-app: #101215;
+  --bg-app-gradient:
+    radial-gradient(120% 85% at 50% 0%, rgba(34, 38, 45, 0.72) 0%, rgba(16, 18, 21, 0.92) 58%, rgba(11, 13, 15, 1) 100%),
+    linear-gradient(165deg, #16191E 0%, #101215 55%, #0C0E10 100%);
+
+  /* Main Panels (Smoky Translucent Glass Slightly Lighter Than Canvas) & Uniform Rows */
+  --bg-surface-1: rgba(25, 29, 35, 0.76);
+  --bg-surface-1-gradient: linear-gradient(180deg, rgba(31, 35, 42, 0.82) 0%, rgba(23, 26, 32, 0.74) 100%);
+  --bg-surface-1-solid: #181B20;
+  --bg-surface-2: rgba(33, 37, 45, 0.94);
+  --bg-surface-2-hover: rgba(41, 46, 56, 0.97);
+  --bg-elevated: rgba(29, 33, 40, 0.94);
+
+  /* Priority Smoky Frosted Glass Surfaces (Header, Sidebar, Floating Timer, Popovers) */
+  --bg-glass-chrome: rgba(22, 25, 31, 0.72);
+  --bg-glass-chrome-gradient: linear-gradient(180deg, rgba(30, 34, 42, 0.78) 0%, rgba(20, 23, 28, 0.68) 100%);
+  --bg-glass-popover: rgba(24, 28, 35, 0.91);
+  --bg-glass-popover-gradient: linear-gradient(180deg, rgba(32, 37, 45, 0.94) 0%, rgba(22, 26, 32, 0.89) 100%);
+  --bg-glass-modal: rgba(25, 29, 36, 0.93);
+  --bg-glass-floating: rgba(26, 30, 37, 0.84);
+  --bg-glass-floating-gradient: linear-gradient(180deg, rgba(34, 39, 48, 0.89) 0%, rgba(23, 27, 33, 0.80) 100%);
+  --bg-glass-secondary-btn: rgba(34, 39, 47, 0.72);
+  --bg-glass-secondary-btn-hover: rgba(44, 50, 60, 0.90);
+
+  /* Typography Contrast Tokens */
   --text-primary: #F3F4F6;
-  --text-secondary: #9CA3AF;
-  --text-muted: #6B7280;
-  --border-subtle: #2A2F37;
-  --border-strong: #374151;
+  --text-secondary: #D1D5DB;
+  --text-muted: #8E96A4;
+
+  /* Refined Smoky Borders & Restrained Top Specular Reflection (Never Shiny White) */
+  --border-subtle: rgba(255, 255, 255, 0.082);
+  --border-glass: rgba(255, 255, 255, 0.105);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-input: rgba(255, 255, 255, 0.14);
+  --divider-subtle: rgba(255, 255, 255, 0.065);
+  --surface-edge-top: rgba(255, 255, 255, 0.075);
+
+  /* Diffused Dark Shadows & Restrained Top Edge Luminance */
+  --shadow-chrome:
+    0 2px 6px rgba(0, 0, 0, 0.28),
+    0 10px 26px -6px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.075);
+  --shadow-card:
+    0 2px 6px rgba(0, 0, 0, 0.24),
+    0 14px 32px -8px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 0 var(--surface-edge-top);
+  --shadow-popover:
+    0 8px 22px -4px rgba(0, 0, 0, 0.46),
+    0 24px 48px -10px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.085);
+  --shadow-floating:
+    0 10px 28px -4px rgba(0, 0, 0, 0.52),
+    0 26px 54px -10px rgba(0, 0, 0, 0.68),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+
+  /* Brand & Status Accents */
   --accent-primary: #6366F1;
   --accent-primary-hover: #818CF8;
-  --accent-subtle: rgba(99, 102, 241, 0.14);
+  --accent-subtle: rgba(99, 102, 241, 0.15);
   --status-success: #22C55E;
   --status-warning: #F59E0B;
   --status-danger: #EF4444;
@@ -53,6 +149,8 @@
 
   body {
     background-color: var(--bg-app);
+    background-image: var(--bg-app-gradient);
+    background-attachment: fixed;
     color: var(--text-primary);
     font-feature-settings: "ss01";
     text-rendering: optimizeLegibility;
@@ -66,32 +164,196 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Keyboard Accessibility Focus Ring */
+  /* Clear, Accessible Keyboard Focus Ring (Never hidden) */
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible,
-  [role="button"]:focus-visible {
+  [role="button"]:focus-visible,
+  [role="radio"]:focus-visible,
+  [role="menuitemradio"]:focus-visible {
     outline: 2px solid var(--accent-primary);
     outline-offset: 2px;
   }
+
+  /* Subtle Tactile Press & Smooth Non-Blur Transitions on Buttons */
+  button:not(:disabled) {
+    transition-property: background-color, border-color, color, box-shadow, transform, opacity;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  button:not(:disabled):active {
+    transform: scale(0.985);
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  /* Crisp, Legible Input & Select Boundaries */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea {
+    border-color: var(--border-input);
+    transition-property: background-color, border-color, box-shadow, color;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-muted);
+    opacity: 0.92;
+  }
 }
 
-/* Semantic Token Utility Classes */
+/* Semantic Surface & Token Utility Classes */
 .bg-app {
   background-color: var(--bg-app);
+  background-image: var(--bg-app-gradient);
+  background-attachment: fixed;
 }
+
+/* Primary Panels / Cards: Controlled translucent glass with lower blur intensity, soft top edge reflection */
 .bg-surface-1,
-.bg-surface-1\/95 {
+.kairos-card {
   background-color: var(--bg-surface-1);
+  background-image: var(--bg-surface-1-gradient);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-card);
+  border-radius: 1.125rem; /* 18px harmonized card radius */
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  backdrop-filter: blur(10px) saturate(1.08);
 }
+
+/* Avoid nested backdrop-filter inside cards or rows */
+.bg-surface-1 .bg-surface-1,
+.bg-surface-1 .bg-surface-2,
+.kairos-modal-panel .bg-surface-1,
+.kairos-modal-panel .bg-surface-2 {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Fallback for environments without backdrop-filter */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bg-surface-1,
+  .kairos-card,
+  .kairos-glass-chrome,
+  .kairos-glass-popover,
+  .kairos-glass-floating,
+  .kairos-modal-panel {
+    background-color: var(--bg-surface-1-solid) !important;
+    background-image: none !important;
+  }
+}
+
+/* Uniform, high-legibility inner rows & input surfaces (no blur, no per-row shadows) */
 .bg-surface-2 {
   background-color: var(--bg-surface-2);
 }
+
+.hover\:bg-surface-2:hover {
+  background-color: var(--bg-surface-2-hover);
+}
+
 .bg-elevated {
   background-color: var(--bg-elevated);
 }
+
+/* 1. Chrome Frosted Glass: Header, Sidebar, Mobile Bottom Navigation */
+.kairos-glass-chrome,
+.bg-surface-1\/95 {
+  background-color: var(--bg-glass-chrome);
+  background-image: var(--bg-glass-chrome-gradient);
+  border-color: var(--border-glass);
+  box-shadow: var(--shadow-chrome);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+  backdrop-filter: blur(16px) saturate(1.16);
+}
+
+/* 2. Popover & Dropdown Menu Frosted Glass */
+.kairos-glass-popover {
+  background-color: var(--bg-glass-popover);
+  background-image: var(--bg-glass-popover-gradient);
+  border-color: var(--border-glass);
+  box-shadow: var(--shadow-popover);
+  -webkit-backdrop-filter: blur(18px) saturate(1.18);
+  backdrop-filter: blur(18px) saturate(1.18);
+}
+
+/* 3. Floating Mini-Timer Capsule & Expanded Panel Frosted Glass (Theme-Aware Milky / Smoky Glass) */
+.kairos-glass-floating {
+  background-color: var(--bg-glass-floating);
+  background-image: var(--bg-glass-floating-gradient);
+  border-color: var(--border-glass);
+  box-shadow: var(--shadow-floating);
+  color: var(--text-primary);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+
+/* 4. Modal Dialog Backdrop & Panel */
+.kairos-modal-backdrop {
+  background-color: rgba(15, 23, 42, 0.42);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+
+.dark .kairos-modal-backdrop {
+  background-color: rgba(0, 0, 0, 0.58);
+}
+
+.kairos-modal-panel {
+  background-color: var(--bg-glass-modal);
+  background-image: var(--bg-glass-popover-gradient);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-popover);
+  border-radius: 1.25rem;
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+/* 5. Secondary Interactive Button Surface */
+.kairos-btn-secondary {
+  background-color: var(--bg-glass-secondary-btn);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 0 var(--surface-edge-top);
+}
+
+.kairos-btn-secondary:hover:not(:disabled) {
+  background-color: var(--bg-glass-secondary-btn-hover);
+  border-color: var(--border-strong);
+}
+
+/* Mobile Performance Optimization: Limit expensive blur layers on mobile viewports */
+@media (max-width: 1023px) {
+  body,
+  .bg-app {
+    background-attachment: scroll;
+  }
+  .bg-surface-1,
+  .kairos-card {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .kairos-glass-chrome,
+  .bg-surface-1\/95,
+  .kairos-glass-popover,
+  .kairos-glass-floating,
+  .kairos-modal-panel {
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    backdrop-filter: blur(10px) saturate(1.1);
+  }
+  .kairos-modal-backdrop {
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+}
+
 .text-token-primary {
   color: var(--text-primary);
 }
@@ -109,6 +371,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Subtle Pop/Fade Entrance for Popovers & Floating Panels (No blur animation) */
+@keyframes kairosFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: kairosFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -118,11 +396,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.35);
+  background: rgba(156, 163, 175, 0.32);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.55);
+  background: rgba(156, 163, 175, 0.52);
 }
 
 /* Pop animation for habit checkmark */

@@ -63,7 +63,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Range Selector Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface-1 p-4 rounded-[18px] border border-token-subtle">
         <div>
           <h2 className="text-base font-black text-slate-800 dark:text-white">
             گزارش عملکرد و پیوستگی
@@ -101,7 +101,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               کارهای انجام‌شده
@@ -121,7 +121,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               تحقق اهداف عادت‌ها
@@ -141,7 +141,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               زمان واقعی تمرکز (تایمر)
@@ -161,7 +161,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               زنجیرهٔ فعال / رکورد کل
@@ -185,8 +185,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* 7-Day Focus & Task Chart */}
-      <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="bg-surface-1 p-6 sm:p-8 rounded-[18px] border border-token-subtle space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-token-subtle pb-4">
           <div>
             <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -246,8 +246,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* Summary Card with Copy */}
-      <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-5">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+      <div className="bg-surface-1 p-6 sm:p-8 rounded-[18px] border border-token-subtle space-y-5">
+        <div className="flex items-center justify-between border-b border-token-subtle pb-4">
           <div>
             <h3 className="text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />

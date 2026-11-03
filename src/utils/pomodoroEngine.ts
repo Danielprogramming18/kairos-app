@@ -103,6 +103,51 @@ export function computeActualElapsedMinutes(
   return Math.min(plannedMinutes, Math.max(1, Math.round(elapsedSeconds / 60)));
 }
 
+/**
+ * Formats timer remaining seconds strictly with ASCII Latin digits (0-9) and fixed-width padding.
+ * Uses MM:SS (e.g. "09:05", "45:00") for durations under 1 hour, and HH:MM:SS (e.g. "01:00:00", "01:30:05")
+ * when hours > 0 (totalSeconds >= 3600).
+ */
+export function formatTimerClockLatin(totalSeconds: number): string {
+  const safeTotal = Math.max(0, Math.floor(Number.isFinite(totalSeconds) ? totalSeconds : 0));
+  const hours = Math.floor(safeTotal / 3600);
+  const minutes = Math.floor((safeTotal % 3600) / 60);
+  const seconds = safeTotal % 60;
+
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+
+  if (hours > 0) {
+    const hh = String(hours).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }
+  return `${mm}:${ss}`;
+}
+
+/**
+ * Determines whether the floating mini-timer should be displayed when away from the full focus page.
+ * Never shows a frozen 00:00 state, and hides when the work timer is completely idle/unstarted.
+ */
+export function isFloatingTimerSessionActive(
+  state: ExtendedActiveTimerState,
+  remainingSeconds: number
+): boolean {
+  if (!Number.isFinite(remainingSeconds) || remainingSeconds <= 0) {
+    return false;
+  }
+  if (state.isRunning) {
+    return true;
+  }
+  // If in break phase (awaiting or paused in short/long break), keep mini-timer visible
+  if (state.phase !== 'work') {
+    return true;
+  }
+  // In work phase while paused: active only if session was started or time has elapsed
+  const hasElapsed = remainingSeconds < state.durationSeconds;
+  const wasStarted = state.startedAtEpochMs !== null && state.startedAtEpochMs !== undefined;
+  return hasElapsed || wasStarted;
+}
+
 export function startTimer(
   state: ExtendedActiveTimerState,
   nowEpochMs: number = Date.now()

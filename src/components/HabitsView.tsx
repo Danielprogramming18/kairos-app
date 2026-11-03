@@ -110,7 +110,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
       {/* 1. KPI Cards */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Today's completion */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               تکمیل‌شدهٔ امروز
@@ -149,7 +149,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         </div>
 
         {/* Highest Current Streak */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               زنجیرهٔ فعلی برتر
@@ -170,7 +170,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         </div>
 
         {/* All-time record */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               بهترین رکورد کل
@@ -191,7 +191,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         </div>
 
         {/* Weekly Performance */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex items-center justify-between">
+        <div className="bg-surface-1 p-5 rounded-[18px] border border-token-subtle flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               عملکرد بازهٔ هفتگی
@@ -215,7 +215,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
       {/* 2. Weekly Bar Chart & Category Breakdown */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Weekly Bar Chart */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex flex-col justify-between">
+        <div className="lg:col-span-2 bg-surface-1 p-6 rounded-[18px] border border-token-subtle flex flex-col justify-between">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
             <div>
               <h3 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -309,7 +309,7 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
         </div>
 
         {/* Category Breakdown */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm flex flex-col justify-between">
+        <div className="bg-surface-1 p-6 rounded-[18px] border border-token-subtle flex flex-col justify-between">
           <div>
             <h3 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2 mb-1">
               <PieChart className="w-5 h-5 text-violet-500" />
@@ -376,8 +376,8 @@ export const HabitsView: React.FC<HabitsViewProps> = ({
       </section>
 
       {/* 3. Filter Bar, Mobile Habit Cards & Desktop Matrix Table */}
-      <section className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm space-y-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+      <section className="bg-surface-1 p-4 sm:p-6 rounded-[18px] border border-token-subtle space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-token-subtle">
           {/* Category Filter Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
             {Object.entries(HABIT_CATEGORIES).map(([key, cat]) => {

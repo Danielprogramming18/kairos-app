@@ -208,7 +208,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
   return (
     <div className="max-w-4xl mx-auto space-y-4">
       {/* Sub-tabs header */}
-      <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm">
+      <div className="flex items-center justify-between bg-surface-1 p-2 rounded-[18px] border border-token-subtle">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -242,7 +242,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
       {activeSubTab === 'local_coach' && (
         <div
           data-testid="local-coach-panel"
-          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]"
+          className="bg-surface-1 rounded-[18px] border border-token-subtle overflow-hidden flex flex-col h-[70vh] min-h-[500px]"
         >
           {/* Header */}
           <div className="px-6 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
@@ -418,7 +418,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
 
       {/* Sub-tab 2: Ivy Lee Wizard */}
       {activeSubTab === 'ivy_wizard' && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm overflow-hidden flex flex-col h-[70vh] min-h-[500px]">
+        <div className="bg-surface-1 rounded-[18px] border border-token-subtle overflow-hidden flex flex-col h-[70vh] min-h-[500px]">
           <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
