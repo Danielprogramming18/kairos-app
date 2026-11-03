@@ -128,7 +128,7 @@ pub fn execute_bridge_request(db: &KairosSqliteDatabase, raw_request: &str) -> S
 }
 
 #[tauri::command]
-pub fn kairos_bridge_invoke(state: tauri::State<'_, AppState>, raw_request: String) -> String {
+fn kairos_bridge_invoke(state: tauri::State<'_, AppState>, raw_request: String) -> String {
     execute_bridge_request(&state.db, &raw_request)
 }
 
