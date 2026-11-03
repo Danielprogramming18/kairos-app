@@ -37,7 +37,7 @@
 
 ### ب) پیش‌نیازهای سیستم سازنده (فقط برای کسی که سورس را به `Setup.exe` کامپایل می‌کند)
 اگر بخواهید روی کامپیوتر ویندوزی خودتان دستور `npm run desktop:build` را اجرا کنید، به ابزارهای زیر نیاز دارید (در روش GitHub Actions نیازی به نصب این موارد روی سیستم شخصی نیست):
-1. **Node.js LTS** (نسخه ۲۰ یا ۲۲ به بالا)
+1. **Node.js LTS** (نسخه ۲۴ به بالا، ترجیحاً `>= 24.12.0` هماهنگ با نیازمندی موتور بسته‌های وابسته و گردش‌کار GitHub Actions)
 2. **Microsoft Visual Studio C++ Build Tools** (انتخاب تیک *Desktop development with C++* شامل MSVC v143 و Windows 10/11 SDK)
 3. **Rust Stable Toolchain** (`rustup-init.exe` با هدف پیش‌فرض `x86_64-pc-windows-msvc`)
 
