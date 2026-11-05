@@ -1,6 +1,6 @@
 [package]
 name = "kairos-desktop"
-version = "2.1.0"
+version = "2.1.1"
 description = "کایروس — فضای کار شخصی و تمرکز عمیق (نسخه دسکتاپ ویندوز)"
 authors = ["Kairos Workspace"]
 license = "Apache-2.0"
