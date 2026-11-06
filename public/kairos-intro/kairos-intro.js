@@ -1,6 +1,20 @@
 /* Independent local onboarding; only trusted local illustration strings are inserted. */
 (()=>{'use strict';
 const root=document.getElementById('kairos-intro-root'),deck=document.getElementById('kairos-intro-deck'),dots=document.getElementById('kairos-intro-dots'),next=document.getElementById('kairos-intro-next'),prev=document.getElementById('kairos-intro-prev'),skip=document.getElementById('kairos-intro-skip'),status=document.getElementById('kairos-intro-status');
+
+// Track input intent explicitly: older Android WebViews may treat a tap as focus-visible.
+root.dataset.input = 'pointer';
+const usePointer = () => { root.dataset.input = 'pointer'; };
+root.addEventListener('pointerdown', usePointer, { passive: true, capture: true });
+root.addEventListener('touchstart', usePointer, { passive: true, capture: true });
+root.addEventListener('mousedown', usePointer, { passive: true, capture: true });
+document.addEventListener('keydown', event => {
+  if (!event.altKey && !event.ctrlKey && !event.metaKey &&
+      ['Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', ' '].includes(event.key)) {
+    root.dataset.input = 'keyboard';
+  }
+}, true);
+
 const slides=window.KairosIntroData.slides,preview=new URLSearchParams(location.search).get('preview')==='1',reduce=matchMedia('(prefers-reduced-motion: reduce)');
 let index=0,ended=false,frame=0,elapsed=0,last=0,touch=null,bridgeError=false;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
