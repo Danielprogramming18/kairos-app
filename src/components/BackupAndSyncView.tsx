@@ -31,9 +31,9 @@ import {
 } from '../types';
 import { BackupEnvelopeV2 } from '../domain/models';
 import { usePlatform } from '../app/PlatformContext';
+import { usePlanning } from '../app/PlanningContext';
 import { toPersianNum } from '../utils/persianDate';
 import {
-  createPlainBackupEnvelope,
   createEncryptedBackupEnvelope,
   decryptBackupEnvelope,
   validateAndPreviewBackupPayload,
@@ -140,6 +140,11 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
   const [pendingRawFile, setPendingRawFile] = useState<string | null>(null);
   const [importPreview, setImportPreview] = useState<BackupPreviewSummary | null>(null);
   const [restoreStrategy, setRestoreStrategy] = useState<'replace' | 'merge'>('replace');
+  const { state: planningState } = usePlanning();
+  const planningMergeUnsupported = planningState.revision > 0 || Boolean(importPreview?.envelope?.payload.settings?.planning);
+  useEffect(() => {
+    if (planningMergeUnsupported) setRestoreStrategy('replace');
+  }, [planningMergeUnsupported]);
   const [isRestoring, setIsRestoring] = useState(false);
   const [decryptPassword, setDecryptPassword] = useState('');
 
@@ -191,18 +196,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
     setImportErrorDetails([]);
     setIsExportingPlain(true);
     try {
-      let backupEnvelope: BackupEnvelopeV2;
-      try {
-        backupEnvelope = await container.backup.exportBackup();
-      } catch {
-        backupEnvelope = createPlainBackupEnvelope({
-          habits,
-          tasks,
-          ideas,
-          focusSessions,
-          usefulInfos,
-        });
-      }
+      const backupEnvelope = await container.backup.exportBackup();
 
       const blob = new Blob([JSON.stringify(backupEnvelope, null, 2)], {
         type: 'application/json',
@@ -233,18 +227,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
     }
     setIsExportingEncrypted(true);
     try {
-      let canonicalEnvelope: BackupEnvelopeV2;
-      try {
-        canonicalEnvelope = await container.backup.exportBackup();
-      } catch {
-        canonicalEnvelope = createPlainBackupEnvelope({
-          habits,
-          tasks,
-          ideas,
-          focusSessions,
-          usefulInfos,
-        });
-      }
+      const canonicalEnvelope = await container.backup.exportBackup();
 
       const encryptedEnvelope = await createEncryptedBackupEnvelope(
         canonicalEnvelope,
@@ -692,6 +675,10 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                 </div>
               </div>
 
+              {importPreview.envelope?.payload.settings?.planning && <p className="text-xs text-token-secondary">
+                این فایل همچنین شامل {toPersianNum(importPreview.envelope.payload.settings.planning.projects.length)} پروژه، {toPersianNum(importPreview.envelope.payload.settings.planning.events.length)} رویداد و {toPersianNum(importPreview.envelope.payload.settings.planning.metrics.length)} شاخص است.
+              </p>}
+              {planningMergeUnsupported && <p className="text-xs text-token-secondary">برای پشتیبان دارای پروژه و برنامه‌ریزی، فعلاً بازیابی با جایگزینی کامل انجام می‌شود. نسخهٔ پیش از بازیابی برای بازگرداندن نگهداری می‌شود.</p>}
               {/* Restore Strategy Selection */}
               <div className="space-y-2">
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
@@ -714,6 +701,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                   </button>
                   <button
                     type="button"
+                    disabled={planningMergeUnsupported}
                     onClick={() => setRestoreStrategy('merge')}
                     className={`p-3 rounded-xl border text-right transition cursor-pointer ${
                       restoreStrategy === 'merge'

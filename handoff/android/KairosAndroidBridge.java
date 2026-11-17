@@ -401,16 +401,28 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
                 return defaults;
             }
             case "settings.save": {
+                db.beginTransaction();
+                try {
                 JSONObject incoming = payload.has("settings") ? payload.getJSONObject("settings") : payload;
                 Object existingObj = getRecord(db, "settings", "user_settings");
                 JSONObject merged = existingObj != JSONObject.NULL ? (JSONObject) existingObj : new JSONObject();
+                if (incoming.has("planning")) {
+                    JSONObject next = incoming.getJSONObject("planning");
+                    JSONObject previous = merged.optJSONObject("planning");
+                    int actual = previous == null ? 0 : previous.optInt("revision", 0);
+                    if (next.optInt("schemaVersion", -1) != 1 || next.optInt("revision", -1) != actual + 1)
+                        throw new Exception("Planning revision conflict; refresh before saving");
+                }
                 Iterator<String> keys = incoming.keys();
                 while (keys.hasNext()) {
                     String k = keys.next();
                     merged.put(k, incoming.get(k));
                 }
                 merged.put("id", "user_settings");
-                return upsertRecordWithConcurrency(db, "settings", merged, null);
+                Object result = upsertRecordWithConcurrency(db, "settings", merged, null);
+                db.setTransactionSuccessful();
+                return result;
+                } finally { db.endTransaction(); }
             }
 
             // Backup & Restore
@@ -445,6 +457,19 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
                     restoreCollectionArray(db, "habitEntries", envelope.optJSONArray("habitEntries"));
                     restoreCollectionArray(db, "notes", envelope.optJSONArray("notes"));
                     restoreCollectionArray(db, "focusSessions", envelope.optJSONArray("focusSessions"));
+                    JSONObject restoredSettings = envelope.optJSONObject("settings");
+                    if (restoredSettings != null) {
+                        restoredSettings = new JSONObject(restoredSettings.toString());
+                        restoredSettings.put("id", "user_settings");
+                        upsertRecordWithConcurrency(db, "settings", restoredSettings, null);
+                    } else if ("replace".equals(strategy)) {
+                        Object currentSettings = getRecord(db, "settings", "user_settings");
+                        if (currentSettings instanceof JSONObject) {
+                            JSONObject cleanSettings = new JSONObject(currentSettings.toString());
+                            cleanSettings.remove("planning");
+                            upsertRecordWithConcurrency(db, "settings", cleanSettings, null);
+                        }
+                    }
                     db.setTransactionSuccessful();
                 } finally {
                     db.endTransaction();

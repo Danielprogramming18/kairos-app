@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/vazirmatn';
 import App from './App.tsx';
+import { PlanningProvider } from './app/PlanningContext';
 import { OnboardingGate } from './components/OnboardingGate';
 import { PlatformProvider } from './app/PlatformContext.tsx';
 import './index.css';
@@ -45,6 +46,6 @@ if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'servic
 
 createRoot(document.getElementById('root')!).render(
   <PlatformProvider>
-    <OnboardingGate><App /></OnboardingGate>
+    <PlanningProvider><OnboardingGate><App /></OnboardingGate></PlanningProvider>
   </PlatformProvider>
 );

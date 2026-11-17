@@ -1,3 +1,4 @@
+import { validatePlanning, validateTaskPlanning } from '../domain/planning';
 import {
   BackupEnvelopeV2,
   BackupPayloadV2,
@@ -215,6 +216,7 @@ function payloadToUiData(payload: BackupPayloadV2): {
       reminded: entity.reminded,
       dueAt: entity.dueAt ?? null,
       projectId: entity.projectId ?? null,
+      planning: entity.planning,
       sourceId: entity.sourceId ?? null,
       tags: Array.isArray(entity.tags) ? [...entity.tags] : [],
       subtasks: Array.isArray(entity.subtasks) ? entity.subtasks.map((s) => ({ ...s })) : [],
@@ -429,6 +431,7 @@ export function migrateLegacyBackupDataToV2Payload(
       reminderTime: typeof raw.reminderTime === 'string' ? raw.reminderTime : null,
       reminded: Boolean(raw.reminded),
       projectId: typeof raw.projectId === 'string' ? raw.projectId : null,
+      planning: raw.planning !== undefined ? validateTaskPlanning(raw.planning) : undefined,
       sourceId: typeof raw.sourceId === 'string' ? raw.sourceId : null,
       category: typeof raw.category === 'string' && raw.category.trim() ? raw.category : 'work',
       tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
@@ -888,6 +891,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
       reminderTime: typeof item.reminderTime === 'string' ? item.reminderTime : null,
       reminded: Boolean(item.reminded),
       projectId: typeof item.projectId === 'string' ? item.projectId : null,
+      planning: item.planning !== undefined ? validateTaskPlanning(item.planning) : undefined,
       sourceId: typeof item.sourceId === 'string' ? item.sourceId : null,
       category: typeof item.category === 'string' && item.category.trim() ? item.category : 'work',
       tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
@@ -1271,6 +1275,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
         errors.push('مقادیر تنظیمات تایمر پومودورو در settings نامعتبر هستند.');
       } else {
         settings = {
+          planning: s.planning !== undefined ? validatePlanning(s.planning) : undefined,
           id: 'default',
           theme,
           soundEnabled: typeof s.soundEnabled === 'boolean' ? s.soundEnabled : true,
@@ -1470,6 +1475,17 @@ export async function decryptBackupEnvelope(
  * Validates an already-parsed backup envelope object (used by both UI preview and Repository restore).
  */
 export function validateBackupEnvelopeObject(
+  parsed: unknown,
+  options?: { verifyChecksum?: boolean }
+): BackupPreviewSummary {
+  try { return validateBackupEnvelopeObjectUnchecked(parsed, options); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'اطلاعات پشتیبان نامعتبر است.';
+    return {valid:false, encrypted:false, error:message, errors:[message]};
+  }
+}
+
+function validateBackupEnvelopeObjectUnchecked(
   parsed: unknown,
   options?: { verifyChecksum?: boolean }
 ): BackupPreviewSummary {

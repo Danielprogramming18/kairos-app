@@ -1081,7 +1081,18 @@ impl KairosSqliteDatabase {
             .and_then(|v| v.as_object())
             .ok_or_else(|| DbError::validation("فیلد settings الزامی است."))?;
 
-        let mut current = self.get_settings()?;
+        // Read, compare and write while holding the same database lock.
+        let conn = self.conn.lock().map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
+        let raw: String = conn.query_row("SELECT json_data FROM settings WHERE id = 'default'", [], |row| row.get(0))?;
+        let mut current: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
+        if let Some(planning) = partial.get("planning") {
+            let actual = current.pointer("/planning/revision").and_then(Value::as_i64).unwrap_or(0);
+            let incoming = planning.get("revision").and_then(Value::as_i64).unwrap_or(-1);
+            if planning.get("schemaVersion").and_then(Value::as_i64) != Some(1) {
+                return Err(DbError::validation("نسخهٔ برنامه‌ریزی پشتیبانی نمی‌شود."));
+            }
+            if incoming != actual + 1 { return Err(DbError::conflict("planning", incoming - 1, actual)); }
+        }
         let now = now_iso_string();
         if let Some(obj) = current.as_object_mut() {
             for (k, v) in partial {
@@ -1091,10 +1102,6 @@ impl KairosSqliteDatabase {
             obj.insert("updatedAt".to_string(), json!(now));
         }
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
         conn.execute(
             "INSERT OR REPLACE INTO settings (id, updated_at, json_data) VALUES ('default', ?1, ?2)",
             params![now, current.to_string()],
@@ -1349,6 +1356,13 @@ impl KairosSqliteDatabase {
                     "INSERT OR REPLACE INTO settings (id, updated_at, json_data) VALUES ('default', ?1, ?2)",
                     params![now, settings.to_string()],
                 )?;
+            }
+        } else if strategy == "replace" {
+            let raw: Option<String> = tx.query_row("SELECT json_data FROM settings WHERE id = 'default'", [], |row| row.get(0)).optional()?;
+            if let Some(raw) = raw {
+                let mut settings: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
+                if let Some(obj) = settings.as_object_mut() { obj.remove("planning"); }
+                tx.execute("UPDATE settings SET updated_at = ?1, json_data = ?2 WHERE id = 'default'", params![now_iso_string(), settings.to_string()])?;
             }
         }
 

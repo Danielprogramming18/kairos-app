@@ -15,6 +15,7 @@ import {
   PanelRightOpen,
 } from 'lucide-react';
 import { NavTabId } from '../types';
+import { usePlanning } from '../app/PlanningContext';
 import { toPersianNum } from '../utils/persianDate';
 import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 
@@ -46,6 +47,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   ideasCount,
   usefulInfoCount = 0,
 }) => {
+  const { state: planning } = usePlanning();
   const [moreDrawerOpen, setMoreDrawerOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
@@ -76,6 +78,11 @@ export const Navigation: React.FC<NavigationProps> = ({
       : activeTab;
 
   const navItems: NavItemConfig[] = [
+    {id:'projects', label:'پروژه‌ها و جست‌وجو', icon:BookOpen, group:'primary'},
+    {id:'events', label:'رویدادها', icon:CalendarDays, group:'secondary'},
+    {id:'tracking', label:'پیگیری‌ها', icon:BarChart3, group:'secondary'},
+    {id:'capacity', label:'قبل از قول‌دادن', icon:Compass, group:'secondary'},
+    {id:'customize', label:'همهٔ ابزارها و چیدمان', icon:Settings, group:'secondary'},
     {
       id: 'dashboard',
       label: 'امروز',
@@ -135,9 +142,21 @@ export const Navigation: React.FC<NavigationProps> = ({
   ];
 
   // Primary 4 items for Mobile Bottom Bar + "More" sheet button (max 5 items)
-  const mobileBarPrimaryIds: NavTabId[] = ['dashboard', 'workspace', 'pomodoro', 'habits'];
-  const mobilePrimaryItems = navItems.filter((item) => mobileBarPrimaryIds.includes(item.id));
-  const mobileMoreItems = navItems.filter((item) => !mobileBarPrimaryIds.includes(item.id));
+  const ordered = (mode: 'desktop' | 'mobile') => {
+    const prefs = planning.layout[mode];
+    return navItems.filter(i => i.id === 'customize' || !prefs.hidden.includes(i.id)).sort((a,b) => {
+      const rank = (id: string) => (prefs.pinned.includes(id) ? -1000 : 0) + (prefs.order.includes(id) ? prefs.order.indexOf(id) : 100 + navItems.findIndex(i => i.id === id));
+      return rank(a.id) - rank(b.id);
+    });
+  };
+  const desktopItems = ordered('desktop');
+  const customDesktopOrder = planning.layout.desktop.order.length > 0;
+  const mobileItems = ordered('mobile');
+  const mobileBarPrimaryIds: NavTabId[] = planning.layout.mobile.order.length || planning.layout.mobile.pinned.length
+    ? mobileItems.filter(i => i.id !== 'customize').slice(0,4).map(i => i.id)
+    : ['dashboard','workspace','pomodoro','habits'];
+  const mobilePrimaryItems = mobileItems.filter((item) => mobileBarPrimaryIds.includes(item.id));
+  const mobileMoreItems = mobileItems.filter((item) => !mobileBarPrimaryIds.includes(item.id));
   const isMoreTabActive = mobileMoreItems.some((item) => item.id === normalizedActiveTab);
 
   const handleSelectFromMore = (tab: NavTabId) => {
@@ -201,11 +220,11 @@ export const Navigation: React.FC<NavigationProps> = ({
           <div className="space-y-1">
             {!isCollapsed && (
               <div className="px-2.5 pb-1 text-[11px] font-semibold text-token-muted">
-                بخش‌های اصلی
+                {customDesktopOrder ? 'ابزارهای من' : 'بخش‌های اصلی'}
               </div>
             )}
-            {navItems
-              .filter((i) => i.group === 'primary')
+            {desktopItems
+              .filter((i) => customDesktopOrder || i.group === 'primary' || planning.layout.desktop.pinned.includes(i.id))
               .map((item) => {
                 const Icon = item.icon;
                 const isActive = normalizedActiveTab === item.id;
@@ -248,14 +267,14 @@ export const Navigation: React.FC<NavigationProps> = ({
               })}
           </div>
 
-          <div className="space-y-1 pt-2 border-t border-token-subtle">
+          {!customDesktopOrder && <div className="space-y-1 pt-2 border-t border-token-subtle">
             {!isCollapsed && (
               <div className="px-2.5 pb-1 text-[11px] font-semibold text-token-muted">
                 ابزارها و تحلیل
               </div>
             )}
-            {navItems
-              .filter((i) => i.group === 'secondary')
+            {desktopItems
+              .filter((i) => i.group === 'secondary' && !planning.layout.desktop.pinned.includes(i.id))
               .map((item) => {
                 const Icon = item.icon;
                 const isActive = normalizedActiveTab === item.id;
@@ -296,7 +315,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                   </button>
                 );
               })}
-          </div>
+          </div>}
         </nav>
       </aside>
 
@@ -317,12 +336,12 @@ export const Navigation: React.FC<NavigationProps> = ({
                 onSelectTab(item.id);
               }}
               aria-current={isActive ? 'page' : undefined}
-              className={`relative flex flex-col items-center justify-center gap-1 py-1.5 px-3 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
+              className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
                 isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-token-secondary'
               }`}
             >
               <Icon className="w-5 h-5" />
-              <span>{item.label}</span>
+              <span className="w-full truncate">{item.label}</span>
               {item.badge !== undefined && (
                 <span className="absolute top-1 right-2 px-1.5 py-0.2 text-[9px] rounded-full bg-indigo-600 text-white font-bold tabular-nums">
                   {toPersianNum(item.badge)}
@@ -337,7 +356,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           onClick={() => setMoreDrawerOpen((prev) => !prev)}
           aria-expanded={moreDrawerOpen}
           aria-label="سایر بخش‌ها"
-          className={`flex flex-col items-center justify-center gap-1 py-1.5 px-3 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
+          className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
             isMoreTabActive || moreDrawerOpen
               ? 'text-indigo-600 dark:text-indigo-400'
               : 'text-token-secondary'
@@ -362,7 +381,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           <div
             ref={moreSheetRef}
             tabIndex={-1}
-            className="w-full max-w-md kairos-modal-panel p-4 space-y-3 mb-14"
+            className="w-full max-w-md kairos-modal-panel p-4 space-y-3 mb-14 max-h-[75dvh] overflow-y-auto"
           >
             <div className="flex items-center justify-between pb-2 border-b border-token-subtle">
               <span className="text-xs font-bold text-token-primary">سایر بخش‌ها</span>
