@@ -1,6 +1,17 @@
 name: Build Windows Installer (Kairos Setup.exe)
 
 on:
+  push:
+    branches: ["feature/offline-planning"]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'index.html'
+      - 'vite.config.ts'
+      - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
     inputs:
       build_target:
@@ -51,6 +62,9 @@ jobs:
 
       - name: Verify offline bundle integrity (dist/)
         run: npx --yes tsx --test src/utils/offlineBundleVerifier.test.ts
+
+      - name: Test native database behavior
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Build Tauri v2 Windows application and NSIS/MSI installers
         shell: pwsh

@@ -4,6 +4,7 @@
  */
 
 import Dexie, { type Table } from 'dexie';
+import { validatePlanning } from '../../domain/planning';
 import {
   ActiveTimerState,
   BackupEnvelopeV2,
@@ -1152,34 +1153,42 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
 
     this.settings = {
       getSettings: async (): Promise<UserSettingsEntity> => {
-        const s = await this.db.settings.get('default');
-        if (s) return s;
-        const fallback: UserSettingsEntity = {
-          id: 'default',
-          theme: 'system',
-          soundEnabled: true,
-          pomodoroWorkMinutes: 45,
-          pomodoroShortBreakMinutes: 10,
-          pomodoroLongBreakMinutes: 20,
-          pomodoroCyclesBeforeLongBreak: 4,
-          calendarPreference: 'jalali',
-          updatedAt: nowIso(),
-        };
-        await this.db.settings.put(fallback);
-        return fallback;
+        // First-run defaults must share the same lock as saves: a second tab
+        // opening an empty database must never overwrite the first tab's save.
+        return this.db.transaction('rw', this.db.settings, async () => {
+          const s = await this.db.settings.get('default');
+          if (s) return s;
+          const fallback: UserSettingsEntity = {
+            id: 'default',
+            theme: 'system',
+            soundEnabled: true,
+            pomodoroWorkMinutes: 45,
+            pomodoroShortBreakMinutes: 10,
+            pomodoroLongBreakMinutes: 20,
+            pomodoroCyclesBeforeLongBreak: 4,
+            calendarPreference: 'jalali',
+            updatedAt: nowIso(),
+          };
+          await this.db.settings.put(fallback);
+          return fallback;
+        });
       },
 
       saveSettings: async (
         partial: Partial<UserSettingsEntity>
       ): Promise<UserSettingsEntity> => {
-        const current = await this.settings.getSettings();
-        const updated: UserSettingsEntity = {
-          ...current,
-          ...partial,
-          id: 'default',
-          updatedAt: nowIso(),
-        };
-        await this.db.settings.put(updated);
+        await this.settings.getSettings();
+        const updated = await this.db.transaction('rw', this.db.settings, async () => {
+          const current = (await this.db.settings.get('default'))!;
+          if (partial.planning !== undefined) {
+            validatePlanning(partial.planning);
+            if (partial.planning.revision !== (current.planning?.revision ?? 0) + 1)
+              throw new Error('اطلاعات برنامه‌ریزی در پنجرهٔ دیگری تغییر کرده؛ صفحه را تازه کن.');
+          }
+          const next: UserSettingsEntity = { ...current, ...partial, id: 'default', updatedAt: nowIso() };
+          await this.db.settings.put(next);
+          return next;
+        });
         notifyCrossTabSync('settings.save');
         return updated;
       },
@@ -1259,6 +1268,9 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
         }
 
         const validatedPayload = validation.envelope.payload;
+        if (strategy === 'merge' && (validatedPayload.settings?.planning || (await this.settings.getSettings()).planning)) {
+          throw new Error('ادغام دو مجموعهٔ برنامه‌ریزی هنوز پشتیبانی نمی‌شود. پشتیبان بگیر و برای بازیابی کامل گزینهٔ جایگزینی را انتخاب کن.');
+        }
 
         // 2. Mandatory pre-restore snapshot creation & read-back verification
         let preRestoreSnapshot: BackupEnvelopeV2;
@@ -1327,6 +1339,10 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
               if (notes.length > 0) await this.db.notes.bulkPut(notes);
               if (focusSessions.length > 0) await this.db.focusSessions.bulkPut(focusSessions);
               if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+              else {
+                const current = await this.db.settings.get('default');
+                if (current?.planning) await this.db.settings.put({ ...current, planning: undefined });
+              }
 
               const [wTasks, wHabits, wEntries, wNotes, wFocus] = await Promise.all([
                 this.db.tasks.count(),
@@ -1490,6 +1506,10 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
             if (notes.length > 0) await this.db.notes.bulkPut(notes);
             if (focusSessions.length > 0) await this.db.focusSessions.bulkPut(focusSessions);
             if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+            else {
+              const current = await this.db.settings.get('default');
+              if (current?.planning) await this.db.settings.put({ ...current, planning: undefined });
+            }
           }
         );
 

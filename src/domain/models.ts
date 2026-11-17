@@ -3,6 +3,7 @@
  * Offline-First Clean Architecture — Domain Layer (Zero UI / Zero Storage Coupling)
  */
 
+import type { PlanningState, TaskPlanning } from './planning';
 export type EntityId = string;
 export type ISODateTimeString = string; // UTC ISO-8601 e.g. '2026-03-29T12:00:00.000Z'
 export type LocalDateKey = string; // 'YYYY-MM-DD' in user's local timezone
@@ -24,6 +25,7 @@ export interface SubtaskEntity {
 }
 
 export interface TaskEntity extends AuditableEntity {
+  planning?: TaskPlanning;
   title: string;
   description?: string;
   status: TaskStatus;
@@ -138,6 +140,7 @@ export class StorageConflictError extends Error {
 }
 
 export interface UserSettingsEntity {
+  planning?: PlanningState;
   id: 'default';
   theme: 'dark' | 'light' | 'system';
   soundEnabled: boolean;

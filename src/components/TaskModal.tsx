@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, CheckSquare, Bell, Sparkles, Clock, Calendar, Flag } from 'lucide-react';
 import { Task } from '../types';
+import { TaskPlanning, validateTaskPlanning } from '../domain/planning';
+import { TaskPlanningFields } from './PlanningViews';
 import {
   getTodayKey,
   getTomorrowKey,
@@ -18,6 +20,7 @@ interface TaskModalProps {
   defaultDateKey?: string;
   onClose: () => void;
   onSave: (taskData: {
+    planning?: TaskPlanning; projectId?: string | null; dueAt?: string | null;
     id?: string;
     title: string;
     description?: string;
@@ -47,6 +50,15 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [targetDate, setTargetDate] = useState<string>(defaultDateKey || todayKey);
   const [reminderTime, setReminderTime] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
+  const [planning,setPlanning] = useState<TaskPlanning>({});
+  const [projectId,setProjectId] = useState('');
+  const [dueAt,setDueAt] = useState('');
+  useEffect(() => {
+    setPlanning(taskToEdit?.planning ? structuredClone(taskToEdit.planning) : {});
+    setProjectId(taskToEdit?.projectId ?? '');
+    const due = taskToEdit?.dueAt ? new Date(taskToEdit.dueAt) : null;
+    setDueAt(due && !isNaN(due.getTime()) ? `${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,'0')}-${String(due.getDate()).padStart(2,'0')}T${String(due.getHours()).padStart(2,'0')}:${String(due.getMinutes()).padStart(2,'0')}` : '');
+  }, [taskToEdit,isOpen]);
 
   const nlpPreview = useMemo(() => {
     if (!title.trim()) return null;
@@ -95,6 +107,9 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             setDuration(Number(draft.duration) || 45);
             setTargetDate(draft.targetDate || defaultDateKey || todayKey);
             setReminderTime(typeof draft.reminderTime === 'string' ? draft.reminderTime : '');
+            try { setPlanning(draft.planning ? validateTaskPlanning(draft.planning) : {}); } catch { setPlanning({}); }
+            setProjectId(typeof draft.projectId === 'string' ? draft.projectId : '');
+            setDueAt(typeof draft.dueAt === 'string' && !isNaN(new Date(draft.dueAt).getTime()) ? draft.dueAt : '');
             restoredDraft = true;
           }
         }
@@ -126,6 +141,9 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               duration,
               targetDate,
               reminderTime,
+              planning,
+              projectId,
+              dueAt,
             })
           );
         } else {
@@ -137,6 +155,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     const hasUnsavedChanges = taskToEdit
       ? title.trim() !== taskToEdit.title ||
         description.trim() !== (taskToEdit.description || '')
+        || priority !== taskToEdit.priority || duration !== taskToEdit.duration
+        || targetDate !== taskToEdit.targetDate || reminderTime !== (taskToEdit.reminderTime || '')
+        || projectId !== (taskToEdit.projectId || '')
+        || JSON.stringify(planning) !== JSON.stringify(taskToEdit.planning || {})
+        || (dueAt ? new Date(dueAt).toISOString() : '') !== (taskToEdit.dueAt || '')
       : Boolean(title.trim() || description.trim());
 
     if (!hasUnsavedChanges) return;
@@ -149,7 +172,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isOpen, taskToEdit, title, description, priority, duration, targetDate, reminderTime]);
+  }, [isOpen, taskToEdit, title, description, priority, duration, targetDate, reminderTime, planning, projectId, dueAt]);
 
   const modalRef = useModalFocusTrap<HTMLDivElement>(
     isOpen,
@@ -174,6 +197,9 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     setIsSaving(true);
     try {
       const ok = await onSave({
+        planning: {...planning, initialEstimate: planning.initialEstimate ?? validDuration},
+        projectId: projectId || null,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
         id: taskToEdit?.id,
         title: title.trim(),
         description: description.trim() || undefined,
@@ -181,7 +207,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         duration: validDuration,
         targetDate: validDate,
         reminderTime: validReminder,
-        category: 'work',
+        category: taskToEdit?.category || 'work',
       });
       if (ok !== false) {
         if (!taskToEdit) {
@@ -209,7 +235,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       <div
         ref={modalRef}
         tabIndex={-1}
-        className="kairos-modal-panel max-w-md w-full p-6 space-y-5"
+        className="kairos-modal-panel max-w-2xl w-full p-6 space-y-5 max-h-[90dvh] overflow-y-auto"
       >
         <div className="flex items-center justify-between border-b border-token-subtle pb-4">
           <h3
@@ -402,6 +428,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             </div>
           </div>
 
+          <TaskPlanningFields taskId={taskToEdit?.id} planning={planning} onChange={setPlanning} projectId={projectId} onProject={setProjectId} dueAt={dueAt} onDue={setDueAt} />
           <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"

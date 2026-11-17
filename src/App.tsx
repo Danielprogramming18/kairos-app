@@ -22,6 +22,7 @@ import { useGlobalPomodoro } from './app/useGlobalPomodoro';
 import { formatTimerClockLatin, isFloatingTimerSessionActive } from './utils/pomodoroEngine';
 import { HabitModal } from './components/HabitModal';
 import { TaskModal } from './components/TaskModal';
+import { ProjectsView, EventsView, TrackingView, CapacityView, CustomizeView } from './components/PlanningViews';
 import { DeleteModal } from './components/DeleteModal';
 import {
   Habit,
@@ -69,6 +70,7 @@ import {
 } from './utils/themeManager';
 
 const HASH_TO_TAB: Record<string, NavTabId> = {
+  '#/projects': 'projects', '#/events': 'events', '#/tracking': 'tracking', '#/capacity': 'capacity', '#/customize': 'customize',
   '#/today': 'dashboard',
   '#/dashboard': 'dashboard',
   '#/tasks': 'workspace',
@@ -90,6 +92,7 @@ const HASH_TO_TAB: Record<string, NavTabId> = {
 };
 
 const TAB_TO_HASH: Record<NavTabId, string> = {
+  projects: '#/projects', events: '#/events', tracking: '#/tracking', capacity: '#/capacity', customize: '#/customize',
   dashboard: '#/today',
   workspace: '#/tasks',
   calendar: '#/calendar',
@@ -342,6 +345,7 @@ export default function App() {
     ].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
 
     setTasks(activeTasks);
+    window.dispatchEvent(new Event('kairos-planning-refresh'));
     setHabits(activeHabits);
     setIdeas(activeIdeas);
     setUsefulInfos(activeUsefulInfos);
@@ -911,6 +915,7 @@ export default function App() {
   };
 
   const handleSaveTask = async (taskData: {
+    planning?: Task['planning']; projectId?: string | null; dueAt?: string | null;
     id?: string;
     title: string;
     description?: string;
@@ -947,6 +952,7 @@ export default function App() {
       return res !== null;
     } else {
       return handleAddTask({
+        planning: taskData.planning, projectId: taskData.projectId, dueAt: taskData.dueAt,
         title: trimmedTitle,
         description: taskData.description,
         priority: taskData.priority,
@@ -1449,6 +1455,7 @@ export default function App() {
     deletedTrashItems.length === 0;
 
   const PAGE_TITLES: Record<NavTabId, string> = {
+    projects: 'پروژه‌ها', events: 'رویدادها', tracking: 'پیگیری‌ها', capacity: 'قبل از قول‌دادن', customize: 'همهٔ ابزارها و چیدمان',
     dashboard: 'امروز',
     workspace: 'کارها',
     calendar: 'تقویم',
@@ -1637,6 +1644,14 @@ export default function App() {
           className="flex-1 min-w-0 w-full"
           data-storage-status={storageStatus}
         >
+          {activeTab === 'projects' && <ProjectsView tasks={tasks} onEdit={handleOpenTaskModal} onAdd={() => handleOpenTaskModal()} onToggle={handleToggleTask} onSaveTasks={async newTasks => {
+            const saved = await executeStorageMutation('ساخت کار از قالب', () => container.tasks.upsertTasksBatch(newTasks.map(taskToDomainEntity)));
+            return saved !== null;
+          }} />}
+          {activeTab === 'events' && <EventsView />}
+          {activeTab === 'tracking' && <TrackingView />}
+          {activeTab === 'capacity' && <CapacityView tasks={tasks} sessions={focusSessions} />}
+          {activeTab === 'customize' && <CustomizeView onNavigate={setActiveTab} />}
           {activeTab === 'dashboard' && (
             <DashboardView
               tasks={tasks}

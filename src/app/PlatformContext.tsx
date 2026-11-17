@@ -62,6 +62,7 @@ export function taskToDomainEntity(task: Task): TaskEntity {
   const now = nowIso();
   return {
     id: task.id,
+    planning: task.planning,
     title: task.title,
     description: task.description,
     status: task.completed
@@ -92,6 +93,7 @@ export function taskToDomainEntity(task: Task): TaskEntity {
 export function domainEntityToTask(entity: TaskEntity): Task {
   return {
     id: entity.id,
+    planning: entity.planning,
     title: entity.title,
     description: entity.description,
     priority: entity.priority,

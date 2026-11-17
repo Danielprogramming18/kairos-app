@@ -294,6 +294,8 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
             validation.errors.join(' | ') || 'فایل پشتیبان نامعتبر است و عملیات بازیابی لغو شد.'
           );
         }
+        if (strategy === 'merge' && (validation.envelope.payload.settings?.planning || (await this.settings.getSettings()).planning))
+          throw new Error('برای پشتیبان دارای برنامه‌ریزی، بازیابی کامل با جایگزینی را انتخاب کن؛ ادغام این اطلاعات پشتیبانی نمی‌شود.');
         return this.transport.invoke<
           { envelope: BackupEnvelopeV2; strategy: 'replace' | 'merge' },
           { restoredCounts: Record<string, number>; snapshotKey?: string }

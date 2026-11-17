@@ -1,3 +1,4 @@
+import type { TaskPlanning } from './domain/planning';
 export type HabitCategory = 'health' | 'learning' | 'work' | 'mindfulness' | 'finance';
 
 export interface Habit {
@@ -21,6 +22,7 @@ export interface Habit {
 export type TaskPriority = 1 | 2 | 3 | 4 | 5 | number;
 
 export interface Task {
+  planning?: TaskPlanning;
   id: string;
   title: string;
   description?: string;
@@ -109,6 +111,7 @@ export interface ChatMessage {
 }
 
 export type NavTabId =
+  | 'projects' | 'events' | 'tracking' | 'capacity' | 'customize'
   | 'deep_focus'
   | 'dashboard'
   | 'calendar'
