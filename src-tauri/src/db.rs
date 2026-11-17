@@ -1,9 +1,9 @@
+use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PRE_RESTORE_SNAPSHOT_KEY: &str = "kairos_pre_restore_snapshot_v2";
 pub const ACTIVE_TIMER_STATE_KEY: &str = "kairos_active_timer_state_v2";
@@ -52,11 +52,30 @@ pub struct KairosSqliteDatabase {
 }
 
 fn now_iso_string() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("unix_{}", secs)
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+fn legacy_timestamp_to_iso(value: &str) -> Option<String> {
+    let seconds = value.strip_prefix("unix_")?;
+    if seconds.is_empty() || !seconds.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let seconds = seconds.parse::<i64>().ok()?;
+    chrono::DateTime::<Utc>::from_timestamp(seconds, 0)
+        .map(|time| time.to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
+fn normalize_record_timestamps(record: &mut Value) -> bool {
+    let Some(fields) = record.as_object_mut() else { return false; };
+    let mut changed = false;
+    for key in ["createdAt", "updatedAt", "deletedAt", "completedAt", "startedAt", "endedAt", "exportedAt"] {
+        let normalized = fields.get(key).and_then(Value::as_str).and_then(legacy_timestamp_to_iso);
+        if let Some(timestamp) = normalized {
+            fields.insert(key.to_string(), json!(timestamp));
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn compute_fnv1a_checksum(serialized: &str) -> String {
@@ -228,7 +247,87 @@ impl KairosSqliteDatabase {
             )?;
         }
 
+        Self::migrate_legacy_timestamps_in_tx(&tx)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    fn migrate_legacy_timestamps_in_tx(tx: &rusqlite::Transaction<'_>) -> Result<(), DbError> {
+        let applied: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = 3)",
+            [], |row| row.get(0),
+        )?;
+        if applied { return Ok(()); }
+
+        // Only metadata emitted by the old native clock is converted. User text,
+        // calendar dates, revisions and unknown/malformed values stay untouched.
+        for table in ["tasks", "habits", "habit_entries", "notes", "focus_sessions", "settings"] {
+            let deleted = if table == "settings" { "NULL" } else { "deleted_at" };
+            let started = if table == "focus_sessions" { "started_at" } else { "NULL" };
+            let query = format!("SELECT id, updated_at, json_data, {}, {} FROM {}", deleted, started, table);
+            let records = {
+                let mut statement = tx.prepare(&query)?;
+                let rows = statement.query_map([], |row| Ok((
+                    row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?,
+                )))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            for (id, updated, raw, deleted, started) in records {
+                let Ok(mut record) = serde_json::from_str::<Value>(&raw) else { continue; };
+                let changed = normalize_record_timestamps(&mut record);
+                let next_updated = legacy_timestamp_to_iso(&updated).unwrap_or_else(|| updated.clone());
+                let next_deleted = deleted.as_ref().map(|s| legacy_timestamp_to_iso(s).unwrap_or_else(|| s.clone()));
+                let next_started = started.as_ref().map(|s| legacy_timestamp_to_iso(s).unwrap_or_else(|| s.clone()));
+                if !changed && next_updated == updated && next_deleted == deleted && next_started == started { continue; }
+                let query = if table == "settings" {
+                    "UPDATE settings SET updated_at = ?1, json_data = ?2 WHERE id = ?3".to_string()
+                } else if table == "focus_sessions" {
+                    "UPDATE focus_sessions SET updated_at = ?1, json_data = ?2, deleted_at = ?4, started_at = ?5 WHERE id = ?3".to_string()
+                } else {
+                    format!("UPDATE {} SET updated_at = ?1, json_data = ?2, deleted_at = ?4 WHERE id = ?3", table)
+                };
+                if table == "settings" {
+                    tx.execute(&query, params![next_updated, record.to_string(), id])?;
+                } else if table == "focus_sessions" {
+                    tx.execute(&query, params![next_updated, record.to_string(), id, next_deleted, next_started])?;
+                } else {
+                    tx.execute(&query, params![next_updated, record.to_string(), id, next_deleted])?;
+                }
+            }
+        }
+
+        let snapshot: Option<(String, String)> = tx.query_row(
+            "SELECT updated_at, json_value FROM kv_state WHERE key = ?1",
+            params![PRE_RESTORE_SNAPSHOT_KEY], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((updated, raw)) = snapshot {
+            if let Ok(mut envelope) = serde_json::from_str::<Value>(&raw) {
+                let mut changed = normalize_record_timestamps(&mut envelope);
+                let mut payload_changed = false;
+                if let Some(payload) = envelope.get_mut("payload").and_then(Value::as_object_mut) {
+                    for collection in ["tasks", "habits", "habitEntries", "notes", "focusSessions"] {
+                        if let Some(records) = payload.get_mut(collection).and_then(Value::as_array_mut) {
+                            for record in records { payload_changed |= normalize_record_timestamps(record); }
+                        }
+                    }
+                    if let Some(settings) = payload.get_mut("settings") {
+                        payload_changed |= normalize_record_timestamps(settings);
+                    }
+                }
+                if payload_changed {
+                    let checksum = compute_fnv1a_checksum(&envelope["payload"].to_string());
+                    envelope["checksum"] = json!(checksum);
+                    changed = true;
+                }
+                let next_updated = legacy_timestamp_to_iso(&updated).unwrap_or_else(|| updated.clone());
+                if changed || next_updated != updated {
+                    tx.execute("UPDATE kv_state SET updated_at = ?1, json_value = ?2 WHERE key = ?3",
+                        params![next_updated, envelope.to_string(), PRE_RESTORE_SNAPSHOT_KEY])?;
+                }
+            }
+        }
+        tx.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?1)", params![now_iso_string()])?;
         Ok(())
     }
 
@@ -1426,5 +1525,124 @@ impl KairosSqliteDatabase {
                 "focusSessions": snap_payload.get("focusSessions").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)
             }
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::DateTime;
+
+    fn assert_iso_timestamp(value: &Value) {
+        let timestamp = value.as_str().expect("timestamp must be a string");
+        DateTime::parse_from_rfc3339(timestamp).expect("timestamp must be valid RFC3339");
+        assert_eq!(timestamp.len(), 24, "use the same millisecond precision as JavaScript");
+        assert!(timestamp.ends_with('Z'), "timestamp must explicitly use UTC");
+    }
+
+    #[test]
+    fn native_clock_returns_javascript_compatible_utc_timestamps() {
+        assert_iso_timestamp(&json!(now_iso_string()));
+    }
+
+    #[test]
+    fn settings_trash_and_backup_keep_valid_iso_timestamps() {
+        let db = KairosSqliteDatabase {
+            db_path: PathBuf::from(":memory:"),
+            conn: Mutex::new(Connection::open_in_memory().expect("open test database")),
+        };
+        db.run_migrations().expect("initialize test schema");
+
+        let initial_settings = db.get_settings().expect("read initial settings");
+        assert_iso_timestamp(&initial_settings["updatedAt"]);
+        let saved_settings = db
+            .save_settings(&json!({ "settings": { "theme": "dark" } }))
+            .expect("save settings");
+        assert_iso_timestamp(&saved_settings["updatedAt"]);
+
+        let task = db
+            .upsert_task(&json!({ "task": {
+                "id": "iso-regression-task",
+                "title": "Timestamp regression",
+                "targetDate": "2026-11-17",
+                "createdAt": now_iso_string(),
+                "duration": 20,
+                "completed": false
+            } }))
+            .expect("create task with a native update timestamp");
+        assert_iso_timestamp(&task["updatedAt"]);
+        db.soft_delete_row("tasks", &json!({ "id": "iso-regression-task" }))
+            .expect("move task to trash");
+
+        let backup = db.export_backup().expect("export native backup");
+        assert_iso_timestamp(&backup["exportedAt"]);
+        assert_iso_timestamp(&backup["payload"]["settings"]["updatedAt"]);
+        let trashed_task = &backup["payload"]["tasks"][0];
+        assert_eq!(trashed_task["id"], "iso-regression-task");
+        assert_iso_timestamp(&trashed_task["deletedAt"]);
+        assert_iso_timestamp(&trashed_task["updatedAt"]);
+    }
+
+    #[test]
+    fn legacy_timestamp_migration_preserves_trash_and_restore_snapshots() {
+        let db = KairosSqliteDatabase {
+            db_path: PathBuf::from(":memory:"),
+            conn: Mutex::new(Connection::open_in_memory().expect("open test database")),
+        };
+        db.run_migrations().expect("initialize test schema");
+        let old_task = json!({
+            "id": "legacy-trash", "title": "Keep this task", "description": "unix_0",
+            "createdAt": "unix_0", "updatedAt": "unix_1000", "deletedAt": "unix_1000",
+            "targetDate": "2026-11-17", "completed": false, "revision": 7,
+            "planning": { "resume": "unix_0" }
+        });
+        let old_snapshot = json!({
+            "exportedAt": "unix_1000", "checksum": "old-checksum",
+            "payload": { "tasks": [old_task.clone()] }
+        });
+        {
+            let conn = db.conn.lock().expect("lock test database");
+            // Simulate an existing version-2 database before startup migration.
+            conn.execute("DELETE FROM schema_migrations WHERE version = 3", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, target_date, updated_at, deleted_at, revision, json_data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params!["legacy-trash", "2026-11-17", "unix_1000", "unix_1000", 7, old_task.to_string()],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO kv_state (key, updated_at, json_value) VALUES (?1, ?2, ?3)",
+                params![PRE_RESTORE_SNAPSHOT_KEY, "unix_1000", old_snapshot.to_string()],
+            ).unwrap();
+        }
+
+        db.run_migrations().expect("migrate legacy timestamps");
+        let task = db.get_by_id("tasks", &json!({ "id": "legacy-trash" })).unwrap();
+        assert_eq!(task["createdAt"], "1970-01-01T00:00:00.000Z");
+        assert_eq!(task["updatedAt"], "1970-01-01T00:16:40.000Z");
+        assert_eq!(task["deletedAt"], "1970-01-01T00:16:40.000Z");
+        assert_eq!(task["revision"], 7);
+        assert_eq!(task["description"], "unix_0");
+        assert_eq!(task["planning"]["resume"], "unix_0");
+        {
+            let conn = db.conn.lock().unwrap();
+            let (updated, deleted): (String, String) = conn.query_row(
+                "SELECT updated_at, deleted_at FROM tasks WHERE id = 'legacy-trash'", [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(updated, task["updatedAt"].as_str().unwrap());
+            assert_eq!(deleted, task["deletedAt"].as_str().unwrap());
+            let raw: String = conn.query_row(
+                "SELECT json_value FROM kv_state WHERE key = ?1", params![PRE_RESTORE_SNAPSHOT_KEY],
+                |row| row.get(0),
+            ).unwrap();
+            let snapshot: Value = serde_json::from_str(&raw).unwrap();
+            assert_iso_timestamp(&snapshot["exportedAt"]);
+            assert_eq!(snapshot["payload"]["tasks"][0]["deletedAt"], task["deletedAt"]);
+            assert_eq!(snapshot["checksum"], compute_fnv1a_checksum(&snapshot["payload"].to_string()));
+        }
+        db.run_migrations().expect("migration is idempotent");
+        assert_eq!(db.get_by_id("tasks", &json!({ "id": "legacy-trash" })).unwrap(), task);
+        for malformed in ["unix_", "unix_bad", "unix_-1", "unix_999999999999999999999999"] {
+            assert!(legacy_timestamp_to_iso(malformed).is_none());
+        }
     }
 }
