@@ -70,6 +70,8 @@ export interface Allocation {
   start: string;
   end: string;
   locked?: boolean;
+  /** Total task minutes approved for this schedule, shared by all of its fragments. */
+  plannedTaskMinutes?: number;
 }
 export interface LayoutPreference {
   order: string[];
@@ -215,7 +217,10 @@ export function validatePlanning(value: unknown): PlanningState {
   requireValid(Array.isArray(value.excludedDates) && value.excludedDates.every(validDate), 'روزهای استثنا نامعتبرند.');
   for (const key of ['allocations', 'previousAllocations']) if (value[key] !== undefined) {
     requireValid(Array.isArray(value[key]) && value[key].length <= 20000, 'برنامهٔ زمانی نامعتبر است.');
-    for (const a of value[key]) requireValid(obj(a) && str(a.taskId) && !!a.taskId && timestamp(a.start) && timestamp(a.end) && Date.parse(a.start) < Date.parse(a.end) && (a.locked === undefined || typeof a.locked === 'boolean'), 'زمان تخصیص‌یافته نامعتبر است.');
+    for (const a of value[key]) {
+      requireValid(obj(a) && str(a.taskId) && !!a.taskId && timestamp(a.start) && timestamp(a.end) && Date.parse(a.start) < Date.parse(a.end) && (a.locked === undefined || typeof a.locked === 'boolean'), 'زمان تخصیص‌یافته نامعتبر است.');
+      requireValid(a.plannedTaskMinutes === undefined || number(a.plannedTaskMinutes) && a.plannedTaskMinutes > 0 && a.plannedTaskMinutes <= 10000000, 'مدت مبنای برنامه نامعتبر است.');
+    }
   }
   requireValid(obj(value.layout), 'چیدمان نامعتبر است.');
   for (const mode of ['desktop', 'mobile']) {

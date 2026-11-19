@@ -2,7 +2,7 @@ name: Build Windows Installer (Kairos Setup.exe)
 
 on:
   push:
-    branches: ["feature/offline-planning"]
+    branches: ["feature/offline-planning", "feature/planning-stability"]
     paths:
       - 'src/**'
       - 'src-tauri/**'

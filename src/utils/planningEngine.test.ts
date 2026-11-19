@@ -29,7 +29,7 @@ test('locked time cannot split a continuous task or exceed its remaining duratio
   s.allocations=[{taskId:'a',start:'2026-11-16T10:00:00',end:'2026-11-16T10:30:00',locked:true}];
   assert.equal(planCapacity(s,[task('a',{duration:60})],now,1).status,'needs_data');
   assert.equal(planCapacity(s,[task('a',{duration:20,planning:{splittable:true}})],now,1).status,'needs_data');
-  const valid=planCapacity(s,[task('a',{duration:30})],now,1);assert.equal(valid.status,'ready');assert.deepEqual(valid.allocations,s.allocations);
+  const valid=planCapacity(s,[task('a',{duration:30})],now,1);assert.equal(valid.status,'ready');assert.deepEqual(valid.allocations,s.allocations.map(a=>({...a,plannedTaskMinutes:30})));
 });
 test('requested break applies before and after locked allocations',()=>{
   const s=emptyPlanning();s.availability=[{id:'a',date:localDate(now),start:'09:00',end:'12:00'}];s.breakMinutes=10;
@@ -138,7 +138,7 @@ test('retained completed, deleted and archived schedule history does not block m
   state.allocations=[{taskId:'done',start:'2026-11-16T09:00:00',end:'2026-11-16T09:30:00'},{taskId:'deleted',start:'2026-11-16T09:00:00',end:'2026-11-16T09:30:00'},{taskId:'archived',start:'2026-11-16T09:00:00',end:'2026-11-16T09:30:00'},{taskId:'active',start:'2026-11-16T10:00:00',end:'2026-11-16T10:30:00'}];
   const tasks=[task('done',{completed:true}),task('deleted',{deletedAt:now.toISOString()}),task('archived',{status:'archived'}),task('active',{duration:30})];
   const moved=moveScheduleAllocation(state,tasks,3,'2026-11-16T09:00:00',now);
-  assert.equal(moved.valid,true);assert.deepEqual(moved.allocations.slice(0,3),state.allocations.slice(0,3));
+  assert.equal(moved.valid,true);assert.deepEqual(moved.allocations.slice(0,3),state.allocations.slice(0,3).map(a=>({...a,plannedTaskMinutes:30})));
   assert.equal(moveScheduleAllocation(state,tasks,0,'2026-11-16T11:00:00',now).valid,false);
 });
 

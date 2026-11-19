@@ -7,7 +7,7 @@ import {estimateDuration,ScheduleResult,scheduleFingerprint} from '../utils/plan
 import {Field,PlanningShell} from './PlanningShared';
 import {domainEntityToTask,domainEntityToFocusSession,usePlatform} from '../app/PlatformContext';
 import {runCapacityCalculation,runCapacityConfirmation} from '../utils/capacityClient';
-import {validateScheduleAllocations} from '../utils/planningEngine';
+import {validateScheduleAllocations,withConfirmedScheduleDurations} from '../utils/planningEngine';
 import {editableSchedule,replacePendingSchedule,taskRevisionSnapshot} from '../utils/scheduleView';
 import {ScheduleBoard} from './ScheduleBoard';
 const uid=()=>createEntityId('plan');
@@ -112,7 +112,7 @@ export function CapacityView({
       if (!mounted.current || controller.signal.aborted) return;
       if(confirmation.status==='refresh') {setPreview(confirmation.result);setMessage(confirmation.reason);await refresh();await onReload?.();return;}
       attemptedSave = true;
-      await container.planning.savePlanning({...fresh,revision:fresh.revision+1,previousAllocations:structuredClone(fresh.allocations),allocations:replacePendingSchedule(fresh.allocations, confirmation.result.allocations, freshTasks, confirmationTime.getTime())},{expectedRevision:fresh.revision,expectedTaskRevisions:taskRevisionSnapshot(freshTasks)});
+      await container.planning.savePlanning({...fresh,revision:fresh.revision+1,previousAllocations:withConfirmedScheduleDurations(fresh.allocations,confirmationTime),allocations:replacePendingSchedule(fresh.allocations, confirmation.result.allocations, freshTasks, confirmationTime.getTime())},{expectedRevision:fresh.revision,expectedTaskRevisions:taskRevisionSnapshot(freshTasks)});
       attemptedSave = false;
       await refresh();setPreview(null);setMessage(confirmation.adjusted?confirmation.reason+' برنامه ذخیره شد.':'برنامهٔ تأییدشده ذخیره شد.');
     } catch(error) {
@@ -140,7 +140,7 @@ export function CapacityView({
       if (!mounted.current || !fresh.previousAllocations) return;
       const freshTasks = entities.map(domainEntityToTask);
       const now = new Date();
-      const previous = editableSchedule(fresh.previousAllocations, freshTasks, now.getTime());
+      const previous = editableSchedule(withConfirmedScheduleDurations(fresh.previousAllocations, now), freshTasks, now.getTime());
       const validation = validateScheduleAllocations(fresh, freshTasks, previous, now, {preserveLocked: true});
       if (!validation.valid) throw Error('برنامهٔ قبلی اکنون قابل اجرا نیست. ' + validation.messages.join(' '));
       await container.planning.savePlanning({

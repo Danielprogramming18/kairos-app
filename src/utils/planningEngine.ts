@@ -53,6 +53,24 @@ export const currentTimezone = (): string => Intl.DateTimeFormat().resolvedOptio
 export function scheduleFingerprint(state: PlanningState, tasks: Task[]): string {
   return JSON.stringify([state.availability, state.commitments, state.excludedDates, state.breakMinutes, state.allocations, tasks.map(t => [t.id, t.revision, t.updatedAt, t.duration, t.priority, t.dueAt, t.completed, t.status, t.deletedAt, [t.planning?.remainingMinutes,t.planning?.splittable,t.planning?.minimumChunk,t.planning?.waiting]]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
 }
+
+/** Backfill older confirmed schedules from their saved intervals, without changing task estimates. */
+export function withConfirmedScheduleDurations(allocations: Allocation[], now = new Date()): Allocation[] {
+  const totals = new Map<string, number>();
+  const saved = new Map<string, number>();
+  for (const slot of allocations) {
+    if (Date.parse(slot.end) <= now.getTime()) continue;
+    totals.set(slot.taskId, (totals.get(slot.taskId) ?? 0) + (Date.parse(slot.end) - Date.parse(slot.start)) / 60000);
+    if (slot.plannedTaskMinutes !== undefined) saved.set(slot.taskId, slot.plannedTaskMinutes);
+  }
+  return allocations.map(slot => slot.plannedTaskMinutes !== undefined || Date.parse(slot.end) <= now.getTime()
+    ? {...slot} : {...slot, plannedTaskMinutes: saved.get(slot.taskId) ?? totals.get(slot.taskId)});
+}
+
+function scheduledTaskMinutes(task: Task, slots: Allocation[]): number {
+  return slots.find(slot => slot.plannedTaskMinutes !== undefined)?.plannedTaskMinutes
+    ?? task.planning?.remainingMinutes ?? task.duration;
+}
 export function planCapacity(state: PlanningState, tasks: Task[], now = new Date(), horizonDays = 30): ScheduleResult {
   horizonDays = Number.isFinite(horizonDays) ? Math.max(1, Math.min(90, Math.floor(horizonDays))) : 30;
   const result: ScheduleResult = {
@@ -105,6 +123,12 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     }
   }
   const locked = state.allocations.filter(a => a.locked && active.some(t => t.id === a.taskId) && Date.parse(a.end) > now.getTime());
+  if (locked.some(slot => slot.plannedTaskMinutes !== undefined &&
+    (!Number.isFinite(slot.plannedTaskMinutes) || slot.plannedTaskMinutes <= 0 ||
+      locked.some(other => other.taskId === slot.taskId && other.plannedTaskMinutes !== undefined && other.plannedTaskMinutes !== slot.plannedTaskMinutes)))) {
+    result.messages.push('مدت مبنای بازه‌های قفل‌شده ناسازگار است؛ قفل‌ها و مدت برنامه را بررسی کن.');
+    return result;
+  }
   const lockedIntervals = locked.map(a => ({
     start: Date.parse(a.start),
     end: Date.parse(a.end)
@@ -145,7 +169,7 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
   for (const t of active) {
     const slots = locked.filter(a => a.taskId === t.id);
     const minutes = slots.reduce((s, a) => s + (Date.parse(a.end) - Math.max(Date.parse(a.start), now.getTime())) / 60000, 0);
-    const required = t.planning?.remainingMinutes ?? t.duration;
+    const required = scheduledTaskMinutes(t, slots);
     if (minutes > required + 1e-6) {
       result.messages.push(`زمان قفل‌شدهٔ «${t.title}» از مدت باقی‌مانده بیشتر است؛ یکی را اصلاح کن.`);
       return result;
@@ -163,7 +187,7 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     const lockedMinutes = locked.filter(a => a.taskId === t.id).reduce((s, a) => s + (Date.parse(a.end) - Math.max(Date.parse(a.start), now.getTime())) / 60000, 0);
     return {
       t,
-      minutes: Math.max(0, (t.planning?.remainingMinutes ?? t.duration) - lockedMinutes)
+      minutes: Math.max(0, scheduledTaskMinutes(t, locked.filter(a => a.taskId === t.id)) - lockedMinutes)
     };
   }).filter(x => x.minutes > 0);
   const deadline = (t: Task) => t.dueAt ? Date.parse(t.dueAt) : Infinity;
@@ -223,7 +247,9 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     }
     if (!failed) {
       result.status = 'ready';
-      result.allocations = allocations.sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+      const durations = new Map(active.map(t => [t.id, scheduledTaskMinutes(t, locked.filter(a => a.taskId === t.id))]));
+      result.allocations = allocations.map(a => ({...a, plannedTaskMinutes: durations.get(a.taskId)}))
+        .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
       result.usedMinutes = result.allocations.reduce((s, a) => s + (Date.parse(a.end) - Math.max(Date.parse(a.start), now.getTime())) / 60000, 0);
       result.messages = ['این پیشنهاد بر اساس وقت آزاد و مدت‌های ثبت‌شده است؛ تا تأیید شما اعمال نمی‌شود.'];
       return result;
@@ -299,7 +325,15 @@ export function validateScheduleAllocations(state: PlanningState, tasks: Task[],
   }
   for (const task of active.values()) {
     const slots = grouped.get(task.id) ?? [];
-    const expected = task.planning?.remainingMinutes ?? task.duration;
+    const expected = scheduledTaskMinutes(task, slots.map(row => row.a));
+    if (slots.some(row => row.a.plannedTaskMinutes !== undefined &&
+      (!Number.isFinite(row.a.plannedTaskMinutes) || row.a.plannedTaskMinutes <= 0 || row.a.plannedTaskMinutes !== expected))) {
+      messages.push(`مدت مبنای بازه‌های «${task.title}» ناسازگار است؛ برنامه را دوباره محاسبه کن.`);
+    }
+    if (options.requireAllTasks) {
+      const locked = state.allocations.filter(a => a.taskId === task.id && a.locked && Date.parse(a.end) > now.getTime());
+      if (Math.abs(expected - scheduledTaskMinutes(task, locked)) > 1e-6) messages.push(`مبنای مدت «${task.title}» تغییر کرده است؛ پیش‌نمایش تازه لازم است.`);
+    }
     const assigned = slots.reduce((sum,x) => sum + (x.end-x.start)/60000, 0);
     if (slots.length && (!Number.isFinite(expected) || expected <= 0 || assigned > expected + 1e-6)) messages.push(`مدت تخصیص‌یافته به «${task.title}» با مدت ثبت‌شده سازگار نیست.`);
     if (options.requireAllTasks && Math.abs(assigned-expected) > 1e-6) messages.push(`تمام مدت «${task.title}» در برنامه جا نگرفته است.`);
@@ -378,7 +412,7 @@ export function confirmSchedule(state: PlanningState, tasks: Task[], preview: Sc
 }
 
 export function moveScheduleAllocation(state: PlanningState, tasks: Task[], allocationIndex: number, start: string, now = new Date()): ScheduleValidation & { allocations: Allocation[] } {
-  const allocations = structuredClone(state.allocations);
+  const allocations = withConfirmedScheduleDurations(state.allocations, now);
   const slot = allocations[allocationIndex];
   if (!slot || slot.locked) return { valid: false, messages: ['این بازه قفل است یا دیگر وجود ندارد.'], allocations };
   const task = tasks.find(t=>t.id===slot.taskId);
