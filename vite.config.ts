@@ -4,14 +4,27 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const androidFiles = mode === 'android';
   return {
     // Relative base path so the built app works on any GitHub Pages subdirectory URL
     base: './',
     plugins: [
       react(),
       tailwindcss(),
-      VitePWA({
+      androidFiles && {
+        name: 'kairos-local-file-entry',
+        transformIndexHtml: {
+          order: 'post',
+          handler(html) {
+            // A file: WebView cannot fetch an external ES module from its opaque origin.
+            return html.replace(/<script type="module" crossorigin src=/g, '<script defer src=')
+              .replace(/<link rel="stylesheet" crossorigin /g, '<link rel="stylesheet" ')
+              .replace(/<link rel="manifest"[^>]*>/g, '');
+          },
+        },
+      },
+      !androidFiles && VitePWA({
         registerType: 'autoUpdate',
         injectRegister: null,
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
@@ -62,6 +75,15 @@ export default defineConfig(() => {
       },
     },
     build: {
+      ...(androidFiles && {
+        outDir: 'build/android',
+        modulePreload: false,
+        assetsInlineLimit: (name: string) => name.endsWith('.woff2') || undefined,
+        rolldownOptions: {
+          transform: { define: { 'import.meta.url': 'document.baseURI', 'import.meta.resolve': 'undefined' } },
+          output: { format: 'iife' as const, codeSplitting: false },
+        },
+      }),
       chunkSizeWarningLimit: 1200,
     },
     server: {

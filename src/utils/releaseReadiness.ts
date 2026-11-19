@@ -337,6 +337,7 @@ export function getPlatformHandoffSnippets(): {
 } {
   return {
     sketchwareWebSettingsJava: [
+      '// فایل‌های build/android را پس از npm run build:android در همان assets/www برنامه قرار بده.',
       'WebSettings ws = webview1.getSettings();',
       'ws.setJavaScriptEnabled(true);',
       'ws.setDomStorageEnabled(true); // الزامی برای IndexedDB و localStorage',

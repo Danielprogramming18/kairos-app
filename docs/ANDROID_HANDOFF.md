@@ -2,16 +2,16 @@
 
 این سند راهنمای گام‌به‌گام استفاده از خروجی وب «کایروس» در داخل `WebView` اندروید (Sketchware / Android Studio) است.
 
-> **نکتهٔ مهم معماری (`FIX-12`):** کایروس به‌گونه‌ای طراحی شده است که **وجود SQLite، پل بومی (`Bridge`)، مدیریت فایل بومی یا اعلان بومی را از پیش فرض نمی‌گیرد**. در حالت پیش‌فرض (فقط بسته‌بندی فایل‌های استاتیک HTML/CSS/JavaScript/تصاویر/فونت‌های محلی `.woff2`)، برنامه به‌صورت خودکار از موتور تراکنشی `IndexedDB` داخل `WebView` استفاده می‌کند و ۱۰۰٪ آفلاین کار می‌کند.
+میزبان اختیاری اندروید می‌تواند از پل SQLite استفاده کند. در نبود پل، راه‌اندازیِ ذخیره‌سازی به IndexedDB واقعی WebView وابسته است. ظرفیت و ماندگاری را روی نسخهٔ هدف WebView و با بازکردن دوباره آزمایش کنید.
 
 ---
 
 ## ۱. حالت الف (پشتیبانی‌شده در نسخهٔ فعلی Sketchware): بسته‌بندی استاتیک بدون نیاز به Bridge یا SQLite
 1. دستور زیر را اجرا کنید تا بستهٔ استاتیک با مسیرهای نسبی (`base: './'`) و فونت‌های محلی `Vazirmatn` (`.woff2`) ساخته شود:
    ```bash
-   npm run build
+   npm run build:android
    ```
-2. تمام محتویات پوشهٔ `dist/` (شامل `index.html` و پوشهٔ `assets/` حاوی فایل‌های JS، CSS و فونت‌های محلی `.woff2`) را در مسیر `assets/kairos/` (یا `assets/www/`) پروژهٔ Sketchware قرار دهید.
+2. محتویات `build/android/` را در همان مسیر assets موجود برنامه (مثلاً `assets/www/` یا `assets/kairos/`) کپی کنید. این خروجی یک اسکریپت کلاسیک، CSS و فونت‌های محلی بسته‌بندی‌شده دارد و Worker برنامه‌ریزی را از محتوای محلی می‌سازد. مسیر `loadUrl` و شناسهٔ برنامهٔ نصب‌شده را حفظ کنید. بستهٔ عادی `dist/` مخصوص میزبان وب یا WebView2 است.
 3. در `WebView` اندروید، تنظیمات استاندارد زیر را فعال کنید:
    ```java
    WebSettings settings = webView.getSettings();
@@ -28,7 +28,7 @@
 ### چرا تنظیم میزبان اندروید اهمیت دارد؟
 در مرورگرهای استاندارد وب، مدیاکوئری `prefers-color-scheme: dark` مستقیماً از سیستم‌عامل خوانده می‌شود. اما در `WebView` اندروید (به‌ویژه در پروژه‌های Sketchware که معمولاً از تم پایهٔ `Theme.AppCompat.Light` بدون `DayNight` استفاده می‌کنند یا تنظیمات `WebSettingsCompat` روی آن‌ها اعمال نشده است)، `window.matchMedia('(prefers-color-scheme: dark)')` داخل `WebView` ممکن است همیشه مقدار `false` (روشن) برگرداند یا هنگام تغییر حالت Dark Mode گوشی از نوار اعلان، رویداد تغییر را به صفحهٔ وب منتقل نکند.
 
-برای تضمین ۱۰۰٪ هماهنگی خودکار تم کایروس با تم گوشی (از لحظهٔ بارگذاری اولیه و همچنین تغییر زنده هنگام باز بودن برنامه بدون `reload`):
+برای هماهنگی تم کایروس با تم گوشی (از لحظهٔ بارگذاری اولیه و همچنین تغییر زنده هنگام باز بودن برنامه بدون `reload`):
 
 ### گام ۱: بارگذاری اولیه بدون پرش رنگی (Zero-Flash Startup)
 هنگام فراخوانی `loadUrl` در `onCreate`، وضعیت فعلی تم گوشی (`UI_MODE_NIGHT_MASK`) را در پارامتر `hostTheme` پاس دهید تا اسکریپت همگام داخل `<head>` پیش از رندر شدن صفحه، تم درست را اعمال کند:
@@ -65,8 +65,8 @@ webView.loadUrl("file:///android_asset/kairos/index.html?hostTheme=" + hostTheme
 
 ---
 
-## ۳. حالت ب (اختیاری برای توسعهٔ آتی): تزریق پل بومی (`KairosAndroidBridge` + `SQLite`)
-اگر در نسخه‌های آینده تصمیم به اتصال دیتابیس بومی `SQLite` گرفته شود، اپلیکیشن وب در هنگام راه‌اندازی (`detectRuntimePlatform` در `src/app/PlatformContext.tsx`) وجود شیء `window.KairosAndroidBridge` را بررسی می‌کند:
+## ۳. حالت ب (پل بومی اختیاری): تزریق پل بومی (`KairosAndroidBridge` + `SQLite`)
+برای استفاده از دیتابیس بومی `SQLite`، اپلیکیشن وب در هنگام راه‌اندازی (`detectRuntimePlatform` در `src/app/PlatformContext.tsx`) وجود شیء `window.KairosAndroidBridge` را بررسی می‌کند:
 
 ```java
 KairosAndroidBridge.attachToWebView(getApplicationContext(), webView);
@@ -79,3 +79,5 @@ webView.loadUrl("file:///android_asset/kairos/index.html?hostTheme=" + hostTheme
 ## ۴. فایل‌های آمادهٔ تحویل در مخزن (Ready-to-Use Handoff Files)
 - **کد کامل جاوای اندروید (هر دو حالت A و B + همگام‌سازی تم گوشی):** فایل `/handoff/android/KairosAndroidBridge.java` شامل متدهای `configureWebViewForModeA(webView)`، `resolveAndroidDeviceTheme(context)` و `syncDeviceThemeToWebView(context, webView)` است.
 - **ممیز خودکار بستهٔ آفلاین (`dist/`):** ماژول `/src/utils/offlineBundleVerifier.ts` و آزمون `/src/utils/offlineBundleVerifier.test.ts` به صورت خودکار بررسی می‌کنند که در `dist/index.html` هیچ مسیر مطلق `/assets/` یا لینک CDN خارجی وجود نداشته باشد و فونت‌های محلی `.woff2` باندل شده باشند.
+
+آزمون محلی بسته با شبکهٔ قطع، فایل `scripts/qa-file-origin.cjs` است. برای تحویل اندروید، کد به‌روز پل را نیز در میزبانِ دارای پل بسازید و روی دستگاه با دادهٔ نسخهٔ قبلی، بازکردن بعد از بستن اجباری، تایمر، صفحه‌کلید، مهاجرت و بازیابی را بررسی کنید. آزمون Chrome دسکتاپ مسیر فایل را پوشش می‌دهد.
