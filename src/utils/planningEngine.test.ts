@@ -105,8 +105,9 @@ test('confirmation detects actual input changes but ignores unrelated menu and m
   assert.equal(confirmSchedule(unrelated,tasks,preview,new Date(now.getTime()+5000)).status,'accepted');
   const changed=structuredClone(state);changed.commitments=[{id:'meeting',date:localDate(now),start:'09:00',end:'10:00'}];
   const confirmation=confirmSchedule(changed,tasks,preview,new Date(now.getTime()+5000));
-  assert.equal(confirmation.status,'refresh');assert.match(confirmation.reason,/تغییر/);assert.equal(new Date(confirmation.result.allocations[0].start).getHours(),10);
-  assert.equal(confirmSchedule(state,[{...tasks[0],duration:60}],preview,now).status,'refresh');
+  assert.equal(confirmation.status,'refresh');assert.match(confirmation.reason,/تعهد ثابت/);assert.equal(new Date(confirmation.result.allocations[0].start).getHours(),10);
+  const resized = confirmSchedule(state,[{...tasks[0],duration:60}],preview,now);
+  assert.equal(resized.status,'refresh');assert.match(resized.reason,/مدت کار «a»/);
 });
 
 test('elapsed time never silently violates a deadline, moves work another day or rewrites a lock',()=>{

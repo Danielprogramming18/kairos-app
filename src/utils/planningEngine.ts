@@ -315,11 +315,37 @@ export interface ScheduleConfirmation {
   adjusted: boolean;
   reason: string;
 }
+
+function scheduleChangeReason(previous: string, current: string, tasks: Task[]): string {
+  // Fingerprints are local preview snapshots. Older snapshots may use another shape.
+  let before: unknown[], after: unknown[];
+  try { before = JSON.parse(previous); after = JSON.parse(current); }
+  catch { return 'اطلاعات پیش‌نمایش تغییر کرده است.'; }
+  if (!Array.isArray(before) || !Array.isArray(after)) return 'اطلاعات پیش‌نمایش تغییر کرده است.';
+  const capacityFields = ['وقت آزاد', 'تعهد ثابت', 'روزهای استثنا', 'فاصلهٔ استراحت', 'بازه‌های تأییدشده یا قفل آن‌ها'];
+  for (const [index, field] of capacityFields.entries()) {
+    if (JSON.stringify(before[index]) !== JSON.stringify(after[index])) return field + ' تغییر کرده است.';
+  }
+  if (!Array.isArray(before[5]) || !Array.isArray(after[5])) return 'کارهای برنامه تغییر کرده‌اند.';
+  const previousTasks = new Map(before[5].filter(Array.isArray).map(row => [row[0], row]));
+  for (const row of after[5].filter(Array.isArray)) {
+    const old = previousTasks.get(row[0]);
+    previousTasks.delete(row[0]);
+    if (JSON.stringify(old) === JSON.stringify(row)) continue;
+    const title = tasks.find(task => task.id === row[0])?.title ?? 'کار';
+    if (!old) return 'کار «' + title + '» اضافه شده است.';
+    const field = old[5] !== row[5] ? 'موعد' : old[3] !== row[3] ? 'مدت' :
+      old[4] !== row[4] ? 'اولویت' : old[6] !== row[6] || old[7] !== row[7] ? 'وضعیت' : 'اطلاعات';
+    return field + ' کار «' + title + '» تغییر کرده است.';
+  }
+  return previousTasks.size ? 'یک کار از فهرست برنامه حذف شده است.' : 'اطلاعات برنامه تغییر کرده است.';
+}
 export const CONFIRMATION_GRACE_MS = 5 * 60000;
 
 export function confirmSchedule(state: PlanningState, tasks: Task[], preview: ScheduleResult, now = new Date()): ScheduleConfirmation {
   const refresh = (reason: string, result = planCapacity(state, tasks, now, preview.horizonDays)): ScheduleConfirmation => ({ status: 'refresh', result, adjusted: false, reason });
-  if (preview.fingerprint !== scheduleFingerprint(state, tasks)) return refresh('کارها، موعد، وقت آزاد یا برنامهٔ ثبت‌شده تغییر کرده است؛ پیش‌نمایش تازه را بررسی کن.');
+  const fingerprint = scheduleFingerprint(state, tasks);
+  if (preview.fingerprint !== fingerprint) return refresh(scheduleChangeReason(preview.fingerprint, fingerprint, tasks) + ' پیش‌نمایش تازه را بررسی کن.');
   if (preview.timezone !== currentTimezone()) return refresh('منطقهٔ زمانی دستگاه تغییر کرده است؛ ساعت‌های محلی را دوباره بررسی کن.');
   const base = Date.parse(preview.baseTime);
   if (preview.status !== 'ready' || !Number.isFinite(base) || now.getTime() < base) return refresh('زمان مبنای پیش‌نمایش معتبر نیست؛ برنامه دوباره محاسبه شد.');

@@ -88,23 +88,48 @@ export function CapacityView({
       setPreview(null);
     }
   };
+  const readCapacityInputs = async () => {
+    const [fresh, entities, history] = await Promise.all([
+      container.planning.getPlanning(), container.tasks.listTasks(), container.focus.listFocusSessions(),
+    ]);
+    const freshTasks = entities.map(domainEntityToTask);
+    const target = freshTasks.find(t => t.id === chosen);
+    const prediction = target ? estimateDuration(target, freshTasks, history.map(domainEntityToFocusSession), fresh.minimumSamples) : null;
+    const inputs = freshTasks.map(t => t.id === chosen && prediction?.minutes && t.planning?.remainingMinutes === undefined
+      ? {...t, duration: prediction.minutes} : t);
+    return {fresh, freshTasks, inputs};
+  };
   const apply = async () => {
     if(!preview||preview.status!=='ready'||calculating)return;
     setCalculating(true);setMessage('');
+    let attemptedSave = false;
     try {
-      const [fresh,taskEntities,sessionEntities]=await Promise.all([container.planning.getPlanning(),container.tasks.listTasks(),container.focus.listFocusSessions()]);
+      const {fresh, freshTasks, inputs} = await readCapacityInputs();
       if (!mounted.current) return;
-      const freshTasks=taskEntities.map(domainEntityToTask),freshSessions=sessionEntities.map(domainEntityToFocusSession);
-      const target=freshTasks.find(t=>t.id===chosen);const prediction=target?estimateDuration(target,freshTasks,freshSessions,fresh.minimumSamples):null;
-      const inputs=freshTasks.map(t=>t.id===chosen&&prediction?.minutes&&t.planning?.remainingMinutes===undefined?{...t,duration:prediction.minutes}:t);
       const controller=new AbortController();controllerRef.current?.abort();controllerRef.current=controller;
       const confirmationTime = new Date();
       const confirmation=await runCapacityConfirmation(fresh,inputs,preview,confirmationTime,controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
       if(confirmation.status==='refresh') {setPreview(confirmation.result);setMessage(confirmation.reason);await refresh();await onReload?.();return;}
+      attemptedSave = true;
       await container.planning.savePlanning({...fresh,revision:fresh.revision+1,previousAllocations:structuredClone(fresh.allocations),allocations:replacePendingSchedule(fresh.allocations, confirmation.result.allocations, freshTasks, confirmationTime.getTime())},{expectedRevision:fresh.revision,expectedTaskRevisions:taskRevisionSnapshot(freshTasks)});
+      attemptedSave = false;
       await refresh();setPreview(null);setMessage(confirmation.adjusted?confirmation.reason+' برنامه ذخیره شد.':'برنامهٔ تأییدشده ذخیره شد.');
-    } catch(error) {if(mounted.current){setMessage((error as Error).message);await refresh();await onReload?.();}}
+    } catch(error) {
+      if (!mounted.current) return;
+      setMessage((error as Error).message);
+      // A transaction can reject a write after Worker validation, e.g. a second tab editing a task.
+      if (attemptedSave) {
+        try {
+          const {fresh, inputs} = await readCapacityInputs();
+          if (mounted.current && scheduleFingerprint(fresh, inputs) !== preview.fingerprint) {
+            const updated = await runCapacityConfirmation(fresh, inputs, preview, new Date(), controllerRef.current?.signal);
+            if (mounted.current) { setPreview(updated.result); setMessage(updated.reason); }
+          }
+        } catch { /* Keep the original storage error if the new snapshot is also unavailable. */ }
+      }
+      await refresh(); await onReload?.();
+    }
     finally {setCalculating(false);}
   };
   const undo = async () => {
