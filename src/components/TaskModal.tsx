@@ -1,453 +1,110 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { X, CheckSquare, Bell, Sparkles, Clock, Calendar, Flag } from 'lucide-react';
-import { Task } from '../types';
-import { TaskPlanning, validateTaskPlanning } from '../domain/planning';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckSquare, Sparkles, X } from 'lucide-react';
+import type { FocusSession, Task } from '../types';
 import { TaskPlanningFields } from './PlanningViews';
-import {
-  getTodayKey,
-  getTomorrowKey,
-  addDays,
-  getDateKey,
-  formatDateKeyToPersian,
-  toPersianNum,
-} from '../utils/persianDate';
+import { getTodayKey } from '../utils/persianDate';
 import { parseNaturalTaskInput } from '../utils/nlpTaskParser';
 import { useModalFocusTrap } from '../utils/useModalFocusTrap';
+import { restoreTaskEditorDraft, taskEditorDraft, validateTaskEditor, type TaskEditorDraft, type TaskEditorSave } from '../utils/taskEditor';
+import './taskEditor.css';
 
 interface TaskModalProps {
-  isOpen: boolean;
-  taskToEdit: Task | null;
-  defaultDateKey?: string;
-  onClose: () => void;
-  onSave: (taskData: {
-    planning?: TaskPlanning; projectId?: string | null; dueAt?: string | null;
-    id?: string;
-    title: string;
-    description?: string;
-    priority: number;
-    duration: number;
-    targetDate: string;
-    reminderTime?: string;
-    category?: string;
-  }) => Promise<boolean> | boolean | void;
+  isOpen: boolean; taskToEdit: Task | null; defaultDateKey?: string; sessions?: FocusSession[];
+  onClose: () => void; onSave: (taskData: TaskEditorSave) => Promise<boolean> | boolean | void;
 }
+const DRAFT_KEY = 'kairos_unsaved_task_draft_v1';
 
-export const TaskModal: React.FC<TaskModalProps> = ({
-  isOpen,
-  taskToEdit,
-  defaultDateKey,
-  onClose,
-  onSave,
-}) => {
-  const todayKey = getTodayKey();
-  const tomorrowKey = getTomorrowKey();
-  const dayAfterTomorrowKey = getDateKey(addDays(new Date(), 2));
-
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<number>(1);
-  const [duration, setDuration] = useState<number>(45);
-  const [targetDate, setTargetDate] = useState<string>(defaultDateKey || todayKey);
-  const [reminderTime, setReminderTime] = useState<string>('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [planning,setPlanning] = useState<TaskPlanning>({});
-  const [projectId,setProjectId] = useState('');
-  const [dueAt,setDueAt] = useState('');
-  useEffect(() => {
-    setPlanning(taskToEdit?.planning ? structuredClone(taskToEdit.planning) : {});
-    setProjectId(taskToEdit?.projectId ?? '');
-    const due = taskToEdit?.dueAt ? new Date(taskToEdit.dueAt) : null;
-    setDueAt(due && !isNaN(due.getTime()) ? `${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,'0')}-${String(due.getDate()).padStart(2,'0')}T${String(due.getHours()).padStart(2,'0')}:${String(due.getMinutes()).padStart(2,'0')}` : '');
-  }, [taskToEdit,isOpen]);
-
-  const nlpPreview = useMemo(() => {
-    if (!title.trim()) return null;
-    const parsed = parseNaturalTaskInput(title);
-    return parsed.hasExtractedTokens ? parsed : null;
-  }, [title]);
-
-  const handleApplyNlpPreview = () => {
-    if (!nlpPreview) return;
-    setTitle(nlpPreview.title);
-    if (nlpPreview.extractedDateDetected) {
-      setTargetDate(nlpPreview.targetDate);
-    }
-    if (nlpPreview.extractedDurationDetected) {
-      setDuration(nlpPreview.duration);
-    }
-    if (nlpPreview.extractedPriorityDetected) {
-      setPriority(nlpPreview.priority);
-    }
-    if (nlpPreview.extractedReminderDetected && nlpPreview.reminderTime) {
-      setReminderTime(nlpPreview.reminderTime);
-    }
-  };
-
-  const TASK_DRAFT_STORAGE_KEY = 'kairos_unsaved_task_draft_v1';
+export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaultDateKey, sessions = [], onClose, onSave }) => {
+  const today = getTodayKey();
+  const [draft, setDraft] = useState<TaskEditorDraft>(() => taskEditorDraft(null, defaultDateKey || today));
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [priorityVisible, setPriorityVisible] = useState(false);
+  const [expanded, setExpanded] = useState({ project: false, time: false, advanced: false });
+  const [viewport, setViewport] = useState<{ height: number; top: number } | null>(null);
+  const baseline = useRef('');
+  const closeEditor = () => { setExpanded({ project: false, time: false, advanced: false }); onClose(); };
+  const field = <K extends keyof TaskEditorDraft>(key: K, value: TaskEditorDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
 
   useEffect(() => {
-    setIsSaving(false);
-    if (taskToEdit) {
-      setTitle(taskToEdit.title);
-      setDescription(taskToEdit.description || '');
-      setPriority(taskToEdit.priority || 1);
-      setDuration(taskToEdit.duration || 45);
-      setTargetDate(taskToEdit.targetDate || todayKey);
-      setReminderTime(taskToEdit.reminderTime || '');
-    } else {
-      let restoredDraft = false;
-      try {
-        const rawDraft = localStorage.getItem(TASK_DRAFT_STORAGE_KEY);
-        if (rawDraft) {
-          const draft = JSON.parse(rawDraft);
-          if (draft && typeof draft.title === 'string' && (draft.title.trim() || draft.description)) {
-            setTitle(draft.title);
-            setDescription(typeof draft.description === 'string' ? draft.description : '');
-            setPriority(Number(draft.priority) || 1);
-            setDuration(Number(draft.duration) || 45);
-            setTargetDate(draft.targetDate || defaultDateKey || todayKey);
-            setReminderTime(typeof draft.reminderTime === 'string' ? draft.reminderTime : '');
-            try { setPlanning(draft.planning ? validateTaskPlanning(draft.planning) : {}); } catch { setPlanning({}); }
-            setProjectId(typeof draft.projectId === 'string' ? draft.projectId : '');
-            setDueAt(typeof draft.dueAt === 'string' && !isNaN(new Date(draft.dueAt).getTime()) ? draft.dueAt : '');
-            restoredDraft = true;
-          }
-        }
-      } catch {}
-
-      if (!restoredDraft) {
-        setTitle('');
-        setDescription('');
-        setPriority(1);
-        setDuration(45);
-        setTargetDate(defaultDateKey || todayKey);
-        setReminderTime('');
-      }
+    if (!isOpen) { setLoaded(false); setExpanded({ project: false, time: false, advanced: false }); return; }
+    let next = taskEditorDraft(taskToEdit, defaultDateKey || getTodayKey());
+    if (!taskToEdit) {
+      try { const saved = localStorage.getItem(DRAFT_KEY); next = saved ? restoreTaskEditorDraft(JSON.parse(saved), defaultDateKey || getTodayKey()) || next : next; } catch { /* Keep the usable empty form. */ }
     }
-  }, [taskToEdit, isOpen, defaultDateKey, todayKey]);
+    setDraft(next); baseline.current = JSON.stringify(next); setLoaded(true); setSaving(false); setErrors({});
+    setPriorityVisible(Boolean(taskToEdit && taskToEdit.priority !== 1));
+    setExpanded({ project: false, time: false, advanced: false });
+  }, [isOpen, taskToEdit?.id, defaultDateKey]);
 
-  // Persist draft for new tasks and register beforeunload guard when modal has unsaved edits
   useEffect(() => {
     if (!isOpen) return;
+    const visual = window.visualViewport;
+    const update = () => setViewport(visual ? { height: visual.height, top: visual.offsetTop } : null);
+    update(); visual?.addEventListener('resize', update); visual?.addEventListener('scroll', update);
+    return () => { visual?.removeEventListener('resize', update); visual?.removeEventListener('scroll', update); };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !loaded) return;
+    const dirty = JSON.stringify(draft) !== baseline.current;
     if (!taskToEdit) {
-      try {
-        if (title.trim() || description.trim()) {
-          localStorage.setItem(
-            TASK_DRAFT_STORAGE_KEY,
-            JSON.stringify({
-              title,
-              description,
-              priority,
-              duration,
-              targetDate,
-              reminderTime,
-              planning,
-              projectId,
-              dueAt,
-            })
-          );
-        } else {
-          localStorage.removeItem(TASK_DRAFT_STORAGE_KEY);
-        }
-      } catch {}
+      try { if (dirty || draft.title || draft.description) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* Saving the task still remains available. */ }
     }
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isOpen, loaded, draft, taskToEdit]);
 
-    const hasUnsavedChanges = taskToEdit
-      ? title.trim() !== taskToEdit.title ||
-        description.trim() !== (taskToEdit.description || '')
-        || priority !== taskToEdit.priority || duration !== taskToEdit.duration
-        || targetDate !== taskToEdit.targetDate || reminderTime !== (taskToEdit.reminderTime || '')
-        || projectId !== (taskToEdit.projectId || '')
-        || JSON.stringify(planning) !== JSON.stringify(taskToEdit.planning || {})
-        || (dueAt ? new Date(dueAt).toISOString() : '') !== (taskToEdit.dueAt || '')
-      : Boolean(title.trim() || description.trim());
-
-    if (!hasUnsavedChanges) return;
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isOpen, taskToEdit, title, description, priority, duration, targetDate, reminderTime, planning, projectId, dueAt]);
-
-  const modalRef = useModalFocusTrap<HTMLDivElement>(
-    isOpen,
-    onClose,
-    '#task-modal-title-input'
-  );
-
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || isSaving) return;
-
-    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : todayKey;
-    const trimmedReminder = reminderTime.trim();
-    const validReminder = /^([01]\d|2[0-3]):([0-5]\d)$/.test(trimmedReminder)
-      ? trimmedReminder
-      : undefined;
-    const validPriority = Math.max(1, Math.min(20, Math.round(Number(priority) || 1)));
-    const validDuration = Math.max(1, Math.min(600, Math.round(Number(duration) || 45)));
-
-    setIsSaving(true);
+  const nlp = useMemo(() => draft.title.trim() ? parseNaturalTaskInput(draft.title) : null, [draft.title]);
+  const applyNlp = () => {
+    if (!nlp) return;
+    setDraft(current => ({ ...current, title: nlp.title, ...(nlp.extractedDateDetected ? { targetDate: nlp.targetDate } : {}), ...(nlp.extractedDurationDetected ? { duration: String(nlp.duration), durationExplicit: true } : {}), ...(nlp.extractedPriorityDetected ? { priority: String(nlp.priority) } : {}), ...(nlp.extractedReminderDetected && nlp.reminderTime ? { reminderTime: nlp.reminderTime } : {}) }));
+    if (nlp.extractedPriorityDetected) setPriorityVisible(true);
+  };
+  const modalRef = useModalFocusTrap<HTMLDivElement>(isOpen, () => { if (!saving) closeEditor(); }, '#task-modal-title-input');
+  const errorText = (name: string) => errors[name] && <p id={`task-error-${name}`} className="kte-error" role="alert">{errors[name]}</p>;
+  const planningProps = { taskId: taskToEdit?.id, completedAt: taskToEdit?.completedAt, planning: draft.planning, onChange: (value: TaskEditorDraft['planning']) => field('planning', value), projectId: draft.projectId, onProject: (value: string) => field('projectId', value), dueAt: draft.dueAt, onDue: (value: string) => setDraft(current => ({ ...current, dueAt: value, dueEdited: true })), sessions };
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); if (saving || !loaded) return;
+    const result = validateTaskEditor(draft, getTodayKey(), taskToEdit);
+    setErrors(result.errors);
+    if (!result.data) {
+      if (result.errors.duration || result.errors.due || result.errors.planning) setExpanded(current => ({ ...current, time: true }));
+      if (result.errors.reminder) setExpanded(current => ({ ...current, advanced: true }));
+      if (result.errors.priority) setPriorityVisible(true);
+      if (result.errors.title) document.getElementById('task-modal-title-input')?.focus();
+      return;
+    }
+    setSaving(true);
     try {
-      const ok = await onSave({
-        planning: {...planning, initialEstimate: planning.initialEstimate ?? validDuration},
-        projectId: projectId || null,
-        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-        id: taskToEdit?.id,
-        title: title.trim(),
-        description: description.trim() || undefined,
-        priority: validPriority,
-        duration: validDuration,
-        targetDate: validDate,
-        reminderTime: validReminder,
-        category: taskToEdit?.category || 'work',
-      });
-      if (ok !== false) {
-        if (!taskToEdit) {
-          try {
-            localStorage.removeItem(TASK_DRAFT_STORAGE_KEY);
-          } catch {}
-        }
-        onClose();
-      }
-    } finally {
-      setIsSaving(false);
-    }
+      const saved = await onSave(result.data);
+      if (saved === false) { setErrors({ save: 'ذخیره انجام نشد؛ پیام خطا را بررسی کن و دوباره تلاش کن.' }); return; }
+      if (!taskToEdit) { try { localStorage.removeItem(DRAFT_KEY); } catch { /* The canonical task has already saved. */ } }
+      closeEditor();
+    } catch (error) { setErrors({ save: (error as Error).message || 'ذخیره انجام نشد.' }); }
+    finally { setSaving(false); }
   };
 
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="task-modal-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isSaving) onClose();
-      }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 kairos-modal-backdrop animate-fade-in"
-    >
-      <div
-        ref={modalRef}
-        tabIndex={-1}
-        className="kairos-modal-panel max-w-2xl w-full p-6 space-y-5 max-h-[90dvh] overflow-y-auto"
-      >
-        <div className="flex items-center justify-between border-b border-token-subtle pb-4">
-          <h3
-            id="task-modal-title"
-            className="text-lg font-black text-token-primary flex items-center gap-2"
-          >
-            <CheckSquare className="w-5 h-5 text-indigo-500" />
-            <span>{taskToEdit ? 'ویرایش کار' : 'ثبت کار جدید'}</span>
-          </h3>
-          <button
-            type="button"
-            aria-label="بستن پنجره"
-            onClick={onClose}
-            disabled={isSaving}
-            className="p-1.5 rounded-xl bg-surface-2 text-token-secondary hover:text-token-primary cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="task-modal-title-input"
-              className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5"
-            >
-              عنوان کار *
-            </label>
-            <input
-              id="task-modal-title-input"
-              type="text"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثلاً: فردا ساعت ۵ عصر ۴۵ دقیقه مرور گزارش اولویت ۱"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-            />
-
-            {nlpPreview && (
-              <div
-                data-testid="nlp-extraction-preview"
-                className="mt-2.5 p-3 rounded-xl bg-indigo-50/90 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/70 space-y-2 animate-fade-in"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-black text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    پیش‌نمایش استخراج از متن:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleApplyNlpPreview}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold transition cursor-pointer"
-                  >
-                    اعمال مقادیر استخراج‌شده
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                  <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-200">
-                    عنوان: {nlpPreview.title}
-                  </span>
-                  {nlpPreview.extractedDateDetected && (
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {nlpPreview.extractedDateLabel}
-                    </span>
-                  )}
-                  {nlpPreview.extractedDurationDetected && (
-                    <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {toPersianNum(nlpPreview.duration)} دقیقه
-                    </span>
-                  )}
-                  {nlpPreview.extractedReminderDetected && nlpPreview.reminderTime && (
-                    <span className="px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-700 dark:text-violet-300 font-bold flex items-center gap-1">
-                      <Bell className="w-3 h-3" />
-                      ساعت {toPersianNum(nlpPreview.reminderTime)}
-                    </span>
-                  )}
-                  {nlpPreview.extractedPriorityDetected && (
-                    <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold flex items-center gap-1">
-                      <Flag className="w-3 h-3" />
-                      اولویت {toPersianNum(nlpPreview.priority)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              توضیحات و جزئیات (اختیاری)
-            </label>
-            <textarea
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="نکات تکمیلی یا گام‌های انجام کار..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-            />
-          </div>
-
-          {/* Date Selector with Quick Presets + Custom Date */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-              تاریخ انجام ({formatDateKeyToPersian(targetDate)})
-            </label>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setTargetDate(todayKey)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  targetDate === todayKey
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                امروز
-              </button>
-              <button
-                type="button"
-                onClick={() => setTargetDate(tomorrowKey)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  targetDate === tomorrowKey
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                فردا
-              </button>
-              <button
-                type="button"
-                onClick={() => setTargetDate(dayAfterTomorrowKey)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  targetDate === dayAfterTomorrowKey
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                پس‌فردا
-              </button>
-              <input
-                type="date"
-                value={targetDate}
-                onChange={(e) => e.target.value && setTargetDate(e.target.value)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                شمارهٔ اولویت
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={priority}
-                onChange={(e) => setPriority(parseInt(e.target.value, 10) || 1)}
-                className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                زمان (دقیقه)
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={600}
-                value={duration}
-                onChange={(e) => setDuration(parseInt(e.target.value, 10) || 45)}
-                className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1">
-                <Bell className="w-3.5 h-3.5 text-amber-500" />
-                <span>ساعت یادآور</span>
-              </label>
-              <input
-                type="time"
-                value={reminderTime}
-                onChange={(e) => setReminderTime(e.target.value)}
-                className="w-full px-2.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <TaskPlanningFields taskId={taskToEdit?.id} planning={planning} onChange={setPlanning} projectId={projectId} onProject={setProjectId} dueAt={dueAt} onDue={setDueAt} />
-          <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSaving}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-            >
-              انصراف
-            </button>
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-sm transition cursor-pointer"
-            >
-              {isSaving ? 'در حال ذخیره...' : 'ذخیرهٔ کار'}
-            </button>
-          </div>
-        </form>
-      </div>
+  if (!isOpen) return null;
+  return <div className="kte-backdrop kairos-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" style={viewport ? { height: viewport.height, top: viewport.top, bottom: 'auto' } : undefined} onClick={event => { if (event.target === event.currentTarget && !saving) closeEditor(); }}>
+    <div ref={modalRef} tabIndex={-1} className="kte-panel kairos-modal-panel" style={viewport ? { maxHeight: Math.max(180, viewport.height - 24) } : undefined}>
+      <header className="kte-header"><h3 id="task-modal-title"><CheckSquare className="w-5 h-5 text-indigo-500" />{taskToEdit ? 'ویرایش کار' : 'ثبت کار جدید'}</h3><button type="button" onClick={closeEditor} disabled={saving} aria-label="بستن پنجره"><X className="w-5 h-5" /></button></header>
+      <form id="task-editor-form" noValidate onSubmit={submit} className="kte-scroll">
+        <fieldset disabled={saving || !loaded}>
+          <label className="kte-field" htmlFor="task-modal-title-input"><span>عنوان کار *</span><input id="task-modal-title-input" type="text" required value={draft.title} onChange={event => field('title', event.target.value)} aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? 'task-error-title' : undefined} placeholder="چه کاری می‌خواهی انجام بدهی؟" /></label>{errorText('title')}
+          {nlp?.hasExtractedTokens && <div className="kte-nlp" data-testid="nlp-extraction-preview"><p><Sparkles className="w-4 h-4" /> از متن، {nlp.extractedDateDetected ? 'تاریخ، ' : ''}{nlp.extractedDurationDetected ? 'مدت، ' : ''}{nlp.extractedPriorityDetected ? 'اولویت، ' : ''}{nlp.extractedReminderDetected ? 'یادآور، ' : ''}پیشنهاد شده است؛ پیش از ثبت بررسی کن.</p><button type="button" onClick={applyNlp}>اعمال مقادیر استخراج‌شده</button></div>}
+          <label className="kte-field" htmlFor="task-editor-date"><span>تاریخ انجام (اختیاری؛ پیش‌فرض امروز)</span><input id="task-editor-date" type="date" value={draft.targetDate} onChange={event => field('targetDate', event.target.value)} aria-invalid={Boolean(errors.date)} aria-describedby={errors.date ? 'task-error-date' : undefined} /></label>{errorText('date')}
+          <label className="kte-check"><input type="checkbox" checked={priorityVisible} onChange={event => setPriorityVisible(event.target.checked)} /> اولویت مشخص کنم</label>
+          {priorityVisible && <><label className="kte-field" htmlFor="task-editor-priority"><span>شمارهٔ اولویت</span><input id="task-editor-priority" inputMode="numeric" value={draft.priority} onChange={event => field('priority', event.target.value)} aria-invalid={Boolean(errors.priority)} aria-describedby={errors.priority ? 'task-error-priority' : undefined} /></label>{errorText('priority')}</>}
+          <details open={expanded.project} onToggle={event => { const open = event.currentTarget.open; setExpanded(current => ({ ...current, project: open })); }}><summary>پروژه و مرحله{draft.projectId ? ' · انتخاب شده' : ''}</summary><TaskPlanningFields {...planningProps} section="project" /></details>
+          <details open={expanded.time} onToggle={event => { const open = event.currentTarget.open; setExpanded(current => ({ ...current, time: open })); }}><summary>زمان‌بندی و تخمین</summary><label className="kte-field" htmlFor="task-editor-duration"><span>مدت کار / تایمر (دقیقه)</span><input id="task-editor-duration" inputMode="numeric" value={draft.duration} onChange={event => { const value = event.target.value; setDraft(current => ({ ...current, duration: value, durationExplicit: true })); }} aria-invalid={Boolean(errors.duration)} aria-describedby="task-duration-hint" /></label><p id="task-duration-hint" className="kte-hint">برای ثبت سریع، تنظیم این بخش لازم نیست. مقدار اولیهٔ تایمر ۴۵ دقیقه است.</p>{errorText('duration')}<TaskPlanningFields {...planningProps} section="time" />{errorText('due')}{errorText('planning')}</details>
+          <details open={expanded.advanced} onToggle={event => { const open = event.currentTarget.open; setExpanded(current => ({ ...current, advanced: open })); }}><summary>جزئیات پیشرفته</summary><label className="kte-field" htmlFor="task-editor-description"><span>توضیحات و جزئیات (اختیاری)</span><textarea id="task-editor-description" rows={3} value={draft.description} onChange={event => field('description', event.target.value)} /></label><label className="kte-field" htmlFor="task-editor-reminder"><span>ساعت یادآور داخل برنامه</span><input id="task-editor-reminder" type="time" value={draft.reminderTime} onChange={event => field('reminderTime', event.target.value)} aria-invalid={Boolean(errors.reminder)} /></label>{errorText('reminder')}<TaskPlanningFields {...planningProps} section="advanced" /></details>
+        </fieldset>
+      </form>
+      <footer className="kte-footer">{errorText('save')}<div><button type="button" disabled={saving} onClick={closeEditor}>انصراف</button><button className="kte-save" type="submit" form="task-editor-form" disabled={saving || !loaded}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</button></div></footer>
     </div>
-  );
+  </div>;
 };

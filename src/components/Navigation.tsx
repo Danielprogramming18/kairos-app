@@ -1,26 +1,13 @@
 import React, { useState } from 'react';
-import {
-  LayoutDashboard,
-  CheckSquare,
-  CalendarDays,
-  Timer,
-  Sparkles,
-  BookOpen,
-  BarChart3,
-  Settings,
-  Compass,
-  MoreHorizontal,
-  X,
-  PanelRightClose,
-  PanelRightOpen,
-} from 'lucide-react';
-import { NavTabId } from '../types';
+import { MoreHorizontal, PanelRightClose, PanelRightOpen, Settings2 } from 'lucide-react';
+import type { NavTabId } from '../types';
 import { usePlanning } from '../app/PlanningContext';
+import { normalizeMenuLayout, orderedMain } from '../utils/menuLayout';
+import { NAV_LABELS, type FeatureId } from './planningNavigation';
+import { FEATURE_ICONS } from './featureIcons';
 import { toPersianNum } from '../utils/persianDate';
-import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 
 export type { NavTabId };
-
 interface NavigationProps {
   activeTab: NavTabId;
   onSelectTab: (tab: NavTabId) => void;
@@ -29,395 +16,56 @@ interface NavigationProps {
   usefulInfoCount?: number;
   trashCount?: number;
 }
+const COLLAPSED_KEY = 'kairos_sidebar_collapsed_v1';
 
-interface NavItemConfig {
-  id: NavTabId;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  badge?: number;
-  group: 'primary' | 'secondary';
-}
-
-const SIDEBAR_COLLAPSED_STORAGE_KEY = 'kairos_sidebar_collapsed_v1';
-
-export const Navigation: React.FC<NavigationProps> = ({
-  activeTab,
-  onSelectTab,
-  pendingTasksCount,
-  ideasCount,
-  usefulInfoCount = 0,
-}) => {
-  const { state: planning } = usePlanning();
-  const [moreDrawerOpen, setMoreDrawerOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
-    } catch {
-      return false;
-    }
+export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab, pendingTasksCount, ideasCount, usefulInfoCount = 0 }) => {
+  const { state } = usePlanning();
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
-
-  const toggleCollapsed = () => {
-    setIsCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
-      } catch {
-        // Ignore storage error
-      }
-      return next;
-    });
+  const desktop = normalizeMenuLayout(state.layout.desktop, 'desktop');
+  const mobile = normalizeMenuLayout(state.layout.mobile, 'mobile');
+  const desktopMain = orderedMain(desktop), mobileMain = orderedMain(mobile);
+  const active = activeTab === 'deep_focus' ? 'pomodoro' : activeTab === 'ideas' ? 'useful_info' : activeTab;
+  const badge = (id: FeatureId) => id === 'workspace' ? pendingTasksCount : id === 'useful_info' ? ideasCount + usefulInfoCount : 0;
+  const toggle = () => setCollapsed(value => {
+    try { localStorage.setItem(COLLAPSED_KEY, String(!value)); } catch { /* Layout still works without localStorage. */ }
+    return !value;
+  });
+  const desktopButton = (id: FeatureId) => {
+    const Icon = FEATURE_ICONS[id], selected = active === id;
+    return <button key={id} type="button" onClick={() => onSelectTab(id)} aria-current={selected ? 'page' : undefined} title={collapsed ? NAV_LABELS[id] : undefined}
+      className={`w-full flex items-center gap-2.5 rounded-xl py-2.5 text-xs font-semibold cursor-pointer transition ${collapsed ? 'justify-center px-2' : 'px-3 text-right'} ${selected ? 'bg-indigo-600 text-white' : 'text-token-secondary hover:bg-surface-2 hover:text-token-primary'}`}>
+      <Icon className="w-4 h-4 shrink-0" />
+      {!collapsed && <><span className="min-w-0 flex-1 truncate">{NAV_LABELS[id]}</span>{badge(id) > 0 && <span className="rounded-full bg-surface-2 text-token-primary px-1.5 text-[10px]">{toPersianNum(badge(id))}</span>}</>}
+    </button>;
   };
-
-  // Normalize activeTab so unified destinations highlight their parent item
-  const normalizedActiveTab: NavTabId =
-    activeTab === 'deep_focus'
-      ? 'pomodoro'
-      : activeTab === 'ideas'
-      ? 'useful_info'
-      : activeTab;
-
-  const navItems: NavItemConfig[] = [
-    {id:'projects', label:'پروژه‌ها و جست‌وجو', icon:BookOpen, group:'primary'},
-    {id:'events', label:'رویدادها', icon:CalendarDays, group:'secondary'},
-    {id:'tracking', label:'پیگیری‌ها', icon:BarChart3, group:'secondary'},
-    {id:'capacity', label:'قبل از قول‌دادن', icon:Compass, group:'secondary'},
-    {id:'customize', label:'همهٔ ابزارها و چیدمان', icon:Settings, group:'secondary'},
-    {
-      id: 'dashboard',
-      label: 'امروز',
-      icon: LayoutDashboard,
-      group: 'primary',
-    },
-    {
-      id: 'workspace',
-      label: 'کارها',
-      icon: CheckSquare,
-      badge: pendingTasksCount > 0 ? pendingTasksCount : undefined,
-      group: 'primary',
-    },
-    {
-      id: 'calendar',
-      label: 'تقویم',
-      icon: CalendarDays,
-      group: 'primary',
-    },
-    {
-      id: 'pomodoro',
-      label: 'تمرکز',
-      icon: Timer,
-      group: 'primary',
-    },
-    {
-      id: 'habits',
-      label: 'عادت‌ها',
-      icon: Sparkles,
-      group: 'primary',
-    },
-    {
-      id: 'useful_info',
-      label: 'یادداشت‌ها',
-      icon: BookOpen,
-      badge: ideasCount > 0 ? ideasCount : undefined,
-      group: 'primary',
-    },
-    {
-      id: 'planner',
-      label: 'کمک به برنامه‌ریزی',
-      icon: Compass,
-      group: 'secondary',
-    },
-    {
-      id: 'analytics',
-      label: 'گزارش‌ها',
-      icon: BarChart3,
-      group: 'secondary',
-    },
-    {
-      id: 'sync',
-      label: 'تنظیمات',
-      icon: Settings,
-      group: 'secondary',
-    },
-  ];
-
-  // Primary 4 items for Mobile Bottom Bar + "More" sheet button (max 5 items)
-  const ordered = (mode: 'desktop' | 'mobile') => {
-    const prefs = planning.layout[mode];
-    return navItems.filter(i => i.id === 'customize' || !prefs.hidden.includes(i.id)).sort((a,b) => {
-      const rank = (id: string) => (prefs.pinned.includes(id) ? -1000 : 0) + (prefs.order.includes(id) ? prefs.order.indexOf(id) : 100 + navItems.findIndex(i => i.id === id));
-      return rank(a.id) - rank(b.id);
-    });
-  };
-  const desktopItems = ordered('desktop');
-  const customDesktopOrder = planning.layout.desktop.order.length > 0;
-  const mobileItems = ordered('mobile');
-  const mobileBarPrimaryIds: NavTabId[] = planning.layout.mobile.order.length || planning.layout.mobile.pinned.length
-    ? mobileItems.filter(i => i.id !== 'customize').slice(0,4).map(i => i.id)
-    : ['dashboard','workspace','pomodoro','habits'];
-  const mobilePrimaryItems = mobileItems.filter((item) => mobileBarPrimaryIds.includes(item.id));
-  const mobileMoreItems = mobileItems.filter((item) => !mobileBarPrimaryIds.includes(item.id));
-  const isMoreTabActive = mobileMoreItems.some((item) => item.id === normalizedActiveTab);
-
-  const handleSelectFromMore = (tab: NavTabId) => {
-    onSelectTab(tab);
-    setMoreDrawerOpen(false);
-  };
-
-  const moreSheetRef = useModalFocusTrap<HTMLDivElement>(
-    moreDrawerOpen,
-    () => setMoreDrawerOpen(false)
-  );
-
-  return (
-    <>
-      {/* 1. Desktop Right Sidebar (RTL Collapsible Architecture) */}
-      <aside
-        aria-label="ناوبری اصلی دسکتاپ"
-        className={`hidden lg:flex flex-col shrink-0 border rounded-[18px] kairos-glass-chrome min-h-[calc(100vh-6rem)] sticky top-20 select-none transition-[width] duration-200 ${
-          isCollapsed ? 'w-20' : 'w-60'
-        }`}
-      >
-        {/* Brand Identity & Collapse Toggle */}
-        <div
-          className={`px-4 h-16 flex items-center border-b border-token-subtle ${
-            isCollapsed ? 'justify-center' : 'justify-between'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-xs shrink-0">
-              ک
-            </div>
-            {!isCollapsed && (
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-token-primary leading-tight truncate">
-                  کایروس
-                </div>
-                <div className="text-[11px] text-token-muted truncate">
-                  فضای کار و تمرکز شخصی
-                </div>
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label={isCollapsed ? 'باز کردن نوار کناری' : 'جمع کردن نوار کناری'}
-            title={isCollapsed ? 'باز کردن نوار کناری' : 'جمع کردن نوار کناری'}
-            className="p-1.5 rounded-lg text-token-secondary hover:text-token-primary hover:bg-surface-2 transition cursor-pointer shrink-0"
-          >
-            {isCollapsed ? (
-              <PanelRightOpen className="w-4 h-4" />
-            ) : (
-              <PanelRightClose className="w-4 h-4" />
-            )}
-          </button>
-        </div>
-
-        {/* Navigation Groups */}
-        <nav className="flex-1 px-2.5 py-4 space-y-5 overflow-y-auto">
-          <div className="space-y-1">
-            {!isCollapsed && (
-              <div className="px-2.5 pb-1 text-[11px] font-semibold text-token-muted">
-                {customDesktopOrder ? 'ابزارهای من' : 'بخش‌های اصلی'}
-              </div>
-            )}
-            {desktopItems
-              .filter((i) => customDesktopOrder || i.group === 'primary' || planning.layout.desktop.pinned.includes(i.id))
-              .map((item) => {
-                const Icon = item.icon;
-                const isActive = normalizedActiveTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSelectTab(item.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                    title={isCollapsed ? item.label : undefined}
-                    className={`w-full flex items-center ${
-                      isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
-                    } py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer relative ${
-                      isActive
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-token-secondary hover:bg-surface-2 hover:text-token-primary'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5 truncate">
-                      <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          isActive ? 'text-white' : 'text-token-muted'
-                        }`}
-                      />
-                      {!isCollapsed && <span className="truncate">{item.label}</span>}
-                    </span>
-                    {!isCollapsed && item.badge !== undefined && (
-                      <span
-                        className={`px-1.5 py-0.5 text-[10px] rounded-full font-bold tabular-nums ${
-                          isActive
-                            ? 'bg-white text-indigo-700'
-                            : 'bg-surface-2 text-token-secondary'
-                        }`}
-                      >
-                        {toPersianNum(item.badge)}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-          </div>
-
-          {!customDesktopOrder && <div className="space-y-1 pt-2 border-t border-token-subtle">
-            {!isCollapsed && (
-              <div className="px-2.5 pb-1 text-[11px] font-semibold text-token-muted">
-                ابزارها و تحلیل
-              </div>
-            )}
-            {desktopItems
-              .filter((i) => i.group === 'secondary' && !planning.layout.desktop.pinned.includes(i.id))
-              .map((item) => {
-                const Icon = item.icon;
-                const isActive = normalizedActiveTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSelectTab(item.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                    title={isCollapsed ? item.label : undefined}
-                    className={`w-full flex items-center ${
-                      isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
-                    } py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-                      isActive
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-token-secondary hover:bg-surface-2 hover:text-token-primary'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5 truncate">
-                      <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          isActive ? 'text-white' : 'text-token-muted'
-                        }`}
-                      />
-                      {!isCollapsed && <span className="truncate">{item.label}</span>}
-                    </span>
-                    {!isCollapsed && item.badge !== undefined && (
-                      <span
-                        className={`px-1.5 py-0.5 text-[10px] rounded-full font-bold tabular-nums ${
-                          isActive
-                            ? 'bg-white text-indigo-700'
-                            : 'bg-surface-2 text-token-secondary'
-                        }`}
-                      >
-                        {toPersianNum(item.badge)}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-          </div>}
-        </nav>
-      </aside>
-
-      {/* 2. Mobile Bottom Navigation Bar (5 Primary Destinations) */}
-      <nav
-        aria-label="ناوبری پایین موبایل"
-        className="lg:hidden fixed bottom-0 inset-x-0 z-40 kairos-glass-chrome border-t px-2 py-1.5 flex items-center justify-around"
-      >
-        {mobilePrimaryItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = normalizedActiveTab === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                setMoreDrawerOpen(false);
-                onSelectTab(item.id);
-              }}
-              aria-current={isActive ? 'page' : undefined}
-              className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
-                isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-token-secondary'
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              <span className="w-full truncate">{item.label}</span>
-              {item.badge !== undefined && (
-                <span className="absolute top-1 right-2 px-1.5 py-0.2 text-[9px] rounded-full bg-indigo-600 text-white font-bold tabular-nums">
-                  {toPersianNum(item.badge)}
-                </span>
-              )}
-            </button>
-          );
-        })}
-
-        <button
-          type="button"
-          onClick={() => setMoreDrawerOpen((prev) => !prev)}
-          aria-expanded={moreDrawerOpen}
-          aria-label="سایر بخش‌ها"
-          className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-semibold transition cursor-pointer ${
-            isMoreTabActive || moreDrawerOpen
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-token-secondary'
-          }`}
-        >
-          <MoreHorizontal className="w-5 h-5" />
-          <span>بیشتر</span>
+  const moreActive = active === 'more' || active === 'customize' || !mobileMain.includes(active as FeatureId);
+  const desktopMoreActive = active === 'more' || (active !== 'customize' && !desktopMain.includes(active as FeatureId));
+  return <>
+    <aside aria-label="ناوبری اصلی دسکتاپ" className={`hidden lg:flex flex-col shrink-0 border rounded-[18px] kairos-glass-chrome sticky top-20 h-[calc(100dvh-6rem)] min-h-96 select-none transition-[width] duration-200 ${collapsed ? 'w-20' : 'w-60'}`}>
+      <div className={`px-4 h-16 shrink-0 flex items-center border-b border-token-subtle ${collapsed ? 'justify-center' : 'justify-between'}`}>
+        {!collapsed && <div className="flex items-center gap-2 min-w-0"><div className="w-8 h-8 rounded-xl bg-indigo-600 text-white grid place-items-center font-black">ک</div><div><div className="text-sm font-bold text-token-primary">کایروس</div><small className="text-token-muted text-[10px]">فضای کار و تمرکز شخصی</small></div></div>}
+        <button type="button" onClick={toggle} aria-label={collapsed ? 'باز کردن نوار کناری' : 'جمع کردن نوار کناری'} className="p-1.5 rounded-lg text-token-secondary hover:bg-surface-2 cursor-pointer">
+          {collapsed ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+        </button>
+      </div>
+      <nav className="flex-1 min-h-0 overflow-y-auto px-2.5 py-4 space-y-1">
+        {desktop.pinned.length > 0 && <div className="space-y-1 pb-3 mb-3 border-b border-token-subtle">{!collapsed && <p className="px-3 pb-1 text-[10px] text-token-muted">سنجاق‌شده‌ها</p>}{desktopMain.filter(id => desktop.pinned.includes(id)).map(desktopButton)}</div>}
+        {desktopMain.filter(id => !desktop.pinned.includes(id)).map(desktopButton)}
+        <button type="button" onClick={() => onSelectTab('more')} aria-current={desktopMoreActive ? 'page' : undefined} title={collapsed ? 'بیشتر' : undefined}
+          className={`w-full flex items-center gap-2.5 rounded-xl py-2.5 text-xs font-semibold cursor-pointer ${collapsed ? 'justify-center px-2' : 'px-3'} ${desktopMoreActive ? 'bg-indigo-600 text-white' : 'text-token-secondary hover:bg-surface-2'}`}>
+          <MoreHorizontal className="w-4 h-4 shrink-0" />{!collapsed && <span>بیشتر</span>}
         </button>
       </nav>
-
-      {/* 3. Mobile "More" Drawer Sheet */}
-      {moreDrawerOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="سایر بخش‌های کایروس"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMoreDrawerOpen(false);
-          }}
-          className="lg:hidden fixed inset-0 z-50 kairos-modal-backdrop flex items-end justify-center p-3 animate-fade-in"
-        >
-          <div
-            ref={moreSheetRef}
-            tabIndex={-1}
-            className="w-full max-w-md kairos-modal-panel p-4 space-y-3 mb-14 max-h-[75dvh] overflow-y-auto"
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-token-subtle">
-              <span className="text-xs font-bold text-token-primary">سایر بخش‌ها</span>
-              <button
-                type="button"
-                aria-label="بستن منو"
-                onClick={() => setMoreDrawerOpen(false)}
-                className="p-1 rounded-lg text-token-muted hover:text-token-primary"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {mobileMoreItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = normalizedActiveTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelectFromMore(item.id)}
-                    className={`flex items-center gap-2.5 p-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                      isActive
-                        ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'bg-surface-2 border-token-subtle text-token-primary'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+      <div className="shrink-0 p-2.5 border-t border-token-subtle"><button type="button" onClick={() => onSelectTab('customize')} title="شخصی‌سازی منو" aria-label="شخصی‌سازی منو" aria-current={active === 'customize' ? 'page' : undefined} className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs text-token-secondary hover:bg-surface-2 cursor-pointer ${collapsed ? 'justify-center' : ''}`}><Settings2 className="w-4 h-4 shrink-0" />{!collapsed && <span>شخصی‌سازی منو</span>}</button></div>
+    </aside>
+    <nav aria-label="ناوبری پایین موبایل" className="lg:hidden fixed bottom-0 inset-x-0 z-40 kairos-glass-chrome border-t px-2 pt-1.5 pb-[max(.375rem,env(safe-area-inset-bottom))] flex items-center justify-around">
+      {mobileMain.map(id => {
+        const Icon = FEATURE_ICONS[id], selected = active === id;
+        return <button type="button" key={id} onClick={() => onSelectTab(id)} aria-current={selected ? 'page' : undefined} className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-semibold cursor-pointer ${selected ? 'text-indigo-600 dark:text-indigo-400' : 'text-token-secondary'}`}><Icon className="w-5 h-5" /><span className="w-full truncate">{NAV_LABELS[id]}</span>{badge(id) > 0 && <span className="absolute top-0 right-2 rounded-full bg-indigo-600 text-white px-1 text-[9px]">{toPersianNum(badge(id))}</span>}</button>;
+      })}
+      <button type="button" onClick={() => onSelectTab('more')} aria-label="بیشتر" aria-current={moreActive ? 'page' : undefined} className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-semibold cursor-pointer ${moreActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-token-secondary'}`}><MoreHorizontal className="w-5 h-5" /><span>بیشتر</span></button>
+    </nav>
+  </>;
 };

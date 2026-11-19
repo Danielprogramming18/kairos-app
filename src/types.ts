@@ -111,7 +111,7 @@ export interface ChatMessage {
 }
 
 export type NavTabId =
-  | 'projects' | 'events' | 'tracking' | 'capacity' | 'customize'
+  | 'projects' | 'events' | 'tracking' | 'capacity' | 'customize' | 'more'
   | 'deep_focus'
   | 'dashboard'
   | 'calendar'
