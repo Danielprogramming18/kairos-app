@@ -30,7 +30,7 @@ export function PlanningProvider({
     if (!platformReady || saving.current) return;
     const request = ++generation.current;
     try {
-      const saved = (await container.settings.getSettings()).planning;
+      const saved = await container.planning.getPlanning();
       if (request !== generation.current) return;
       const next = saved ? validatePlanning(saved) : emptyPlanning();
       revision.current = next.revision;
@@ -68,12 +68,10 @@ export function PlanningProvider({
       fn(next);
       next.revision = state.revision + 1;
       validatePlanning(next);
-      const current = (await container.settings.getSettings()).planning ?? emptyPlanning();
+      const current = await container.planning.getPlanning();
       if (current.revision !== state.revision || current.revision !== revision.current) throw new Error('اطلاعات تغییر کرده است؛ تازه‌سازی کن و دوباره تلاش کن.');
-      const saved = await container.settings.saveSettings({
-        planning: next
-      });
-      if (saved.planning?.revision !== next.revision) throw new Error('میزبان ذخیرهٔ اطلاعات جدید را تأیید نکرد.');
+      const saved = await container.planning.savePlanning(next, {expectedRevision:current.revision});
+      if (saved.revision !== next.revision) throw new Error('میزبان ذخیرهٔ اطلاعات جدید را تأیید نکرد.');
       revision.current = next.revision;
       setState(next);
       return true;

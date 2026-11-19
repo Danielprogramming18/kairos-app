@@ -32,6 +32,7 @@ import {
 import { BackupEnvelopeV2 } from '../domain/models';
 import { usePlatform } from '../app/PlatformContext';
 import { usePlanning } from '../app/PlanningContext';
+import {hasPlanningContent} from '../infrastructure/planningRecords';
 import { toPersianNum } from '../utils/persianDate';
 import {
   createEncryptedBackupEnvelope,
@@ -141,7 +142,8 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
   const [importPreview, setImportPreview] = useState<BackupPreviewSummary | null>(null);
   const [restoreStrategy, setRestoreStrategy] = useState<'replace' | 'merge'>('replace');
   const { state: planningState } = usePlanning();
-  const planningMergeUnsupported = planningState.revision > 0 || Boolean(importPreview?.envelope?.payload.settings?.planning);
+  const importPlanning=importPreview?.envelope?.payload.planning??importPreview?.envelope?.payload.settings?.planning;
+  const planningMergeUnsupported = hasPlanningContent(planningState) || Boolean(importPlanning&&hasPlanningContent(importPlanning));
   useEffect(() => {
     if (planningMergeUnsupported) setRestoreStrategy('replace');
   }, [planningMergeUnsupported]);
@@ -198,7 +200,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
     try {
       const backupEnvelope = await container.backup.exportBackup();
 
-      const blob = new Blob([JSON.stringify(backupEnvelope, null, 2)], {
+      const blob = new Blob([JSON.stringify(backupEnvelope)], {
         type: 'application/json',
       });
       const url = URL.createObjectURL(blob);
@@ -233,7 +235,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
         canonicalEnvelope,
         exportPassword
       );
-      const blob = new Blob([JSON.stringify(encryptedEnvelope, null, 2)], {
+      const blob = new Blob([JSON.stringify(encryptedEnvelope)], {
         type: 'application/json',
       });
       const url = URL.createObjectURL(blob);
@@ -675,8 +677,8 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                 </div>
               </div>
 
-              {importPreview.envelope?.payload.settings?.planning && <p className="text-xs text-token-secondary">
-                این فایل همچنین شامل {toPersianNum(importPreview.envelope.payload.settings.planning.projects.length)} پروژه، {toPersianNum(importPreview.envelope.payload.settings.planning.events.length)} رویداد و {toPersianNum(importPreview.envelope.payload.settings.planning.metrics.length)} شاخص است.
+              {importPlanning && <p className="text-xs text-token-secondary">
+                این فایل همچنین شامل {toPersianNum(importPlanning.projects.length)} پروژه، {toPersianNum(importPlanning.events.length)} رویداد و {toPersianNum(importPlanning.metrics.length)} شاخص است.
               </p>}
               {planningMergeUnsupported && <p className="text-xs text-token-secondary">برای پشتیبان دارای پروژه و برنامه‌ریزی، فعلاً بازیابی با جایگزینی کامل انجام می‌شود. نسخهٔ پیش از بازیابی برای بازگرداندن نگهداری می‌شود.</p>}
               {/* Restore Strategy Selection */}

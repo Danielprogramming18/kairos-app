@@ -17,6 +17,9 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.nio.charset.StandardCharsets;
 
 /**
  * KairosAndroidBridge — Production Reference Implementation for Android Sketchware / Android Studio
@@ -29,7 +32,7 @@ import java.util.Set;
  *   ws.setDatabaseEnabled(true);
  *   ws.setAllowFileAccess(true);
  *   ws.setAllowContentAccess(true);
- *   ws.setAllowFileAccessFromFileURLs(true);
+ *   ws.setAllowFileAccessFromFileURLs(false);
  *   webview1.loadUrl("file:///android_asset/www/index.html");
  *
  * نحوهٔ استفاده در حالت B (اختیاری — فعال‌سازی پایگاه داده SQLite بومی اندروید):
@@ -71,6 +74,8 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         "focus.saveActiveTimer",
         "settings.get",
         "settings.save",
+        "planning.get",
+        "planning.save",
         "backup.export",
         "backup.restore",
         "backup.hasPreRestoreSnapshot",
@@ -95,7 +100,7 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         ws.setDatabaseEnabled(true);
         ws.setAllowFileAccess(true);
         ws.setAllowContentAccess(true);
-        ws.setAllowFileAccessFromFileURLs(true);
+        ws.setAllowFileAccessFromFileURLs(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ws.setForceDark(WebSettings.FORCE_DARK_AUTO);
         }
@@ -176,7 +181,7 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
     public String postMessage(String rawRequestJson) {
         String requestId = "unknown";
         try {
-            if (rawRequestJson == null || rawRequestJson.length() > MAX_BRIDGE_PAYLOAD_BYTES) {
+            if (rawRequestJson == null || rawRequestJson.getBytes(StandardCharsets.UTF_8).length > MAX_BRIDGE_PAYLOAD_BYTES) {
                 return buildErrorEnvelope(requestId, "PAYLOAD_TOO_LARGE", "Payload exceeds 5 MB limit");
             }
 
@@ -213,7 +218,9 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             res.put("version", CONTRACT_VERSION);
             res.put("ok", true);
             res.put("data", resultData != null ? resultData : JSONObject.NULL);
-            return res.toString();
+            String serialized=res.toString();
+            if(serialized.getBytes(StandardCharsets.UTF_8).length>MAX_BRIDGE_PAYLOAD_BYTES)return buildErrorEnvelope(requestId,"PAYLOAD_TOO_LARGE","Native response exceeds the 5 MiB bridge limit");
+            return serialized;
         } catch (BridgeExecutionException bex) {
             return buildErrorEnvelope(requestId, bex.code, bex.getMessage());
         } catch (Exception ex) {
@@ -404,15 +411,9 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
                 db.beginTransaction();
                 try {
                 JSONObject incoming = payload.has("settings") ? payload.getJSONObject("settings") : payload;
+                if(incoming.has("planning"))throw new BridgeExecutionException("VALIDATION_ERROR","Upgrade the interface to use the independent planning repository");
                 Object existingObj = getRecord(db, "settings", "user_settings");
                 JSONObject merged = existingObj != JSONObject.NULL ? (JSONObject) existingObj : new JSONObject();
-                if (incoming.has("planning")) {
-                    JSONObject next = incoming.getJSONObject("planning");
-                    JSONObject previous = merged.optJSONObject("planning");
-                    int actual = previous == null ? 0 : previous.optInt("revision", 0);
-                    if (next.optInt("schemaVersion", -1) != 1 || next.optInt("revision", -1) != actual + 1)
-                        throw new Exception("Planning revision conflict; refresh before saving");
-                }
                 Iterator<String> keys = incoming.keys();
                 while (keys.hasNext()) {
                     String k = keys.next();
@@ -425,78 +426,66 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
                 } finally { db.endTransaction(); }
             }
 
-            // Backup & Restore
+            case "planning.get": return getPlanningPage(db,payload);
+            case "planning.save": return savePlanningPatch(db,payload);
+            // Capture, validate, and apply against the same SQLite snapshot.
             case "backup.export": {
-                JSONObject env = new JSONObject();
-                env.put("app", "kairos");
-                env.put("schemaVersion", 2);
-                env.put("exportedAt", isoNow());
-                env.put("tasks", listCollection(db, "tasks", true, null));
-                env.put("habits", listCollection(db, "habits", true, null));
-                env.put("habitEntries", listCollection(db, "habitEntries", true, null));
-                env.put("notes", listCollection(db, "notes", true, null));
-                env.put("focusSessions", listCollection(db, "focusSessions", true, null));
-                env.put("settings", dispatchOperation("settings.get", new JSONObject()));
-                return env;
-            }
-            case "backup.restore": {
-                JSONObject envelope = payload.getJSONObject("envelope");
-                String strategy = payload.optString("strategy", "replace");
-                JSONObject currentSnapshot = (JSONObject) dispatchOperation("backup.export", new JSONObject());
-                currentSnapshot.put("id", "pre_restore_snapshot");
-                currentSnapshot.put("createdAt", isoNow());
-                upsertRecordWithConcurrency(db, "snapshots", currentSnapshot, null);
-
-                db.beginTransaction();
+                ensurePlanningRecords(db);
+                db.beginTransactionNonExclusive();
                 try {
-                    if ("replace".equals(strategy)) {
-                        db.execSQL("DELETE FROM kairos_records WHERE collection IN ('tasks','habits','habitEntries','notes','focusSessions');");
-                    }
-                    restoreCollectionArray(db, "tasks", envelope.optJSONArray("tasks"));
-                    restoreCollectionArray(db, "habits", envelope.optJSONArray("habits"));
-                    restoreCollectionArray(db, "habitEntries", envelope.optJSONArray("habitEntries"));
-                    restoreCollectionArray(db, "notes", envelope.optJSONArray("notes"));
-                    restoreCollectionArray(db, "focusSessions", envelope.optJSONArray("focusSessions"));
-                    JSONObject restoredSettings = envelope.optJSONObject("settings");
-                    if (restoredSettings != null) {
-                        restoredSettings = new JSONObject(restoredSettings.toString());
-                        restoredSettings.put("id", "user_settings");
-                        upsertRecordWithConcurrency(db, "settings", restoredSettings, null);
-                    } else if ("replace".equals(strategy)) {
-                        Object currentSettings = getRecord(db, "settings", "user_settings");
-                        if (currentSettings instanceof JSONObject) {
-                            JSONObject cleanSettings = new JSONObject(currentSettings.toString());
-                            cleanSettings.remove("planning");
-                            upsertRecordWithConcurrency(db, "settings", cleanSettings, null);
-                        }
-                    }
+                    JSONObject envelope = exportBackupInTransaction(db);
                     db.setTransactionSuccessful();
+                    return envelope;
                 } finally {
                     db.endTransaction();
                 }
-                JSONObject counts = new JSONObject();
-                counts.put("tasks", envelope.optJSONArray("tasks") != null ? envelope.optJSONArray("tasks").length() : 0);
-                return new JSONObject().put("restoredCounts", counts).put("snapshotKey", "pre_restore_snapshot");
+            }
+            case "backup.restore": {
+                ensurePlanningRecords(db);
+                String strategy = payload.optString("strategy", "replace");
+                if (!"replace".equals(strategy) && !"merge".equals(strategy)) {
+                    throw new BridgeExecutionException("VALIDATION_ERROR", "Unknown restore strategy");
+                }
+                JSONObject data = backupPayload(payload.getJSONObject("envelope"));
+                db.beginTransaction();
+                try {
+                    JSONObject snapshot = exportBackupInTransaction(db);
+                    if ("merge".equals(strategy) && (hasPlanningContent(snapshot.getJSONObject("payload").optJSONObject("planning"))
+                        || hasPlanningContent(data.optJSONObject("planning")) || hasPlanningContent(legacyPlanning(data)))) {
+                        throw new BridgeExecutionException("VALIDATION_ERROR", "Use replace to restore planning data");
+                    }
+                    snapshot.put("id", "pre_restore_snapshot").put("createdAt", isoNow());
+                    writeRestoredRecord(db, "snapshots", snapshot);
+                    JSONObject counts = applyBackupInTransaction(db, data, "replace".equals(strategy));
+                    db.setTransactionSuccessful();
+                    return new JSONObject().put("restoredCounts", counts).put("snapshotKey", "pre_restore_snapshot");
+                } finally {
+                    db.endTransaction();
+                }
             }
             case "backup.hasPreRestoreSnapshot": {
-                Object snap = getRecord(db, "snapshots", "pre_restore_snapshot");
-                JSONObject info = new JSONObject();
-                info.put("exists", snap != JSONObject.NULL);
-                if (snap != JSONObject.NULL) {
-                    info.put("createdAt", ((JSONObject) snap).optString("createdAt", isoNow()));
+                Object snapshot = getRecord(db, "snapshots", "pre_restore_snapshot");
+                JSONObject info = new JSONObject().put("exists", snapshot != JSONObject.NULL);
+                if (snapshot instanceof JSONObject) {
+                    info.put("createdAt", ((JSONObject) snapshot).optString("createdAt", ""));
                 }
                 return info;
             }
             case "backup.rollback": {
-                Object snapObj = getRecord(db, "snapshots", "pre_restore_snapshot");
-                if (snapObj == JSONObject.NULL) {
-                    throw new BridgeExecutionException("STORAGE_ERROR", "No pre-restore snapshot found");
+                ensurePlanningRecords(db);
+                db.beginTransaction();
+                try {
+                    Object snapshot = getRecord(db, "snapshots", "pre_restore_snapshot");
+                    if (!(snapshot instanceof JSONObject)) {
+                        throw new BridgeExecutionException("STORAGE_ERROR", "No pre-restore snapshot found");
+                    }
+                    JSONObject counts = applyBackupInTransaction(db, backupPayload((JSONObject) snapshot), true);
+                    db.execSQL("DELETE FROM kairos_records WHERE collection='snapshots' AND id='pre_restore_snapshot'");
+                    db.setTransactionSuccessful();
+                    return new JSONObject().put("restoredCounts", counts);
+                } finally {
+                    db.endTransaction();
                 }
-                JSONObject snap = (JSONObject) snapObj;
-                JSONObject restorePayload = new JSONObject();
-                restorePayload.put("envelope", snap);
-                restorePayload.put("strategy", "replace");
-                return dispatchOperation("backup.restore", restorePayload);
             }
 
             // Notifications
@@ -512,10 +501,231 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         }
     }
 
-    private void restoreCollectionArray(SQLiteDatabase db, String collection, JSONArray items) throws Exception {
-        if (items == null) return;
-        for (int i = 0; i < items.length(); i++) {
-            upsertRecordWithConcurrency(db, collection, items.getJSONObject(i), null);
+    private static final int PLANNING_RECORD_BYTES=256*1024;
+    private static final int PLANNING_PAGE_BYTES=512*1024;
+    private JSONObject emptyPlanning() throws Exception {
+        return new JSONObject("{\"schemaVersion\":1,\"revision\":0,\"projects\":[],\"templates\":[],\"events\":[],\"metrics\":[],\"layout\":{\"desktop\":{\"order\":[],\"hidden\":[],\"pinned\":[]},\"mobile\":{\"order\":[],\"hidden\":[],\"pinned\":[]}},\"availability\":[],\"commitments\":[],\"excludedDates\":[],\"allocations\":[],\"breakMinutes\":0,\"minimumSamples\":3,\"feedback\":[],\"predictions\":[]}");
+    }
+    private String planningKey(String collection,String id) {
+        StringBuilder encoded=new StringBuilder();
+        for(byte signed:id.getBytes(StandardCharsets.UTF_8)){int value=signed&255;if(value>='A'&&value<='Z'||value>='a'&&value<='z'||value>='0'&&value<='9'||"-_.!~*'()".indexOf(value)>=0)encoded.append((char)value);else encoded.append(String.format("%%%02X",value));}
+        return collection+":"+encoded;
+    }
+    private JSONObject planningRecord(String collection,String id,int position,Object value) throws Exception {
+        return new JSONObject().put("key",planningKey(collection,id)).put("collection",collection).put("position",position).put("value",value);
+    }
+    private void validatePlanningRecord(JSONObject record) throws Exception {
+        String key=record.optString("key","");String collection=record.optString("collection","");
+        Set<String> allowed=new HashSet<>(Arrays.asList("meta","projects","templates","events","metrics","metricEntries","availability","commitments","feedback","predictions","allocations","previousAllocations","excludedDates"));
+        if(key.isEmpty()||key.length()>2048||!allowed.contains(collection)||record.optLong("position",-1)<0||!record.has("value")||"meta".equals(key)!= "meta".equals(collection))throw new BridgeExecutionException("VALIDATION_ERROR","Invalid planning record");
+        if(record.toString().getBytes(StandardCharsets.UTF_8).length>PLANNING_RECORD_BYTES)throw new BridgeExecutionException("PAYLOAD_TOO_LARGE","A planning record exceeds 256 KiB");
+    }
+    private JSONArray splitPlanning(JSONObject state) throws Exception {
+        if(state.optInt("schemaVersion",-1)!=1||state.optLong("revision",-1)<0)throw new BridgeExecutionException("VALIDATION_ERROR","Invalid planning schema/revision");
+        if(state.toString().getBytes(StandardCharsets.UTF_8).length>16*1024*1024)throw new BridgeExecutionException("PAYLOAD_TOO_LARGE","Planning exceeds 16 MiB");
+        JSONObject preferences=new JSONObject(state.toString());
+        String[] collections={"projects","templates","events","availability","commitments","feedback","predictions"};
+        for(String collection:collections)preferences.remove(collection);
+        for(String collection:new String[]{"metrics","allocations","previousAllocations","excludedDates"})preferences.remove(collection);
+        preferences.put("storageVersion",1);preferences.put("previousAllocationsPresent",state.has("previousAllocations"));
+        JSONArray rows=new JSONArray().put(new JSONObject().put("key","meta").put("collection","meta").put("position",0).put("value",preferences));
+        for(String collection:collections){JSONArray items=state.getJSONArray(collection);for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);rows.put(planningRecord(collection,item.getString("id"),i,item));}}
+        JSONArray metrics=state.getJSONArray("metrics");
+        for(int i=0;i<metrics.length();i++){JSONObject metric=metrics.getJSONObject(i);String id=metric.getString("id");JSONObject definition=new JSONObject(metric.toString());definition.remove("entries");rows.put(planningRecord("metrics",id,i,definition));JSONArray entries=metric.getJSONArray("entries");for(int j=0;j<entries.length();j++){JSONObject entry=entries.getJSONObject(j);JSONObject row=planningRecord("metricEntries",id,j,entry);row.put("key",planningKey("metricEntries",id)+"/"+planningKey("",entry.getString("id")).substring(1));row.put("ownerId",id);rows.put(row);}}
+        for(String collection:new String[]{"allocations","previousAllocations"}){JSONArray items=state.optJSONArray(collection);if(items==null)continue;java.util.HashMap<String,Integer> duplicates=new java.util.HashMap<>();for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);String id=item.getString("taskId")+"/"+item.getString("start");Integer previous=duplicates.get(id);int occurrence=previous==null?0:previous;duplicates.put(id,occurrence+1);JSONObject row=planningRecord(collection,id,i,item);row.put("key",row.getString("key")+"/"+occurrence);rows.put(row);}}
+        JSONArray excluded=state.getJSONArray("excludedDates");for(int i=0;i<excluded.length();i++)rows.put(planningRecord("excludedDates",excluded.getString(i),i,excluded.get(i)));
+        Set<String> keys=new HashSet<>();for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);validatePlanningRecord(row);if(!keys.add(row.getString("key")))throw new BridgeExecutionException("VALIDATION_ERROR","Duplicate planning identifier");}return rows;
+    }
+    private ArrayList<JSONObject> orderedPlanning(JSONArray records,String collection) throws Exception {
+        ArrayList<JSONObject> items=new ArrayList<>();for(int i=0;i<records.length();i++){JSONObject row=records.getJSONObject(i);if(collection.equals(row.optString("collection")))items.add(row);}Collections.sort(items,(a,b)->Long.compare(a.optLong("position"),b.optLong("position")));return items;
+    }
+    private JSONObject joinPlanning(JSONArray records) throws Exception {
+        if(records.length()==0)return emptyPlanning();JSONObject preferences=null;
+        for(int i=0;i<records.length();i++)if("meta".equals(records.getJSONObject(i).optString("key")))preferences=records.getJSONObject(i).getJSONObject("value");
+        if(preferences==null||preferences.optInt("storageVersion",-1)!=1)throw new BridgeExecutionException("STORAGE_ERROR","Missing planning metadata");
+        JSONObject state=new JSONObject(preferences.toString());state.remove("storageVersion");boolean previous=state.optBoolean("previousAllocationsPresent");state.remove("previousAllocationsPresent");
+        for(String collection:new String[]{"projects","templates","events","availability","commitments","feedback","predictions","allocations","excludedDates","previousAllocations"}){if("previousAllocations".equals(collection)&&!previous)continue;JSONArray items=new JSONArray();for(JSONObject row:orderedPlanning(records,collection))items.put(row.get("value"));state.put(collection,items);}
+        java.util.Map<String, JSONArray> histories = new java.util.HashMap<>();
+        for (JSONObject row : orderedPlanning(records, "metricEntries")) {
+            String owner = row.getString("ownerId");
+            JSONArray entries = histories.get(owner);
+            if (entries == null) {
+                entries = new JSONArray();
+                histories.put(owner, entries);
+            }
+            entries.put(row.get("value"));
+        }
+        JSONArray metrics = new JSONArray();
+        for (JSONObject row : orderedPlanning(records, "metrics")) {
+            JSONObject metric = new JSONObject(row.getJSONObject("value").toString());
+            JSONArray entries = histories.remove(metric.getString("id"));
+            metric.put("entries", entries == null ? new JSONArray() : entries);
+            metrics.put(metric);
+        }
+        if (!histories.isEmpty()) throw new BridgeExecutionException("STORAGE_ERROR", "A measurement has no matching metric");
+        state.put("metrics",metrics);
+        if(state.toString().getBytes(StandardCharsets.UTF_8).length>16*1024*1024)throw new BridgeExecutionException("PAYLOAD_TOO_LARGE","Planning exceeds 16 MiB");return state;
+    }
+    private JSONArray readPlanningRecords(SQLiteDatabase db) throws Exception {
+        JSONArray records=new JSONArray();try(Cursor cursor=db.rawQuery("SELECT json_payload FROM kairos_records WHERE collection='planningRecords' ORDER BY id",null)){while(cursor.moveToNext())records.put(new JSONObject(cursor.getString(0)));}return records;
+    }
+    private void writePlanningRecord(SQLiteDatabase db,JSONObject record) throws Exception {
+        validatePlanningRecord(record);db.execSQL("INSERT OR REPLACE INTO kairos_records (collection,id,deleted_at,updated_at,revision,json_payload) VALUES ('planningRecords',?,NULL,?,1,?)",new Object[]{record.getString("key"),isoNow(),record.toString()});
+    }
+    private boolean sameJson(Object a,Object b) throws Exception {
+        if(a instanceof JSONObject&&b instanceof JSONObject){JSONObject x=(JSONObject)a,y=(JSONObject)b;if(x.length()!=y.length())return false;Iterator<String> keys=x.keys();while(keys.hasNext()){String k=keys.next();if(!y.has(k)||!sameJson(x.get(k),y.get(k)))return false;}return true;}
+        if(a instanceof JSONArray&&b instanceof JSONArray){JSONArray x=(JSONArray)a,y=(JSONArray)b;if(x.length()!=y.length())return false;for(int i=0;i<x.length();i++)if(!sameJson(x.get(i),y.get(i)))return false;return true;}
+        if(a instanceof Number&&b instanceof Number)return Double.compare(((Number)a).doubleValue(),((Number)b).doubleValue())==0;return a==null?b==null:a.equals(b);
+    }
+    private void ensurePlanningRecords(SQLiteDatabase db) throws Exception {
+        db.beginTransaction();try{
+            if(getRecord(db,"planningRecords","meta")==JSONObject.NULL){
+                Object raw=getRecord(db,"settings","user_settings");JSONObject settings=raw instanceof JSONObject?new JSONObject(raw.toString()):new JSONObject();JSONObject legacy=settings.optJSONObject("planning");JSONObject state=legacy==null?emptyPlanning():legacy;JSONArray rows=splitPlanning(state);
+                if(legacy!=null)db.execSQL("INSERT OR IGNORE INTO kairos_records (collection,id,updated_at,revision,json_payload) VALUES ('planningRecovery','legacy-settings-v1',?,1,?)",new Object[]{isoNow(),legacy.toString()});
+                for(int i=0;i<rows.length();i++)writePlanningRecord(db,rows.getJSONObject(i));
+                if(!sameJson(joinPlanning(readPlanningRecords(db)),state))throw new BridgeExecutionException("STORAGE_ERROR","Planning migration verification failed; original settings retained");
+                if(legacy!=null){settings.remove("planning");db.execSQL("UPDATE kairos_records SET json_payload=? WHERE collection='settings' AND id='user_settings'",new Object[]{settings.toString()});}
+            }db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
+    }
+    private JSONObject getPlanningPage(SQLiteDatabase db,JSONObject payload) throws Exception {
+        ensurePlanningRecords(db);db.beginTransactionNonExclusive();try{
+            JSONObject metadata=(JSONObject)getRecord(db,"planningRecords","meta");long revision=metadata.getJSONObject("value").getLong("revision");
+            if(payload.has("expectedRevision")&&!payload.isNull("expectedRevision")&&payload.getLong("expectedRevision")!=revision)throw new BridgeExecutionException("CONFLICT_STALE_REVISION","Planning changed while paging");
+            int cursor=payload.optInt("cursor",0),total;try(Cursor count=db.rawQuery("SELECT COUNT(*) FROM kairos_records WHERE collection='planningRecords'",null)){count.moveToFirst();total=count.getInt(0);}if(cursor<0||cursor>total)throw new BridgeExecutionException("VALIDATION_ERROR","Invalid planning cursor");
+            JSONArray page=new JSONArray();int bytes=0;try(Cursor rows=db.rawQuery("SELECT json_payload FROM kairos_records WHERE collection='planningRecords' ORDER BY id LIMIT -1 OFFSET ?",new String[]{String.valueOf(cursor)})){while(rows.moveToNext()){String raw=rows.getString(0);int size=raw.getBytes(StandardCharsets.UTF_8).length;if(page.length()>0&&bytes+size>PLANNING_PAGE_BYTES)break;bytes+=size;page.put(new JSONObject(raw));}}
+            int next=cursor+page.length();db.setTransactionSuccessful();return new JSONObject().put("revision",revision).put("records",page).put("nextCursor",next<total?next:JSONObject.NULL);
+        }finally{db.endTransaction();}
+    }
+    private JSONObject savePlanningPatch(SQLiteDatabase db,JSONObject payload) throws Exception {
+        ensurePlanningRecords(db);db.beginTransaction();try{
+            JSONObject taskRevisions=payload.optJSONObject("expectedTaskRevisions");if(taskRevisions!=null){int count=0;try(Cursor cursor=db.rawQuery("SELECT id,revision FROM kairos_records WHERE collection='tasks' AND (deleted_at IS NULL OR deleted_at='')",null)){while(cursor.moveToNext()){count++;if(!taskRevisions.has(cursor.getString(0))||taskRevisions.optLong(cursor.getString(0),-1)!=cursor.getLong(1))throw new BridgeExecutionException("CONFLICT_STALE_REVISION","Tasks changed before schedule confirmation");}}if(count!=taskRevisions.length())throw new BridgeExecutionException("CONFLICT_STALE_REVISION","Tasks changed before schedule confirmation");}
+            long actual=planningRevision(db),expected=payload.optLong("expectedRevision",-1),revision=payload.optLong("revision",-1);
+            if(actual<0||actual>=9_007_199_254_740_991L)throw new BridgeExecutionException("VALIDATION_ERROR","Planning revision is outside its safe range");
+            if(actual!=expected||revision!=actual+1)throw new BridgeExecutionException("CONFLICT_STALE_REVISION","Planning changed; refresh before saving");
+            if(payload.optInt("storageVersion",-1)!=1)throw new BridgeExecutionException("VALIDATION_ERROR","Unsupported planning storage version");
+            JSONArray upserts=payload.getJSONArray("upserts"),deletes=payload.getJSONArray("deletes");for(int i=0;i<upserts.length();i++)writePlanningRecord(db,upserts.getJSONObject(i));for(int i=0;i<deletes.length();i++)db.execSQL("DELETE FROM kairos_records WHERE collection='planningRecords' AND id=?",new Object[]{deletes.getString(i)});
+            if(joinPlanning(readPlanningRecords(db)).getLong("revision")!=revision)throw new BridgeExecutionException("VALIDATION_ERROR","Planning metadata revision mismatch");db.setTransactionSuccessful();return new JSONObject().put("revision",revision);
+        }finally{db.endTransaction();}
+    }
+
+    private static final String[] BACKUP_COLLECTIONS = {"tasks", "habits", "habitEntries", "notes", "focusSessions"};
+
+    private long planningRevision(SQLiteDatabase db) throws Exception {
+        return ((JSONObject)getRecord(db, "planningRecords", "meta")).getJSONObject("value").getLong("revision");
+    }
+
+    private JSONObject backupPayload(JSONObject envelope) throws Exception {
+        return envelope.has("payload") ? envelope.getJSONObject("payload") : envelope;
+    }
+
+    private JSONObject legacyPlanning(JSONObject data) {
+        JSONObject settings = data.optJSONObject("settings");
+        return settings == null ? null : settings.optJSONObject("planning");
+    }
+
+    private boolean hasPlanningContent(JSONObject state) throws Exception {
+        if (state == null) return false;
+        if (state.getInt("breakMinutes") != 0 || state.getInt("minimumSamples") != 3) return true;
+        for (String key : new String[]{"projects", "templates", "events", "metrics", "allocations", "previousAllocations",
+            "availability", "commitments", "excludedDates", "feedback", "predictions"}) {
+            JSONArray items = state.optJSONArray(key);
+            if (items != null && items.length() > 0) return true;
+        }
+        String[] order = {"dashboard", "workspace", "projects", "calendar", "pomodoro", "habits", "useful_info",
+            "events", "tracking", "capacity", "planner", "analytics", "sync"};
+        for (String mode : new String[]{"desktop", "mobile"}) {
+            JSONObject menu = state.getJSONObject("layout").getJSONObject(mode);
+            JSONArray menuOrder = menu.getJSONArray("order");
+            if (menu.getJSONArray("pinned").length() > 0 || menu.getJSONArray("hidden").length() > 0) return true;
+            if (menuOrder.length() > 0 && (!menu.has("main") || !sameJson(menuOrder, new JSONArray(Arrays.asList(order))))) return true;
+            JSONArray main = menu.optJSONArray("main");
+            int defaultCount = "desktop".equals(mode) ? 5 : 3;
+            if (main != null && !sameJson(main, new JSONArray(Arrays.asList(order).subList(0, defaultCount)))) return true;
+        }
+        return false;
+    }
+
+    private JSONObject exportBackupInTransaction(SQLiteDatabase db) throws Exception {
+        JSONObject data = new JSONObject();
+        for (String collection : BACKUP_COLLECTIONS) data.put(collection, listCollection(db, collection, true, null));
+        Object settings = getRecord(db, "settings", "user_settings");
+        data.put("settings", settings == JSONObject.NULL ? dispatchOperation("settings.get", new JSONObject()) : settings);
+        data.put("planning", joinPlanning(readPlanningRecords(db)));
+        JSONObject envelope = new JSONObject().put("app", "Kairos").put("appId", "kairos")
+            .put("formatVersion", 2).put("schemaVersion", 2).put("platform", "android_webview")
+            .put("encrypted", false).put("exportedAt", isoNow()).put("payload", data);
+        if (envelope.toString().getBytes(StandardCharsets.UTF_8).length + 1024 > MAX_BRIDGE_PAYLOAD_BYTES) {
+            throw new BridgeExecutionException("PAYLOAD_TOO_LARGE", "Native backup exceeds the 5 MiB bridge limit");
+        }
+        return envelope;
+    }
+
+    private JSONObject applyBackupInTransaction(SQLiteDatabase db, JSONObject data, boolean replace) throws Exception {
+        if (replace) {
+            JSONObject state = data.optJSONObject("planning");
+            if (state == null) state = legacyPlanning(data);
+            state = state == null ? emptyPlanning() : new JSONObject(state.toString());
+            long current = planningRevision(db);
+            long imported = state.getLong("revision");
+            long limit = 9_007_199_254_740_991L;
+            if (current < 0 || current >= limit || imported < 0 || imported > limit) {
+                throw new BridgeExecutionException("VALIDATION_ERROR", "Planning revision is outside its safe range");
+            }
+            state.put("revision", Math.max(current + 1, imported));
+            JSONArray records = splitPlanning(state);
+            db.execSQL("DELETE FROM kairos_records WHERE collection IN ('tasks','habits','habitEntries','notes','focusSessions','planningRecords')");
+            for (int i = 0; i < records.length(); i++) writePlanningRecord(db, records.getJSONObject(i));
+        }
+        JSONObject counts = new JSONObject();
+        for (String collection : BACKUP_COLLECTIONS) {
+            JSONArray items = data.optJSONArray(collection);
+            int count = items == null ? 0 : items.length();
+            for (int i = 0; i < count; i++) {
+                JSONObject record = items.getJSONObject(i);
+                if (replace) writeRestoredRecord(db, collection, record);
+                else upsertRecordWithConcurrency(db, collection, record, null);
+            }
+            counts.put(collection, count);
+        }
+        JSONObject settings = data.optJSONObject("settings");
+        if (settings != null) {
+            JSONObject clean = new JSONObject(settings.toString());
+            clean.remove("planning");
+            clean.put("id", "user_settings");
+            if (replace) writeRestoredRecord(db, "settings", clean);
+            else upsertRecordWithConcurrency(db, "settings", clean, null);
+        }
+        return counts;
+    }
+
+    private void writeRestoredRecord(SQLiteDatabase db, String collection, JSONObject record) throws Exception {
+        String deletedAt = record.isNull("deletedAt") ? null : record.getString("deletedAt");
+        db.execSQL("INSERT OR REPLACE INTO kairos_records (collection,id,deleted_at,updated_at,revision,json_payload) VALUES (?,?,?,?,?,?)",
+            new Object[]{collection, record.getString("id"), deletedAt, record.optString("updatedAt", isoNow()),
+                record.optLong("revision", 1), record.toString()});
+    }
+
+    // SQLite CursorWindow can be smaller than a valid legacy settings row or restore snapshot.
+    private JSONObject readLargeRecord(SQLiteDatabase db, String collection, String id) throws Exception {
+        db.beginTransactionNonExclusive();
+        try {
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            int pageBytes = 128 * 1024;
+            for (int offset = 1; ; offset += pageBytes) {
+                String sql = "SELECT substr(CAST(json_payload AS BLOB), ?, ?) FROM kairos_records WHERE collection=? AND id=?";
+                try (Cursor page = db.rawQuery(sql, new String[]{String.valueOf(offset), String.valueOf(pageBytes), collection, id})) {
+                    if (!page.moveToFirst()) throw new BridgeExecutionException("STORAGE_ERROR", "Record changed during read");
+                    byte[] bytes = page.getBlob(0);
+                    output.write(bytes);
+                    if (bytes.length < pageBytes) break;
+                }
+            }
+            JSONObject record = new JSONObject(new String(output.toByteArray(), StandardCharsets.UTF_8));
+            db.setTransactionSuccessful();
+            return record;
+        } finally {
+            db.endTransaction();
         }
     }
 
@@ -538,14 +748,16 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
 
     private Object getRecord(SQLiteDatabase db, String collection, String id) throws Exception {
         try (Cursor c = db.rawQuery(
-            "SELECT json_payload FROM kairos_records WHERE collection = ? AND id = ?",
+            "SELECT CASE WHEN length(CAST(json_payload AS BLOB)) <= 524288 THEN json_payload ELSE NULL END FROM kairos_records WHERE collection = ? AND id = ?",
             new String[]{collection, id}
         )) {
             if (c.moveToFirst()) {
-                return new JSONObject(c.getString(0));
+                if (!c.isNull(0)) return new JSONObject(c.getString(0));
+            } else {
+                return JSONObject.NULL;
             }
         }
-        return JSONObject.NULL;
+        return readLargeRecord(db, collection, id);
     }
 
     private JSONObject upsertRecordWithConcurrency(
@@ -554,6 +766,19 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         JSONObject record,
         Integer expectedRevision
     ) throws Exception {
+        if (db.inTransaction()) return upsertRecordInTransaction(db, collection, record, expectedRevision);
+        db.beginTransaction();
+        try {
+            JSONObject saved = upsertRecordInTransaction(db, collection, record, expectedRevision);
+            db.setTransactionSuccessful();
+            return saved;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    private JSONObject upsertRecordInTransaction(SQLiteDatabase db, String collection, JSONObject record,
+                                                Integer expectedRevision) throws Exception {
         String id = record.getString("id");
         Object existingObj = getRecord(db, collection, id);
         int nextRev = 1;
@@ -562,8 +787,8 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             int currentRev = existing.optInt("revision", 1);
             if (expectedRevision != null && currentRev != expectedRevision) {
                 throw new BridgeExecutionException(
-                    "STORAGE_ERROR",
-                    "CONFLICT_STALE_REVISION: expected " + expectedRevision + ", actual " + currentRev
+                    "CONFLICT_STALE_REVISION",
+                    "Expected revision " + expectedRevision + ", actual " + currentRev
                 );
             }
             nextRev = currentRev + 1;

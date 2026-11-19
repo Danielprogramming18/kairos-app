@@ -1,4 +1,8 @@
 use chrono::{SecondsFormat, Utc};
+use crate::planning;
+#[cfg(test)]
+#[path = "planning_tests.rs"]
+mod planning_storage_tests;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::fs;
@@ -207,6 +211,10 @@ impl KairosSqliteDatabase {
                 key TEXT PRIMARY KEY,
                 updated_at TEXT NOT NULL,
                 json_value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS planning_records (
+                key TEXT PRIMARY KEY,
+                json_data TEXT NOT NULL
             );",
         )?;
 
@@ -375,6 +383,8 @@ impl KairosSqliteDatabase {
             // ================= SETTINGS =================
             "settings.get" => self.get_settings(),
             "settings.save" => self.save_settings(payload),
+            "planning.get" => self.get_planning_page(payload),
+            "planning.save" => self.save_planning_patch(payload),
 
             // ================= BACKUP & RESTORE =================
             "backup.export" => self.export_backup(),
@@ -1150,6 +1160,10 @@ impl KairosSqliteDatabase {
             .conn
             .lock()
             .map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
+        Self::read_settings(&conn)
+    }
+
+    fn read_settings(conn: &Connection) -> Result<Value, DbError> {
         let raw: Option<String> = conn
             .query_row(
                 "SELECT json_data FROM settings WHERE id = 'default'",
@@ -1179,19 +1193,12 @@ impl KairosSqliteDatabase {
             .get("settings")
             .and_then(|v| v.as_object())
             .ok_or_else(|| DbError::validation("فیلد settings الزامی است."))?;
+        if partial.contains_key("planning") { return Err(DbError::validation("این نسخه از مخزن مستقل برنامه‌ریزی استفاده می‌کند؛ رابط برنامه را به‌روز کن.")); }
 
         // Read, compare and write while holding the same database lock.
         let conn = self.conn.lock().map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
         let raw: String = conn.query_row("SELECT json_data FROM settings WHERE id = 'default'", [], |row| row.get(0))?;
         let mut current: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
-        if let Some(planning) = partial.get("planning") {
-            let actual = current.pointer("/planning/revision").and_then(Value::as_i64).unwrap_or(0);
-            let incoming = planning.get("revision").and_then(Value::as_i64).unwrap_or(-1);
-            if planning.get("schemaVersion").and_then(Value::as_i64) != Some(1) {
-                return Err(DbError::validation("نسخهٔ برنامه‌ریزی پشتیبانی نمی‌شود."));
-            }
-            if incoming != actual + 1 { return Err(DbError::conflict("planning", incoming - 1, actual)); }
-        }
         let now = now_iso_string();
         if let Some(obj) = current.as_object_mut() {
             for (k, v) in partial {
@@ -1208,24 +1215,111 @@ impl KairosSqliteDatabase {
         Ok(current)
     }
 
-    fn export_backup(&self) -> Result<Value, DbError> {
-        let tasks = self.list_tasks(&json!({ "includeDeleted": true }))?;
-        let habits = self.list_habits(&json!({ "includeDeleted": true }))?;
-        let habit_entries = self.list_habit_entries(&json!({}))?;
-        let notes = self.list_notes(&json!({ "includeDeleted": true }))?;
-        let focus_sessions = self.list_focus_sessions(&json!({ "includeDeleted": true }))?;
-        let settings = self.get_settings()?;
+    fn read_planning_records(conn: &Connection) -> Result<Vec<Value>, DbError> {
+        let mut statement=conn.prepare("SELECT json_data FROM planning_records ORDER BY key")?;
+        let rows=statement.query_map([],|row|row.get::<_,String>(0))?;
+        let mut records=Vec::new();for raw in rows {records.push(serde_json::from_str(&raw?).map_err(|e|DbError::storage(e.to_string()))?);}Ok(records)
+    }
 
-        let backup_payload = json!({
-            "tasks": tasks,
-            "habits": habits,
-            "habitEntries": habit_entries,
-            "notes": notes,
-            "focusSessions": focus_sessions,
-            "settings": settings
+    fn planning_revision(conn: &Connection) -> Result<i64, DbError> {
+        let raw: String = conn.query_row("SELECT json_data FROM planning_records WHERE key='meta'", [], |row| row.get(0))?;
+        let meta: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
+        meta.pointer("/value/revision").and_then(Value::as_i64)
+            .ok_or_else(|| DbError::storage("نسخهٔ جاری برنامه‌ریزی نامعتبر است."))
+    }
+
+    fn ensure_planning_records(&self) -> Result<(), DbError> {
+        let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;
+        let tx=conn.transaction()?;
+        let present:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM planning_records WHERE key='meta')",[],|r|r.get(0))?;
+        if !present {
+            let raw:Option<String>=tx.query_row("SELECT json_data FROM settings WHERE id='default'",[],|r|r.get(0)).optional()?;
+            let mut settings:Value=raw.as_ref().map(|s|serde_json::from_str(s)).transpose().map_err(|e|DbError::storage(e.to_string()))?.unwrap_or(json!({"id":"default"}));
+            let legacy=settings.get("planning").cloned();let state=legacy.clone().unwrap_or_else(planning::empty_state);
+            let records=planning::split(&state)?;
+            if let Some(legacy)=legacy {tx.execute("INSERT OR IGNORE INTO kv_state (key,updated_at,json_value) VALUES (?1,?2,?3)",params![planning::RECOVERY_KEY,now_iso_string(),legacy.to_string()])?;}
+            for record in records {tx.execute("INSERT INTO planning_records (key,json_data) VALUES (?1,?2)",params![record["key"].as_str(),record.to_string()])?;}
+            let verified=planning::join(&Self::read_planning_records(&tx)?)?;
+            if verified!=state {return Err(DbError::storage("تأیید مهاجرت برنامه‌ریزی شکست خورد؛ دادهٔ قبلی حفظ شد."));}
+            if let Some(settings)=settings.as_object_mut() {settings.remove("planning");}
+            if raw.is_some(){tx.execute("UPDATE settings SET json_data=?1 WHERE id='default'",params![settings.to_string()])?;}
+            tx.execute("INSERT OR IGNORE INTO schema_migrations (version,applied_at) VALUES (4,?1)",params![now_iso_string()])?;
+        }
+        tx.commit()?;Ok(())
+    }
+
+    fn get_planning_page(&self,payload:&Value)->Result<Value,DbError>{
+        self.ensure_planning_records()?;
+        let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;let tx=conn.transaction()?;
+        let revision = Self::planning_revision(&tx)?;
+        if let Some(expected)=payload.get("expectedRevision").and_then(Value::as_i64){if expected!=revision{return Err(DbError::conflict("planning",expected,revision));}}
+        let cursor=payload.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let total:usize=tx.query_row("SELECT COUNT(*) FROM planning_records",[],|row|row.get(0))?;
+        if cursor>total{return Err(DbError::validation("صفحهٔ برنامه‌ریزی نامعتبر است."));}
+        let mut page=Vec::new();let mut bytes=0;let mut next=cursor;
+        {let mut statement=tx.prepare("SELECT json_data FROM planning_records ORDER BY key LIMIT -1 OFFSET ?1")?;let rows=statement.query_map(params![cursor],|row|row.get::<_,String>(0))?;
+        for raw in rows {let raw=raw?;let size=raw.len();if !page.is_empty()&&bytes+size>planning::PAGE_LIMIT{break;}bytes+=size;page.push(serde_json::from_str::<Value>(&raw).map_err(|e|DbError::storage(e.to_string()))?);next+=1;}}
+        tx.commit()?;Ok(json!({"revision":revision,"records":page,"nextCursor":if next<total{Some(next)}else{None}}))
+    }
+
+    fn save_planning_patch(&self,payload:&Value)->Result<Value,DbError>{
+        self.ensure_planning_records()?;
+        let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;let tx=conn.transaction()?;
+        if let Some(expected)=payload.get("expectedTaskRevisions").and_then(Value::as_object){
+            let mut statement=tx.prepare("SELECT id,revision FROM tasks WHERE deleted_at IS NULL OR deleted_at='' ")?;
+            let rows=statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))?;
+            let mut count=0;for row in rows {let(id,revision)=row?;count+=1;if expected.get(&id).and_then(Value::as_i64)!=Some(revision){return Err(DbError::conflict("tasks",-1,-1));}}
+            if count!=expected.len(){return Err(DbError::conflict("tasks",-1,-1));}
+        }
+        let actual = Self::planning_revision(&tx)?;
+        let expected=payload.get("expectedRevision").and_then(Value::as_i64).unwrap_or(-1);let revision=payload.get("revision").and_then(Value::as_i64).unwrap_or(-1);
+        if !(0..9_007_199_254_740_991_i64).contains(&actual) {
+            return Err(DbError::validation("نسخهٔ برنامه‌ریزی خارج از محدوده است."));
+        }
+        if actual!=expected||revision!=actual+1{return Err(DbError::conflict("planning",expected,actual));}
+        if payload.get("storageVersion").and_then(Value::as_i64)!=Some(1){return Err(DbError::validation("نسخهٔ ذخیره‌سازی برنامه‌ریزی نامعتبر است."));}
+        let upserts=payload.get("upserts").and_then(Value::as_array).ok_or_else(||DbError::validation("تغییرهای برنامه‌ریزی نامعتبرند."))?;
+        let deletes=payload.get("deletes").and_then(Value::as_array).ok_or_else(||DbError::validation("تغییرهای برنامه‌ریزی نامعتبرند."))?;
+        for row in upserts {planning::validate_record(row)?;tx.execute("INSERT OR REPLACE INTO planning_records (key,json_data) VALUES (?1,?2)",params![row["key"].as_str(),row.to_string()])?;}
+        for key in deletes {let key=key.as_str().ok_or_else(||DbError::validation("شناسهٔ تغییر نامعتبر است."))?;tx.execute("DELETE FROM planning_records WHERE key=?1",params![key])?;}
+        let state=planning::join(&Self::read_planning_records(&tx)?)?;
+        if state.get("revision").and_then(Value::as_i64)!=Some(revision){return Err(DbError::validation("نسخهٔ رکورد پایه با تغییرها سازگار نیست."));}
+        tx.commit()?;Ok(json!({"revision":revision}))
+    }
+
+    fn export_backup(&self) -> Result<Value, DbError> {
+        self.ensure_planning_records()?;
+        let mut conn = self.conn.lock().map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
+        let tx = conn.transaction()?;
+        let envelope = Self::backup_in_tx(&tx)?;
+        tx.commit()?;
+        Ok(envelope)
+    }
+
+    fn backup_in_tx(tx: &rusqlite::Transaction<'_>) -> Result<Value, DbError> {
+        let mut backup_payload = json!({
+            "settings": Self::read_settings(tx)?,
+            "planning": planning::join(&Self::read_planning_records(tx)?)?,
         });
+        for (name, query) in [
+            ("tasks", "SELECT json_data FROM tasks ORDER BY priority ASC, updated_at DESC"),
+            ("habits", "SELECT json_data FROM habits ORDER BY updated_at DESC"),
+            ("habitEntries", "SELECT json_data FROM habit_entries"),
+            ("notes", "SELECT json_data FROM notes ORDER BY pinned DESC, updated_at DESC"),
+            ("focusSessions", "SELECT json_data FROM focus_sessions ORDER BY started_at DESC"),
+        ] {
+            let mut statement = tx.prepare(query)?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            let mut items = Vec::new();
+            for row in rows {
+                let item = serde_json::from_str(&row?).map_err(|e| DbError::storage(e.to_string()))?;
+                items.push(item);
+            }
+            backup_payload[name] = Value::Array(items);
+        }
 
         let payload_str = backup_payload.to_string();
+        if payload_str.len()+2048>crate::MAX_BRIDGE_PAYLOAD_BYTES {return Err(DbError{code:"PAYLOAD_TOO_LARGE".to_string(),message:"اندازهٔ پشتیبان بومی از محدودیت ۵ میبی‌بایت پل بیشتر است؛ خروجی ساخته نشد و داده‌ها تغییری نکردند.".to_string()});}
         let checksum = compute_fnv1a_checksum(&payload_str);
 
         Ok(json!({
@@ -1253,16 +1347,25 @@ impl KairosSqliteDatabase {
         let data_payload = envelope
             .get("payload")
             .ok_or_else(|| DbError::validation("فیلد envelope.payload الزامی است."))?;
-
-        // 1. Capture pre-restore snapshot before mutating tables
-        let snapshot_envelope = self.export_backup()?;
-        let snap_now = now_iso_string();
+        if !matches!(strategy, "replace" | "merge") {
+            return Err(DbError::validation("روش بازیابی نامعتبر است."));
+        }
+        self.ensure_planning_records()?;
 
         let mut conn = self
             .conn
             .lock()
             .map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
         let tx = conn.transaction()?;
+        let snapshot_envelope = Self::backup_in_tx(&tx)?;
+        let snap_now = now_iso_string();
+        if strategy == "merge" && [
+            snapshot_envelope.pointer("/payload/planning"),
+            data_payload.get("planning"),
+            data_payload.pointer("/settings/planning"),
+        ].into_iter().flatten().any(planning::has_content) {
+            return Err(DbError::validation("ادغام برنامه‌ریزی پشتیبانی نمی‌شود؛ از جایگزینی کامل استفاده کن."));
+        }
 
         tx.execute(
             "INSERT OR REPLACE INTO kv_state (key, updated_at, json_value) VALUES (?1, ?2, ?3)",
@@ -1313,6 +1416,19 @@ impl KairosSqliteDatabase {
         data_payload: &Value,
         strategy: &str,
     ) -> Result<(), DbError> {
+        if strategy=="replace" {
+            let mut state=data_payload.get("planning").or_else(||data_payload.pointer("/settings/planning")).cloned().unwrap_or_else(planning::empty_state);
+            let current = Self::planning_revision(tx)?;
+            let imported = state["revision"].as_i64().ok_or_else(|| DbError::validation("نسخهٔ پشتیبان برنامه‌ریزی نامعتبر است."))?;
+            let limit: i64 = 9_007_199_254_740_991;
+            if !(0..limit).contains(&current) || !(0..=limit).contains(&imported) {
+                return Err(DbError::validation("نسخهٔ برنامه‌ریزی خارج از محدوده است."));
+            }
+            state["revision"] = json!(imported.max(current + 1));
+            let records=planning::split(&state)?;
+            tx.execute("DELETE FROM planning_records",[])?;
+            for record in records {tx.execute("INSERT INTO planning_records (key,json_data) VALUES (?1,?2)",params![record["key"].as_str(),record.to_string()])?;}
+        }
         if strategy == "replace" {
             tx.execute_batch(
                 "DELETE FROM tasks;
@@ -1450,6 +1566,7 @@ impl KairosSqliteDatabase {
 
         if let Some(settings) = data_payload.get("settings") {
             if settings.is_object() {
+                let mut settings=settings.clone();if let Some(object)=settings.as_object_mut(){object.remove("planning");}
                 let now = now_iso_string();
                 tx.execute(
                     "INSERT OR REPLACE INTO settings (id, updated_at, json_data) VALUES ('default', ?1, ?2)",
@@ -1487,6 +1604,7 @@ impl KairosSqliteDatabase {
     }
 
     fn rollback_last_restore(&self) -> Result<Value, DbError> {
+        self.ensure_planning_records()?;
         let mut conn = self
             .conn
             .lock()

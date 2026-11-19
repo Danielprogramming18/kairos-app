@@ -1,4 +1,5 @@
 pub mod db;
+pub mod planning;
 
 use db::KairosSqliteDatabase;
 use serde::{Deserialize, Serialize};
@@ -92,14 +93,27 @@ pub fn execute_bridge_request(db: &KairosSqliteDatabase, raw_request: &str) -> S
             }
 
             match db.dispatch(&req.operation, &req.payload) {
-                Ok(data) => serde_json::to_string(&BridgeResponseEnvelope {
-                    request_id: req.request_id,
-                    version: BRIDGE_CONTRACT_VERSION.to_string(),
-                    ok: true,
-                    data: Some(data),
-                    error: None,
-                })
-                .unwrap_or_default(),
+                Ok(data) => {
+                    let mut response = BridgeResponseEnvelope {
+                        request_id: req.request_id,
+                        version: BRIDGE_CONTRACT_VERSION.to_string(),
+                        ok: true,
+                        data: Some(data),
+                        error: None,
+                    };
+                    let encoded = serde_json::to_string(&response).unwrap_or_default();
+                    if encoded.len() <= MAX_BRIDGE_PAYLOAD_BYTES {
+                        encoded
+                    } else {
+                        response.ok = false;
+                        response.data = None;
+                        response.error = Some(BridgeErrorObject {
+                            code: "PAYLOAD_TOO_LARGE".into(),
+                            message: "اندازهٔ پاسخ پل بومی بیشتر از ۵ میبی‌بایت است.".into(),
+                        });
+                        serde_json::to_string(&response).unwrap_or_default()
+                    }
+                }
                 Err(err) => serde_json::to_string(&BridgeResponseEnvelope {
                     request_id: req.request_id,
                     version: BRIDGE_CONTRACT_VERSION.to_string(),

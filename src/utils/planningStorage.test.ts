@@ -8,6 +8,7 @@ import { taskToDomainEntity, domainEntityToTask } from '../app/PlatformContext';
 import { computeBackupChecksum, createEncryptedBackupEnvelope, decryptBackupEnvelope, validateBackupEnvelopeObject } from './backupCrypto';
 import { AndroidBridgePlatformAdapter } from '../infrastructure/android/androidBridgeAdapter';
 import { WindowsDesktopPlatformAdapter } from '../infrastructure/desktop/desktopBridgeAdapter';
+import { upgradeLegacyPlanningLayout } from '../infrastructure/planningRecords';
 
 const at = '2026-11-17T08:00:00.000Z';
 let dbSequence = 0;
@@ -30,7 +31,7 @@ function examplePlanning() {
   state.previousAllocations = [];
   state.feedback.push({ id: 'feedback1', taskId: 'task1', barrier: 'large', action: 'small-step', answer: 'helped', at });
   state.predictions.push({ id: 'prediction1', taskId: 'task1', at, minutes: 30, manual: 40, sampleIds: ['old-task'] });
-  return state;
+  return upgradeLegacyPlanningLayout(state);
 }
 function exampleTask(): TaskEntity {
   return { id: 'task1', title: 'کار', status: 'todo', completed: false, priority: 2, duration: 30, targetDate: '2026-11-17', dueAt: '2026-11-18T18:00:00.000Z', projectId: 'project1', category: 'learning', tags: [], subtasks: [], createdAt: at, updatedAt: at, revision: 1,
@@ -46,29 +47,29 @@ test('planning and task extras survive canonical mappings, encrypted backup, rep
   const planning = examplePlanning();
   try {
     const savedTask = await adapter.tasks.upsertTask(exampleTask());
-    await adapter.settings.saveSettings({ planning });
+    await adapter.planning.savePlanning(planning, {expectedRevision:0});
     const uiTask = domainEntityToTask(savedTask);
     assert.deepEqual(taskToDomainEntity(uiTask).planning, savedTask.planning);
     assert.equal(uiTask.projectId, 'project1');
     const exported = await adapter.backup.exportBackup();
     const validated = validateBackupEnvelopeObject(JSON.parse(JSON.stringify(exported)), { verifyChecksum: true });
     assert.equal(validated.valid, true, validated.errors.join(' | '));
-    assert.deepEqual(validated.envelope!.payload.settings?.planning, planning);
+    assert.deepEqual(validated.envelope!.payload.planning, planning);
     assert.deepEqual(validated.envelope!.payload.tasks[0].planning, savedTask.planning);
     const encrypted = await createEncryptedBackupEnvelope(exported, 'planning-roundtrip');
     const decrypted = await decryptBackupEnvelope(JSON.stringify(encrypted), 'planning-roundtrip');
     assert.equal(decrypted.valid, true, decrypted.errors.join(' | '));
-    assert.deepEqual(decrypted.envelope!.payload.settings?.planning, planning);
+    assert.deepEqual(decrypted.envelope!.payload.planning, planning);
 
     const replacement = structuredClone(exported);
-    replacement.payload.settings!.planning!.revision = 10;
-    replacement.payload.settings!.planning!.projects[0].title = 'عنوان بازیابی‌شده';
+    replacement.payload.planning!.revision = 10;
+    replacement.payload.planning!.projects[0].title = 'عنوان بازیابی‌شده';
     replacement.payload.tasks[0].planning!.resume = 'یادداشت جدید';
     await adapter.backup.restoreBackup(refreshChecksum(replacement), 'replace');
-    assert.equal((await adapter.settings.getSettings()).planning?.projects[0].title, 'عنوان بازیابی‌شده');
+    assert.equal((await adapter.planning.getPlanning())?.projects[0].title, 'عنوان بازیابی‌شده');
     assert.equal((await adapter.tasks.listTasks())[0].planning?.resume, 'یادداشت جدید');
     await adapter.backup.rollbackLastRestore!();
-    assert.deepEqual((await adapter.settings.getSettings()).planning, planning);
+    assert.deepEqual(await adapter.planning.getPlanning(), { ...planning, revision: 11 });
     assert.deepEqual((await adapter.tasks.listTasks())[0].planning, savedTask.planning);
   } finally { await db.delete(); }
 });
@@ -81,15 +82,15 @@ test('planning revision check prevents concurrent and stale writes without clobb
     await adapter.settings.saveSettings({ theme: 'light' });
     const first = examplePlanning();
     const second = examplePlanning(); second.projects[0].title = 'پنجرهٔ دوم';
-    const outcomes = await Promise.allSettled([adapter.settings.saveSettings({ planning: first }), adapter.settings.saveSettings({ planning: second })]);
+    const outcomes = await Promise.allSettled([adapter.planning.savePlanning(first, {expectedRevision:0}), adapter.planning.savePlanning(second, {expectedRevision:0})]);
     assert.equal(outcomes.filter(r => r.status === 'fulfilled').length, 1);
     assert.equal(outcomes.filter(r => r.status === 'rejected').length, 1);
-    await assert.rejects(() => adapter.settings.saveSettings({ planning: first }), /پنجره/);
+    await assert.rejects(() => adapter.planning.savePlanning(first, {expectedRevision:0}), /پنجره/);
     await adapter.settings.saveSettings({ soundEnabled: false });
     const after = await adapter.settings.getSettings();
-    assert.equal(after.theme, 'light'); assert.equal(after.soundEnabled, false); assert.equal(after.planning?.revision, 1);
+    assert.equal(after.theme, 'light'); assert.equal(after.soundEnabled, false); assert.equal((await adapter.planning.getPlanning()).revision, 1);
     await assert.rejects(() => adapter.settings.saveSettings({ planning: null as any }));
-    assert.deepEqual((await adapter.settings.getSettings()).planning, after.planning);
+    assert.deepEqual((await adapter.planning.getPlanning()), await adapter.planning.getPlanning());
   } finally { await db.delete(); }
 });
 
@@ -97,16 +98,16 @@ test('malformed planning is reported as invalid and cannot mutate tasks, setting
   const { db, adapter } = setup();
   try {
     await adapter.tasks.upsertTask(exampleTask());
-    await adapter.settings.saveSettings({ planning: examplePlanning() });
+    await adapter.planning.savePlanning(examplePlanning(), {expectedRevision:0});
     const exported = await adapter.backup.exportBackup();
     const invalidVariants: ((e: BackupEnvelopeV2) => void)[] = [
-      e => { e.payload.settings!.planning!.schemaVersion = 2 as any; },
-      e => { e.payload.settings!.planning!.metrics[0].entries[0].value = '۱۲' as any; },
-      e => { e.payload.settings!.planning!.templates[0].tasks[0].category = {} as any; },
+      e => { e.payload.planning!.schemaVersion = 2 as any; },
+      e => { e.payload.planning!.metrics[0].entries[0].value = '۱۲' as any; },
+      e => { e.payload.planning!.templates[0].tasks[0].category = {} as any; },
       e => { e.payload.tasks[0].planning!.remainingMinutes = -1; },
       e => { e.payload.tasks[0].planning = null as any; },
-      e => { e.payload.settings!.planning = null as any; },
-      e => { e.payload.settings!.planning!.projects.push(e.payload.settings!.planning!.projects[0]); },
+      e => { e.payload.planning = null as any; },
+      e => { e.payload.planning!.projects.push(e.payload.planning!.projects[0]); },
     ];
     for (const mutate of invalidVariants) {
       const bad = structuredClone(exported); mutate(bad); refreshChecksum(bad);
@@ -127,20 +128,20 @@ test('old settings and backups still load, and replacing a backup without settin
     await adapter.settings.saveSettings({ theme: 'light' });
     const legacy = await adapter.backup.exportBackup();
     assert.equal(validateBackupEnvelopeObject(legacy).valid, true);
-    await adapter.settings.saveSettings({ planning: examplePlanning() });
-    delete legacy.payload.settings;
+    await adapter.planning.savePlanning(examplePlanning(), {expectedRevision:0});
+    delete legacy.payload.settings; delete legacy.payload.planning;
     await adapter.backup.restoreBackup(refreshChecksum(legacy), 'replace');
     const settings = await adapter.settings.getSettings();
     assert.equal(settings.planning, undefined); assert.equal(settings.theme, 'light');
     await adapter.backup.rollbackLastRestore!();
-    assert.deepEqual((await adapter.settings.getSettings()).planning, examplePlanning());
+    assert.deepEqual(await adapter.planning.getPlanning(), { ...examplePlanning(), revision: 3 });
   } finally { await db.delete(); }
 });
 
 test('both native adapters reject planning merges before sending a restore command', async () => {
   const { db, adapter } = setup();
   try {
-    await adapter.settings.saveSettings({ planning: examplePlanning() });
+    await adapter.planning.savePlanning(examplePlanning(), {expectedRevision:0});
     const envelope = await adapter.backup.exportBackup();
     for (const Adapter of [AndroidBridgePlatformAdapter, WindowsDesktopPlatformAdapter]) {
       const operations: string[] = [];
@@ -168,7 +169,7 @@ test('first-run default initialization from another connection cannot overwrite 
   const otherDb = new KairosWebDatabase(db.name);
   const other = new WebDexiePlatformAdapter(otherDb);
   try {
-    await Promise.all([adapter.settings.saveSettings({ planning: examplePlanning() }), other.settings.getSettings()]);
-    assert.deepEqual((await other.settings.getSettings()).planning, examplePlanning());
+    await Promise.all([adapter.planning.savePlanning(examplePlanning(), {expectedRevision:0}), other.settings.getSettings()]);
+    assert.deepEqual((await other.planning.getPlanning()), examplePlanning());
   } finally { otherDb.close(); await db.delete(); }
 });

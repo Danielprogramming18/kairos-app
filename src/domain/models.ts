@@ -180,6 +180,7 @@ export interface MigrationReport {
 }
 
 export interface BackupPayloadV2 {
+  planning?: PlanningState;
   tasks: TaskEntity[];
   habits: HabitEntity[];
   habitEntries: HabitEntryEntity[];

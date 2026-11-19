@@ -8,6 +8,12 @@ import {
   validateAndPreviewBackupPayload,
 } from './backupCrypto';
 
+test('encrypted export refuses a backup whose Base64 envelope would exceed the import limit', async () => {
+  const envelope = createPlainBackupEnvelope(sampleData);
+  envelope.payload.notes[0].content = 'آ'.repeat(12 * 1024 * 1024);
+  await assert.rejects(() => createEncryptedBackupEnvelope(envelope, 'backup-test'), /۳۲ میبی‌بایت/);
+});
+
 const sampleData = {
   habits: [
     {

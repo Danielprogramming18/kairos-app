@@ -85,7 +85,7 @@ export interface BackupPreviewSummary {
   };
 }
 
-export const MAX_BACKUP_BYTES = 10 * 1024 * 1024; // 10 MB safety limit
+export const MAX_BACKUP_BYTES = 32 * 1024 * 1024; // 32 MiB, measured after UTF-8 encoding
 export const PBKDF2_ITERATIONS = 100_000;
 
 const VALID_HABIT_CATEGORIES = new Set<string>([
@@ -179,6 +179,7 @@ export function computeBackupChecksum(payload: BackupPayloadV2): string {
     notes: Array.isArray(payload.notes) ? payload.notes : [],
     focusSessions: Array.isArray(payload.focusSessions) ? payload.focusSessions : [],
     settings: payload.settings ?? undefined,
+    planning: payload.planning ?? undefined,
   };
   const str = JSON.stringify(normalized);
   let hash = 2166136261;
@@ -1251,6 +1252,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
   }
 
   let settings: UserSettingsEntity | undefined;
+  const planning=rawPayload.planning!==undefined?validatePlanning(rawPayload.planning):undefined;
   if (rawPayload.settings !== undefined && rawPayload.settings !== null) {
     if (!isPlainObject(rawPayload.settings)) {
       errors.push('فیلد settings در فایل پشتیبان یک شیء معتبر نیست.');
@@ -1307,6 +1309,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
       notes,
       focusSessions,
       settings,
+      planning,
     },
   };
 }
@@ -1349,6 +1352,7 @@ export function createPlainBackupEnvelope(
       notes: Array.isArray(payload.notes) ? payload.notes : [],
       focusSessions: Array.isArray(payload.focusSessions) ? payload.focusSessions : [],
       settings: payload.settings,
+      planning: payload.planning,
     };
     return {
       appId: 'kairos',
@@ -1405,15 +1409,7 @@ export async function createEncryptedBackupEnvelope(
 
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveAesGcmKey(password, salt, PBKDF2_ITERATIONS);
-
-  const cipherBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv as BufferSource },
-    key,
-    plaintextBytes as BufferSource
-  );
-
-  return {
+  const envelope: KairosEncryptedBackupEnvelope = {
     appId: 'kairos',
     app: 'Kairos',
     formatVersion: 2,
@@ -1429,9 +1425,21 @@ export async function createEncryptedBackupEnvelope(
     cipher: {
       algorithm: 'AES-GCM',
       ivBase64: bytesToBase64(iv),
-      ciphertextBase64: bytesToBase64(new Uint8Array(cipherBuffer)),
+      ciphertextBase64: '',
     },
   };
+  // AES-GCM adds a 16-byte tag. Base64 encodes each three bytes in four ASCII bytes.
+  const encodedLength = 4 * Math.ceil((plaintextBytes.byteLength + 16) / 3);
+  const headerLength = new TextEncoder().encode(JSON.stringify(envelope)).byteLength;
+  if (headerLength + encodedLength > MAX_BACKUP_BYTES) {
+    throw new Error('حجم فایل رمزگذاری‌شده از ۳۲ میبی‌بایت بیشتر می‌شود. پشتیبان ساده بگیر.');
+  }
+  const key = await deriveAesGcmKey(password, salt, PBKDF2_ITERATIONS);
+  const cipherBuffer = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv as BufferSource }, key, plaintextBytes as BufferSource
+  );
+  envelope.cipher.ciphertextBase64 = bytesToBase64(new Uint8Array(cipherBuffer));
+  return envelope;
 }
 
 /**
@@ -1573,6 +1581,11 @@ function validateBackupEnvelopeObjectUnchecked(
     }
 
     validatedPayload = v2Result.payload;
+  } else if (Number(parsed.schemaVersion)===2 && Array.isArray(parsed.notes) && Array.isArray(parsed.tasks) && Array.isArray(parsed.habits)) {
+    // Early Android hosts exported the V2 collections at the root, without a payload wrapper.
+    const flat=validateCanonicalV2Payload(parsed);
+    if(!flat.valid||!flat.payload)return {valid:false,encrypted:false,error:flat.errors[0],errors:flat.errors};
+    validatedPayload=flat.payload;migratedFromLegacy=true;
   } else {
     // Path B: Legacy v1 (`data` object or root arrays)
     const legacyContainer = isPlainObject(parsed.data) ? parsed.data : parsed;
@@ -1657,8 +1670,8 @@ export function validateAndPreviewBackupPayload(
     const msg = 'فایل پشتیبان خالی است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }
-  if (rawJson.length > MAX_BACKUP_BYTES) {
-    const msg = 'حجم فایل پشتیبان بیش از حد مجاز (۱۰ مگابایت) است.';
+  if (new TextEncoder().encode(rawJson).byteLength > MAX_BACKUP_BYTES) {
+    const msg = 'حجم فایل پشتیبان بیش از حد مجاز (۳۲ میبی‌بایت) است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }
 
