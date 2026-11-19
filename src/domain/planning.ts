@@ -3,12 +3,16 @@ export interface TaskPlanning {
   stageId?: string;
   resume?: string;
   templateId?: string;
+  templateItemId?: string;
+  workType?: string;
   units?: number;
   unitName?: string;
   initialEstimate?: number;
   remainingMinutes?: number;
   actualMinutes?: number;
   actualConfirmed?: boolean;
+  timerCoverageConfirmed?: boolean;
+  timerCoverageFingerprint?: string;
   splittable?: boolean;
   minimumChunk?: number;
   waiting?: boolean;
@@ -28,7 +32,7 @@ export interface Project {
 export interface TaskTemplate {
   id: string;
   title: string;
-  tasks: Pick<Task, 'title' | 'description' | 'duration' | 'priority' | 'category' | 'subtasks'>[];
+  tasks: (Pick<Task, 'title' | 'description' | 'duration' | 'priority' | 'category' | 'subtasks'> & { id?: string; workType?: string; units?: number; unitName?: string })[];
 }
 export interface PlanningEvent {
   id: string;
@@ -71,6 +75,7 @@ export interface LayoutPreference {
   order: string[];
   hidden: string[];
   pinned: string[];
+  main?: string[];
 }
 export type Barrier = 'unclear' | 'large' | 'waiting' | 'time' | 'importance' | 'other';
 export interface CoachFeedback {
@@ -173,15 +178,16 @@ function collection(v: unknown, name: string): any[] {
 }
 export function validateTaskPlanning(value: unknown): TaskPlanning {
   requireValid(obj(value), 'اطلاعات تکمیلی کار نامعتبر است.');
-  for (const k of ['stageId', 'resume', 'templateId', 'unitName']) if (value[k] !== undefined) requireValid(str(value[k]), `فیلد ${k} نامعتبر است.`);
+  for (const k of ['stageId', 'resume', 'templateId', 'templateItemId', 'workType', 'unitName', 'timerCoverageFingerprint']) if (value[k] !== undefined) requireValid(str(value[k]), `فیلد ${k} نامعتبر است.`);
   for (const k of ['units', 'initialEstimate', 'remainingMinutes', 'actualMinutes', 'minimumChunk']) if (value[k] !== undefined) requireValid(number(value[k]) && value[k] >= 0 && value[k] <= 10000000, `مقدار ${k} نامعتبر است.`);
-  for (const k of ['actualConfirmed', 'splittable', 'waiting', 'coachDisabled']) if (value[k] !== undefined) requireValid(typeof value[k] === 'boolean', `فیلد ${k} نامعتبر است.`);
+  for (const k of ['actualConfirmed', 'timerCoverageConfirmed', 'splittable', 'waiting', 'coachDisabled']) if (value[k] !== undefined) requireValid(typeof value[k] === 'boolean', `فیلد ${k} نامعتبر است.`);
   return structuredClone(value) as TaskPlanning;
 }
+export const MAX_PLANNING_STATE_BYTES = 16 * 1024 * 1024;
 export function validatePlanning(value: unknown): PlanningState {
   requireValid(obj(value) && value.schemaVersion === 1, 'نسخهٔ اطلاعات برنامه‌ریزی پشتیبانی نمی‌شود.');
   requireValid(Number.isSafeInteger(value.revision) && value.revision >= 0, 'نسخهٔ ویرایش نامعتبر است.');
-  requireValid(JSON.stringify(value).length < 2_000_000, 'اطلاعات برنامه‌ریزی بیش از حد بزرگ است.');
+  requireValid(new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_PLANNING_STATE_BYTES, 'اطلاعات برنامه‌ریزی از سقف ۱۶ میبی‌بایت بیشتر است.');
   for (const p of collection(value.projects, 'پروژه‌ها')) {
     requireValid(str(p.title) && !!p.title.trim() && str(p.description) && typeof p.archived === 'boolean', 'پروژه نامعتبر است.');
     requireValid(p.nextTaskId === undefined || str(p.nextTaskId), 'قدم بعدی پروژه نامعتبر است.');
@@ -199,7 +205,11 @@ export function validatePlanning(value: unknown): PlanningState {
     for (const task of t.tasks) {
       requireValid(obj(task) && str(task.title) && !!task.title.trim() && number(task.duration) && task.duration > 0 && number(task.priority) && task.priority > 0 && (task.description === undefined || str(task.description)) && (task.category === undefined || str(task.category)), 'کار قالب نامعتبر است.');
       if (task.subtasks !== undefined) for (const subtask of collection(task.subtasks, 'ریزکارهای قالب')) requireValid(str(subtask.title) && typeof subtask.completed === 'boolean', 'ریزکار قالب نامعتبر است.');
+      for (const key of ['id', 'workType', 'unitName']) requireValid(task[key] === undefined || str(task[key]), 'شناسه یا نوع کار قالب نامعتبر است.');
+      requireValid(task.units === undefined || number(task.units) && task.units > 0, 'حجم کار قالب نامعتبر است.');
     }
+    const itemIds = t.tasks.filter((task: { id?: string }) => task.id !== undefined).map((task: { id: string }) => task.id);
+    requireValid(new Set(itemIds).size === itemIds.length, 'شناسهٔ آیتم‌های قالب تکراری است.');
   }
   for (const group of ['availability', 'commitments']) for (const w of collection(value[group], group)) requireValid(validTime(w.start) && validTime(w.end) && w.start < w.end && (w.date ? validDate(w.date) : Number.isInteger(w.weekday) && w.weekday >= 0 && w.weekday <= 6), 'بازهٔ زمانی نامعتبر است.');
   requireValid(Array.isArray(value.excludedDates) && value.excludedDates.every(validDate), 'روزهای استثنا نامعتبرند.');
@@ -211,6 +221,12 @@ export function validatePlanning(value: unknown): PlanningState {
   for (const mode of ['desktop', 'mobile']) {
     requireValid(obj(value.layout[mode]), 'چیدمان دستگاه نامعتبر است.');
     for (const key of ['order', 'hidden', 'pinned']) requireValid(Array.isArray(value.layout[mode][key]) && value.layout[mode][key].length <= 100 && value.layout[mode][key].every(str) && new Set(value.layout[mode][key]).size === value.layout[mode][key].length, 'فهرست چیدمان نامعتبر است.');
+    const layout = value.layout[mode];
+    if (layout.main !== undefined) {
+      requireValid(Array.isArray(layout.main) && layout.main.length <= (mode === 'mobile' ? 4 : 100) && layout.main.every(str) && new Set(layout.main).size === layout.main.length, 'فهرست منوی اصلی نامعتبر است.');
+      requireValid(!layout.hidden.some((id: string) => layout.main.includes(id) || layout.pinned.includes(id)) && layout.pinned.every((id: string) => layout.main.includes(id)), 'حالت‌های چیدمان با یکدیگر ناسازگارند.');
+    }
+    requireValid(!layout.hidden.includes('more') && !layout.hidden.includes('customize'), 'راه دسترسی به بیشتر و شخصی‌سازی باید باز بماند.');
   }
   requireValid(number(value.breakMinutes) && value.breakMinutes >= 0 && value.breakMinutes <= 120 && Number.isInteger(value.minimumSamples) && value.minimumSamples >= 3 && value.minimumSamples <= 50, 'تنظیمات محاسبه نامعتبر است.');
   for (const f of collection(value.feedback, 'بازخورد')) requireValid(str(f.taskId) && ['unclear', 'large', 'waiting', 'time', 'importance', 'other'].includes(f.barrier) && str(f.action) && ['helped', 'not_helped', 'untried'].includes(f.answer) && timestamp(f.at), 'بازخورد نامعتبر است.');
