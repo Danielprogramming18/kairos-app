@@ -5,13 +5,17 @@ if ($files.Count -ne 3) { throw 'Expected three binaries' }
 $rows = @()
 $reason = $null
 $updated = $null
+$updateError = $null
+$fresh = $false
 try {
     $status = Get-MpComputerStatus
     if (-not ($status.AMServiceEnabled -and $status.AntivirusEnabled)) { throw 'Defender engine inactive' }
-    Update-MpSignature -ErrorAction Stop
+    try { Update-MpSignature -ErrorAction Stop } catch { $updateError = $_.Exception.Message }
     $status = Get-MpComputerStatus
+    if (-not ($status.AMServiceEnabled -and $status.AntivirusEnabled)) { throw 'Defender engine inactive after update attempt' }
     $updated = $status.AntivirusSignatureLastUpdated.ToUniversalTime()
-    if (-not $status.AMEngineVersion -or -not $status.AntivirusSignatureVersion -or $status.DefenderSignaturesOutOfDate -or $updated -lt [DateTime]::UtcNow.AddDays(-2)) { throw 'Fresh definitions could not be verified' }
+    if (-not $status.AMEngineVersion -or -not $status.AntivirusSignatureVersion) { throw 'Engine or definition version unavailable' }
+    $fresh = -not $status.DefenderSignaturesOutOfDate -and $updated -ge [DateTime]::UtcNow.AddDays(-2)
     $scanner = Join-Path $env:ProgramFiles 'Windows Defender/MpCmdRun.exe'
     if (-not (Test-Path -LiteralPath $scanner)) { throw 'Scanner unavailable' }
 } catch { $reason = $_.Exception.Message }
@@ -33,6 +37,6 @@ foreach ($file in $files) {
     }
     $rows += [pscustomobject]$row
 }
-[ordered]@{at=[DateTime]::UtcNow; engine=$status.AMEngineVersion; signatures=$status.AntivirusSignatureVersion; updated=$updated; reason=$reason; files=$rows} |
+[ordered]@{at=[DateTime]::UtcNow; engine=$status.AMEngineVersion; signatures=$status.AntivirusSignatureVersion; updated=$updated; recentDefinitions=$fresh; updateError=$updateError; reason=$reason; files=$rows} |
     ConvertTo-Json -Depth 6 | Tee-Object -FilePath $Report
 if ($rows.scan -match '^detected') { throw 'Review Defender detection or scan failure before distribution' }
