@@ -94,9 +94,10 @@ const commonPhrases = new Set(['password12345678', 'passwordpassword', 'qwertyui
 export function validExportPassphrase(password: string): boolean {
   const value = password.trim().normalize('NFKC').toLowerCase();
   const compact = value.replace(/[\s_-]/gu, '');
+  const letters = compact.replace(/[\p{Number}\p{Punctuation}\p{Symbol}]/gu, '');
   return [...value].length >= 15 && new Set(compact).size >= 4 &&
-    !/^(?:1234567890?|0123456789|password|qwerty|1234)+\d*$/u.test(compact) &&
-    !/^\d+$/u.test(compact) && !commonPhrases.has(compact);
+    letters.length > 0 && !/^(?:password|qwerty)+$/u.test(letters) &&
+    !commonPhrases.has(compact);
 }
 
 function withinBackupLimit(raw: string): boolean {

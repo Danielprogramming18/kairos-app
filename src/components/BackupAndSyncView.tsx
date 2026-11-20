@@ -733,8 +733,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  disabled={isRestoring}
-                  disabled={decrypting}
+                  disabled={isRestoring || decrypting}
                   onClick={() => {
                     setImportPreview(null);
                     importGeneration.current++;
