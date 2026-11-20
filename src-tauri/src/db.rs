@@ -1257,8 +1257,12 @@ impl KairosSqliteDatabase {
         let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;let tx=conn.transaction()?;
         let revision = Self::planning_revision(&tx)?;
         if let Some(expected)=payload.get("expectedRevision").and_then(Value::as_i64){if expected!=revision{return Err(DbError::conflict("planning",expected,revision));}}
-        let cursor=payload.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let total:usize=tx.query_row("SELECT COUNT(*) FROM planning_records",[],|row|row.get(0))?;
+        let cursor = match payload.get("cursor") {
+            None | Some(Value::Null) => 0,
+            Some(value) => value.as_i64().filter(|n| *n >= 0)
+                .ok_or_else(|| DbError::validation("شمارهٔ صفحه باید عدد صحیح نامنفی باشد."))?,
+        };
+        let total: i64 = tx.query_row("SELECT COUNT(*) FROM planning_records", [], |row| row.get(0))?;
         if cursor>total{return Err(DbError::validation("صفحهٔ برنامه‌ریزی نامعتبر است."));}
         let mut page=Vec::new();let mut bytes=0;let mut next=cursor;
         {let mut statement=tx.prepare("SELECT json_data FROM planning_records ORDER BY key LIMIT -1 OFFSET ?1")?;let rows=statement.query_map(params![cursor],|row|row.get::<_,String>(0))?;
