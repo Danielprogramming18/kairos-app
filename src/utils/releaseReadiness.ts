@@ -184,10 +184,10 @@ export async function runSubsystemSelfDiagnostics(
           focusSessions: [],
           usefulInfos: [],
         });
-        const encrypted = await createEncryptedBackupEnvelope(sampleEnvelope, 'KairosDiag#1404');
+        const encrypted = await createEncryptedBackupEnvelope(sampleEnvelope, 'sample phrase for diagnostics');
         const decrypted = await decryptBackupEnvelope(
           JSON.stringify(encrypted),
-          'KairosDiag#1404'
+          'sample phrase for diagnostics'
         );
         const wrongPass = await decryptBackupEnvelope(
           JSON.stringify(encrypted),
@@ -337,26 +337,12 @@ export function getPlatformHandoffSnippets(): {
 } {
   return {
     sketchwareWebSettingsJava: [
-      '// فایل‌های build/android را پس از npm run build:android در همان assets/www برنامه قرار بده.',
-      'WebSettings ws = webview1.getSettings();',
-      'ws.setJavaScriptEnabled(true);',
-      'ws.setDomStorageEnabled(true); // الزامی برای IndexedDB و localStorage',
-      'ws.setDatabaseEnabled(true);',
-      'ws.setAllowFileAccess(true);',
-      'ws.setAllowFileAccessFromFileURLs(false);',
-      'ws.setAllowUniversalAccessFromFileURLs(false);',
-      '// هماهنگی خودکار تم گوشی با کایروس در WebView (در onPageFinished و onConfigurationChanged):',
-      'boolean isNight = (getResources().getConfiguration().uiMode',
-      '    & android.content.res.Configuration.UI_MODE_NIGHT_MASK)',
-      '    == android.content.res.Configuration.UI_MODE_NIGHT_YES;',
-      'String hostTheme = isNight ? "dark" : "light";',
-      'webview1.loadUrl("file:///android_asset/www/index.html?hostTheme=" + hostTheme);',
-      '// هنگام تغییر زندهٔ تم گوشی بدون reload:',
-      '// webview1.evaluateJavascript("window.__KAIROS_SET_HOST_THEME__ && window.__KAIROS_SET_HOST_THEME__(\\"" + hostTheme + "\\")", null);',
+      '// پوشهٔ نصب قبلی و نوع ذخیره‌سازی آن را حفظ کن. جزئیات در docs/ANDROID_HANDOFF.md',
+      'closeKairos = KairosAndroidBridge.start(this, webview1, "www", false);',
     ].join('\n'),
     windowsBuildCommands: [
       'npm ci',
-      'npm run desktop:build # اجرای npm run build + npx tauri build روی ویندوز (تولید Setup.exe و .msi در src-tauri/target/release/bundle/)',
+      'npm run desktop:build # اجرای npm run build + tauri build روی ویندوز (تولید Setup.exe و .msi در src-tauri/target/release/bundle/)',
     ].join('\n'),
   };
 }

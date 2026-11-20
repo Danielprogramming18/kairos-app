@@ -10,6 +10,17 @@ export default defineConfig(({ mode }) => {
     // Relative base path so the built app works on any GitHub Pages subdirectory URL
     base: './',
     plugins: [
+      {
+        name: 'kairos-production-csp',
+        apply: 'build',
+        transformIndexHtml: {
+          order: 'post',
+          handler: () => [{ tag: 'meta', attrs: {
+            'http-equiv': 'Content-Security-Policy',
+            content: "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'" + (mode === 'desktop' ? ' ipc: http://ipc.localhost' : ''),
+          }, injectTo: 'head-prepend' as const }],
+        },
+      },
       react(),
       tailwindcss(),
       androidFiles && {

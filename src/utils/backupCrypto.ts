@@ -86,7 +86,50 @@ export interface BackupPreviewSummary {
 }
 
 export const MAX_BACKUP_BYTES = 32 * 1024 * 1024; // 32 MiB, measured after UTF-8 encoding
-export const PBKDF2_ITERATIONS = 100_000;
+// The v2 writer originally used 100,000. New exports use OWASP's SHA-256 work factor.
+const LEGACY_ITERATIONS = 100_000;
+export const PBKDF2_ITERATIONS = 600_000;
+export const PASSPHRASE_HINT = 'چند واژهٔ دور از حدس برای خودت انتخاب کن؛ عبارت باید حداقل ۱۵ نویسه داشته باشد.';
+const commonPhrases = new Set(['password12345678', 'passwordpassword', 'qwertyuiopasdfgh', 'letmeinletmein', 'iloveyouiloveyou', 'رمزعبوررمزعبور']);
+export function validExportPassphrase(password: string): boolean {
+  const value = password.trim().normalize('NFKC').toLowerCase();
+  const compact = value.replace(/[\s_-]/gu, '');
+  return [...value].length >= 15 && new Set(compact).size >= 4 &&
+    !/^(?:1234567890?|0123456789|password|qwerty|1234)+\d*$/u.test(compact) &&
+    !/^\d+$/u.test(compact) && !commonPhrases.has(compact);
+}
+
+function withinBackupLimit(raw: string): boolean {
+  return typeof raw === 'string' && raw.length <= MAX_BACKUP_BYTES &&
+    new Blob([raw]).size <= MAX_BACKUP_BYTES;
+}
+
+// Validate canonical padded Base64 without allocating decoded ciphertext or using
+// a repeated regex group that can exhaust the regex engine on large inputs.
+function base64Length(value: unknown): number {
+  if (typeof value !== 'string' || !value.length || value.length > MAX_BACKUP_BYTES ||
+      value.length % 4 !== 0) return -1;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const data = value.slice(0, value.length - padding);
+  if (/[^A-Za-z0-9+/]/.test(data)) return -1;
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  if (padding && (alphabet.indexOf(data[data.length - 1]) & (padding === 2 ? 15 : 3))) return -1;
+  return value.length / 4 * 3 - padding;
+}
+
+function encryptedHeaderValid(value: unknown): value is KairosEncryptedBackupEnvelope {
+  if (!isPlainObject(value) || value.encrypted !== true || value.appId !== 'kairos' ||
+      value.app !== 'Kairos' || value.formatVersion !== 2 || value.schemaVersion !== 2 ||
+      !isValidIsoTimestamp(value.exportedAt) || !isPlainObject(value.kdf) || !isPlainObject(value.cipher)) return false;
+  const {kdf, cipher} = value;
+  return kdf.algorithm === 'PBKDF2' && kdf.hash === 'SHA-256' &&
+    typeof kdf.iterations === 'number' && Number.isInteger(kdf.iterations) &&
+    kdf.iterations >= LEGACY_ITERATIONS && kdf.iterations <= PBKDF2_ITERATIONS &&
+    cipher.algorithm === 'AES-GCM' && base64Length(kdf.saltBase64) === 16 &&
+    base64Length(cipher.ivBase64) === 12 && base64Length(cipher.ciphertextBase64) > 16;
+}
+
+let decryptInProgress = false;
 
 const VALID_HABIT_CATEGORIES = new Set<string>([
   'health',
@@ -1400,8 +1443,8 @@ export async function createEncryptedBackupEnvelope(
   input: BackupEnvelopeV2 | BackupPayloadV2 | LegacyBackupDataInput,
   password: string
 ): Promise<KairosEncryptedBackupEnvelope> {
-  if (!password || password.trim().length < 4) {
-    throw new Error('گذرواژهٔ رمزگذاری باید حداقل ۴ کاراکتر باشد.');
+  if (!validExportPassphrase(password)) {
+    throw new Error(PASSPHRASE_HINT);
   }
 
   const plainEnvelope = createPlainBackupEnvelope(input);
@@ -1449,16 +1492,17 @@ export async function decryptBackupEnvelope(
   rawJson: string,
   password: string
 ): Promise<BackupPreviewSummary> {
+  const fail = (error: string, encrypted = false) => ({ valid: false, encrypted, error, errors: [error] });
+  if (!withinBackupLimit(rawJson)) return fail('حجم فایل از ۳۲ میبی‌بایت بیشتر است.');
+  if (decryptInProgress) return fail('رمزگشایی قبلی در حال انجام است.', true);
+  decryptInProgress = true;
   try {
-    const parsed = JSON.parse(rawJson) as KairosEncryptedBackupEnvelope;
-    if (!parsed || parsed.encrypted !== true || !parsed.kdf || !parsed.cipher) {
-      const msg = 'ساختار فایل پشتیبان رمزگذاری‌شده معتبر نیست.';
-      return { valid: false, encrypted: false, error: msg, errors: [msg] };
-    }
+    const parsed: unknown = JSON.parse(rawJson);
+    if (!encryptedHeaderValid(parsed)) return fail('ساختار فایل پشتیبان رمزگذاری‌شده معتبر نیست.');
     const salt = base64ToBytes(parsed.kdf.saltBase64);
     const iv = base64ToBytes(parsed.cipher.ivBase64);
     const ciphertext = base64ToBytes(parsed.cipher.ciphertextBase64);
-    const iterations = Number(parsed.kdf.iterations) || PBKDF2_ITERATIONS;
+    const iterations = parsed.kdf.iterations;
 
     const key = await deriveAesGcmKey(password, salt, iterations);
     const plainBuffer = await crypto.subtle.decrypt(
@@ -1467,7 +1511,7 @@ export async function decryptBackupEnvelope(
       ciphertext as BufferSource
     );
     const plainText = new TextDecoder().decode(plainBuffer);
-    return validateAndPreviewBackupPayload(plainText);
+    return validateAndPreviewBackupPayload(plainText, { verifyChecksum: true });
   } catch {
     const msg = 'گذرواژه اشتباه است یا فایل پشتیبان رمزگذاری‌شده دستکاری/آسیب دیده است.';
     return {
@@ -1476,6 +1520,8 @@ export async function decryptBackupEnvelope(
       error: msg,
       errors: [msg],
     };
+  } finally {
+    decryptInProgress = false;
   }
 }
 
@@ -1503,6 +1549,10 @@ function validateBackupEnvelopeObjectUnchecked(
   }
 
   if (parsed.encrypted === true) {
+    if (!encryptedHeaderValid(parsed)) {
+      const error = 'ساختار فایل پشتیبان رمزگذاری‌شده معتبر نیست.';
+      return { valid: false, encrypted: false, error, errors: [error] };
+    }
     const msg = 'این فایل پشتیبان رمزگذاری شده است. لطفاً گذرواژهٔ آن را وارد کنید.';
     return {
       valid: false,
@@ -1666,11 +1716,11 @@ export function validateAndPreviewBackupPayload(
   rawJson: string,
   options?: { verifyChecksum?: boolean }
 ): BackupPreviewSummary {
-  if (!rawJson || typeof rawJson !== 'string' || !rawJson.trim()) {
+  if (!rawJson || typeof rawJson !== 'string') {
     const msg = 'فایل پشتیبان خالی است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }
-  if (new TextEncoder().encode(rawJson).byteLength > MAX_BACKUP_BYTES) {
+  if (!withinBackupLimit(rawJson)) {
     const msg = 'حجم فایل پشتیبان بیش از حد مجاز (۳۲ میبی‌بایت) است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }

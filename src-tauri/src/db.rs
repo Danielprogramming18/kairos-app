@@ -1,4 +1,4 @@
-use chrono::{SecondsFormat, Utc};
+use time::{macros::format_description, OffsetDateTime};
 use crate::planning;
 #[cfg(test)]
 #[path = "planning_tests.rs"]
@@ -55,8 +55,13 @@ pub struct KairosSqliteDatabase {
     conn: Mutex<Connection>,
 }
 
+fn iso_utc(time: OffsetDateTime) -> String {
+    time.format(format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"))
+        .expect("formatting a UTC timestamp")
+}
+
 fn now_iso_string() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+    iso_utc(OffsetDateTime::now_utc())
 }
 
 fn legacy_timestamp_to_iso(value: &str) -> Option<String> {
@@ -65,8 +70,7 @@ fn legacy_timestamp_to_iso(value: &str) -> Option<String> {
         return None;
     }
     let seconds = seconds.parse::<i64>().ok()?;
-    chrono::DateTime::<Utc>::from_timestamp(seconds, 0)
-        .map(|time| time.to_rfc3339_opts(SecondsFormat::Millis, true))
+    OffsetDateTime::from_unix_timestamp(seconds).ok().map(iso_utc)
 }
 
 fn normalize_record_timestamps(record: &mut Value) -> bool {
@@ -1649,11 +1653,10 @@ impl KairosSqliteDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::DateTime;
 
     fn assert_iso_timestamp(value: &Value) {
         let timestamp = value.as_str().expect("timestamp must be a string");
-        DateTime::parse_from_rfc3339(timestamp).expect("timestamp must be valid RFC3339");
+        OffsetDateTime::parse(timestamp, &time::format_description::well_known::Rfc3339).expect("timestamp must be valid RFC3339");
         assert_eq!(timestamp.len(), 24, "use the same millisecond precision as JavaScript");
         assert!(timestamp.ends_with('Z'), "timestamp must explicitly use UTC");
     }

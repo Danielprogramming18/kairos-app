@@ -2,52 +2,45 @@ name: Build Windows Installer (Kairos Setup.exe)
 
 on:
   push:
-    branches: ["feature/offline-planning", "feature/planning-stability"]
+    branches: ["feature/offline-planning", "feature/planning-stability", "fix/security-hardening"]
     paths:
       - 'src/**'
       - 'src-tauri/**'
       - 'public/**'
+      - 'scripts/windows-*.ps1'
       - 'package.json'
       - 'package-lock.json'
       - 'index.html'
       - 'vite.config.ts'
       - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
-    inputs:
-      build_target:
-        description: 'Target architecture (default: x86_64-pc-windows-msvc)'
-        required: false
-        default: 'x86_64-pc-windows-msvc'
-
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build-windows-installer:
     name: Build Windows NSIS Setup.exe & MSI
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 45
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           cache: 'npm'
 
-      - name: Setup Rust stable toolchain (MSVC x64)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ inputs.build_target || 'x86_64-pc-windows-msvc' }}
-
-      - name: Cache Rust Cargo build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.100.0 --profile minimal
+          rustup override set 1.100.0
       - name: Install npm dependencies
         run: npm ci
 
@@ -61,54 +54,36 @@ jobs:
         run: npm run build
 
       - name: Verify offline bundle integrity (dist/)
-        run: npx --yes tsx --test src/utils/offlineBundleVerifier.test.ts
+        run: npm exec --offline -- tsx --test src/utils/offlineBundleVerifier.test.ts
 
       - name: Test native database behavior
-        run: cargo test --release --manifest-path src-tauri/Cargo.toml --lib
+        run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Build Tauri v2 Windows application and NSIS/MSI installers
         shell: pwsh
         run: |
-          npx --yes @tauri-apps/cli@^2.2.0 build --target ${{ inputs.build_target || 'x86_64-pc-windows-msvc' }}
+          npm run desktop:build
 
-      - name: Generate SHA-256 checksums for built installers and executable
+      - name: Record provenance and check expected outputs
         shell: pwsh
         run: |
-          $targetArch = "${{ inputs.build_target || 'x86_64-pc-windows-msvc' }}"
-          $releaseDir = "src-tauri/target/$targetArch/release"
-          if (-not (Test-Path $releaseDir)) {
-            $releaseDir = "src-tauri/target/release"
-          }
-
-          $outDir = "windows-installer-artifacts"
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-
-          $exeFiles = Get-ChildItem -Path $releaseDir -Filter "*.exe" -File -ErrorAction SilentlyContinue
-          foreach ($f in $exeFiles) {
-            Copy-Item $f.FullName -Destination (Join-Path $outDir $f.Name)
-          }
-
-          $nsisFiles = Get-ChildItem -Path (Join-Path $releaseDir "bundle/nsis") -Filter "*-setup.exe" -File -ErrorAction SilentlyContinue
-          foreach ($f in $nsisFiles) {
-            Copy-Item $f.FullName -Destination (Join-Path $outDir $f.Name)
-          }
-
-          $msiFiles = Get-ChildItem -Path (Join-Path $releaseDir "bundle/msi") -Filter "*.msi" -File -ErrorAction SilentlyContinue
-          foreach ($f in $msiFiles) {
-            Copy-Item $f.FullName -Destination (Join-Path $outDir $f.Name)
-          }
-
-          $checksumFile = Join-Path $outDir "SHA256SUMS.txt"
-          Get-ChildItem -Path $outDir -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | ForEach-Object {
-            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)" | Out-File -FilePath $checksumFile -Append -Encoding utf8
-          }
-
-          Write-Host "Generated artifacts and SHA256SUMS.txt:"
-          Get-Content $checksumFile
+          $ErrorActionPreference = 'Stop'
+          $outDir = New-Item -ItemType Directory windows-installer-artifacts
+          $release = 'src-tauri/target/release'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $files = @("$release/kairos-desktop.exe", "$release/bundle/nsis/Kairos_${version}_x64-setup.exe", "$release/bundle/msi/Kairos_${version}_x64_en-US.msi")
+          foreach ($file in $files) { Copy-Item -LiteralPath $file -Destination $outDir }
+          Get-ChildItem $outDir -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_.FullName).Hash.ToLower())  $($_.Name)"
+          } | Tee-Object -FilePath "$outDir/SHA256SUMS.txt"
+          [ordered]@{commit=$env:GITHUB_SHA; parent=(git rev-parse HEAD^); version=$version; runner=$env:ImageVersion; node=(node -v); npm=(npm -v); rust=(rustc -V); cargo=(cargo -V); tauri=(npm exec --offline -- tauri --version); locks=@((Get-FileHash package-lock.json).Hash,(Get-FileHash src-tauri/Cargo.lock).Hash)} |
+            ConvertTo-Json | Set-Content "$outDir/build.json"
+      - name: Check new Windows binaries individually
+        shell: pwsh
+        run: ./scripts/windows-inspect.ps1 -Directory windows-installer-artifacts -Report windows-installer-artifacts/inspection.json
 
       - name: Upload Windows Installer Artifacts (Setup.exe, MSI, SHA256SUMS.txt)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: kairos-windows-x64-installer
           path: |
@@ -116,5 +91,21 @@ jobs:
             windows-installer-artifacts/*.msi
             windows-installer-artifacts/kairos-desktop.exe
             windows-installer-artifacts/SHA256SUMS.txt
+            windows-installer-artifacts/*.json
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Check original artifact and exercise upgrade on the disposable runner
+        if: github.ref == 'refs/heads/fix/security-hardening'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/windows-upgrade.ps1
+      - name: Upload inspection and upgrade evidence
+        if: always() && github.ref == 'refs/heads/fix/security-hardening'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kairos-windows-inspection
+          path: windows-evidence/*.json
+          if-no-files-found: warn
           retention-days: 30

@@ -1,53 +1,17 @@
-name: Deploy Kairos to GitHub Pages
-
-on:
-  push:
-    branches: ["main"]
-  workflow_dispatch:
-
+# The security branch validates Pages-compatible assets without publishing them.
+name: Validate offline web build
+on: workflow_dispatch
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
 jobs:
-  build-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 24
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          bun-version: "1.4.4"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build static site for GitHub Pages
-        run: npm run build
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: "./dist"
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          node-version: '24.22.1'
+      - run: npm ci
+      - run: npm run build

@@ -124,14 +124,6 @@ export type NavTabId =
   | 'analytics'
   | 'sync';
 
-export interface GitHubSyncConfig {
-  owner: string;
-  repo: string;
-  path: string; // default 'data.json'
-  branch: string; // default 'main'
-  token: string; // Fine-grained PAT stored ONLY in sessionStorage
-  autoSync: boolean;
-}
 
 export interface KairosDataFile {
   app: 'Kairos';

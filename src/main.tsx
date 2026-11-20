@@ -44,7 +44,9 @@ if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'servic
   }
 }
 
-createRoot(document.getElementById('root')!).render(
+try { localStorage.removeItem('kairos_github_config_v1'); } catch { /* Storage may be unavailable. */ }
+
+if (location.search !== '?kairosStorageTransfer=1') createRoot(document.getElementById('root')!).render(
   <PlatformProvider>
     <PlanningProvider><OnboardingGate><App /></OnboardingGate></PlanningProvider>
   </PlatformProvider>

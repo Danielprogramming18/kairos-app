@@ -6,8 +6,19 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.os.Build;
-import android.webkit.JavascriptInterface;
+import android.net.Uri;
+import android.content.Intent;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
+import androidx.webkit.WebViewAssetLoader;
+import androidx.webkit.WebMessageCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+import java.io.ByteArrayInputStream;
 import android.webkit.WebSettings;
+import android.webkit.ValueCallback;
 import android.webkit.WebView;
 
 import org.json.JSONArray;
@@ -21,24 +32,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.nio.charset.StandardCharsets;
 
-/**
- * KairosAndroidBridge — Production Reference Implementation for Android Sketchware / Android Studio
- * Protocol Version: 1.0.0 (Strictly aligned with src/infrastructure/bridge/protocol.ts)
- *
- * نحوهٔ استفاده در Sketchware (حالت A — بدون نیاز به این کلاس، صرفاً WebView + IndexedDB):
- *   WebSettings ws = webview1.getSettings();
- *   ws.setJavaScriptEnabled(true);
- *   ws.setDomStorageEnabled(true);
- *   ws.setDatabaseEnabled(true);
- *   ws.setAllowFileAccess(true);
- *   ws.setAllowContentAccess(true);
- *   ws.setAllowFileAccessFromFileURLs(false);
- *   webview1.loadUrl("file:///android_asset/www/index.html");
- *
- * نحوهٔ استفاده در حالت B (اختیاری — فعال‌سازی پایگاه داده SQLite بومی اندروید):
- *   KairosAndroidBridge.attachToWebView(getApplicationContext(), webview1);
- *   webview1.loadUrl("file:///android_asset/www/index.html");
- */
+/** Local Kairos host. Install on a fresh WebView before any navigation; see docs/ANDROID_HANDOFF.md. */
 public class KairosAndroidBridge extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "kairos_native_v2.db";
@@ -93,13 +87,22 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
     /**
      * Securely configures WebSettings for local asset loading without enabling universal file access.
      */
-    public static void configureWebViewForModeA(WebView webView) {
+    private static void configure(WebView webView, WebChromeClient picker) {
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setDatabaseEnabled(true);
-        ws.setAllowFileAccess(true);
-        ws.setAllowContentAccess(true);
+        ws.setAllowFileAccess(false);
+        ws.setAllowContentAccess(false);
+        ws.setAllowUniversalAccessFromFileURLs(false);
+        ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        ws.setJavaScriptCanOpenWindowsAutomatically(false);
+        ws.setSupportMultipleWindows(true);
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                return picker != null && picker.onShowFileChooser(view, callback, params);
+            }
+        });
         ws.setAllowFileAccessFromFileURLs(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ws.setForceDark(WebSettings.FORCE_DARK_AUTO);
@@ -137,10 +140,141 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         webView.post(() -> webView.evaluateJavascript(js, null));
     }
 
-    public static void attachToWebView(Context context, WebView webView) {
-        configureWebViewForModeA(webView);
-        webView.addJavascriptInterface(new KairosAndroidBridge(context), "KairosAndroidBridge");
-        syncDeviceThemeToWebView(context, webView);
+    private static final String HOST = "appassets.androidplatform.net";
+    private static final String ORIGIN = "https://" + HOST;
+    private static final String TRANSFER = "kairosStorageTransfer=1";
+
+    private static boolean appOrigin(Uri uri) {
+        return "https".equals(uri.getScheme()) && HOST.equals(uri.getEncodedAuthority());
+    }
+
+    private static WebResourceResponse blocked() {
+        return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked",
+            Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
+    }
+
+    // API 24+ supplies the redirect and gesture flags for main-frame navigation.
+    public static Runnable start(Context context, WebView view, String folder, boolean nativeStorage) {
+        return start(context, view, folder, nativeStorage, null);
+    }
+
+    public static Runnable start(Context context, WebView view, String folder, boolean nativeStorage, WebChromeClient picker) {
+        if (!"www".equals(folder) && !"kairos".equals(folder))
+            throw new IllegalArgumentException("Expected the original packaged asset directory");
+        if (Build.VERSION.SDK_INT < 24 || nativeStorage &&
+            !WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER))
+            throw new IllegalStateException("Update Android System WebView before opening Kairos");
+        configure(view, picker);
+        final Context app = context.getApplicationContext();
+        final String fileRoot = "/android_asset/" + folder + "/";
+        final String assetRoot = "/assets/" + folder + "/";
+        final String oldEntry = "file://" + fileRoot + "index.html";
+        final String entry = nativeStorage ? ORIGIN + assetRoot + "index.html" : oldEntry;
+        final android.content.SharedPreferences flags = app.getSharedPreferences("kairos_host_upgrade", 0);
+        final String marker = "prefs-v1-" + folder;
+        boolean migrating = nativeStorage && !flags.getBoolean(marker, false);
+        final WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(app)).build();
+        final java.util.concurrent.ExecutorService database =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+        final KairosAndroidBridge bridge = nativeStorage ? new KairosAndroidBridge(app) : null;
+        final java.util.concurrent.atomic.AtomicLong pendingBytes = new java.util.concurrent.atomic.AtomicLong();
+        if (bridge != null) {
+            WebViewCompat.addWebMessageListener(view, "KairosAndroidBridge", Collections.singleton(ORIGIN),
+                (sender, message, origin, mainFrame, reply) -> {
+                    if (!mainFrame || !appOrigin(origin) || message.getType() != WebMessageCompat.TYPE_STRING) return;
+                    String json = message.getData();
+                    if (json == null || json.length() > MAX_BRIDGE_PAYLOAD_BYTES) return;
+                    // Count a minimum per request so both queue depth and bytes are bounded.
+                    long cost = Math.max(65536L, (long) json.length() * 2);
+                    if (pendingBytes.addAndGet(cost) > 2L * MAX_BRIDGE_PAYLOAD_BYTES) {
+                        pendingBytes.addAndGet(-cost);
+                        return;
+                    }
+                    database.execute(() -> {
+                        try {
+                            String result = bridge.postMessage(json);
+                            sender.post(() -> reply.postMessage(result));
+                        } finally { pendingBytes.addAndGet(-cost); }
+                    });
+                });
+        }
+        view.setWebViewClient(new WebViewClient() {
+            private JSONObject snapshot;
+            private boolean transferring = migrating;
+
+            private boolean asset(Uri u) {
+                String path = u.getEncodedPath();
+                boolean bundledFile = (!nativeStorage || transferring) && "file".equals(u.getScheme())
+                    && (u.getEncodedAuthority() == null || u.getEncodedAuthority().isEmpty());
+                String root = bundledFile ? fileRoot : assetRoot;
+                if ((!bundledFile && !(nativeStorage && appOrigin(u))) || path == null) return false;
+                String[] parts = path.split("/", -1);
+                if (parts.length < 4 || !path.startsWith(root)) return false;
+                for (int i = 1; i < parts.length; ++i)
+                    if (!parts[i].matches("[A-Za-z0-9_.@-]+") || parts[i].equals(".") || parts[i].equals("..")) return false;
+                return true;
+            }
+
+            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
+                Uri u = request.getUrl();
+                if (!"GET".equals(request.getMethod()) || !asset(u)) return blocked();
+                if ("file".equals(u.getScheme())) return null;
+                WebResourceResponse response = assets.shouldInterceptRequest(u);
+                return response == null ? blocked() : response;
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
+                Uri u = req.getUrl();
+                if (asset(u) && !req.isRedirect()) {
+                    String root = "file".equals(u.getScheme()) ? fileRoot : assetRoot;
+                    String path = u.getEncodedPath();
+                    if (req.isForMainFrame()) return !(root + "index.html").equals(path);
+                    return !(root + "kairos-intro/kairos-intro.html").equals(path);
+                }
+                if (req.isForMainFrame() && req.hasGesture() && !req.isRedirect() &&
+                    (("https".equals(u.getScheme()) || "http".equals(u.getScheme())) &&
+                     u.getHost() != null && u.getUserInfo() == null || "mailto".equals(u.getScheme()))) {
+                    try { app.startActivity(new Intent(Intent.ACTION_VIEW, u)
+                        .addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+                    catch (android.content.ActivityNotFoundException ignored) {}
+                }
+                return true;
+            }
+            @Override public void onPageFinished(WebView v, String url) {
+                if (transferring && (oldEntry + "?" + TRANSFER).equals(url)) {
+                    v.evaluateJavascript("window.KairosPreferences.read()", raw -> {
+                        try { snapshot = new JSONObject(raw); }
+                        catch (Exception e) { showMigrationError(v); return; }
+                        v.loadUrl(entry + "?" + TRANSFER);
+                    });
+                } else if (transferring && (entry + "?" + TRANSFER).equals(url) && snapshot != null) {
+                    String encoded = JSONObject.quote(snapshot.toString());
+                    v.evaluateJavascript("window.KairosPreferences.copy(JSON.parse(" + encoded + "))", result -> {
+                        if (!"true".equals(result) || !flags.edit().putBoolean(marker, true).commit()) {
+                            showMigrationError(v); return;
+                        }
+                        transferring = false;
+                        snapshot = null;
+                        v.loadUrl(entry);
+                    });
+                } else if (url.equals(entry)) syncDeviceThemeToWebView(app, v);
+            }
+        });
+        view.loadUrl(migrating ? oldEntry + "?" + TRANSFER : entry);
+        return () -> {
+            if (bridge != null) {
+                WebViewCompat.removeWebMessageListener(view, "KairosAndroidBridge");
+                database.execute(bridge::close);
+            }
+            database.shutdown();
+            view.destroy();
+        };
+    }
+
+    private static void showMigrationError(WebView view) {
+        android.widget.Toast.makeText(view.getContext(),
+            "انتقال تنظیمات کامل نشد. برنامه را دوباره باز کنید؛ داده‌های قبلی حفظ شدند.",
+            android.widget.Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -177,8 +311,7 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         }
     }
 
-    @JavascriptInterface
-    public String postMessage(String rawRequestJson) {
+    private String postMessage(String rawRequestJson) {
         String requestId = "unknown";
         try {
             if (rawRequestJson == null || rawRequestJson.getBytes(StandardCharsets.UTF_8).length > MAX_BRIDGE_PAYLOAD_BYTES) {
@@ -186,14 +319,17 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             }
 
             JSONObject req = new JSONObject(rawRequestJson);
-            requestId = req.optString("requestId", "unknown");
+            Object id = req.opt("requestId");
+            if (!(id instanceof String) || !((String) id).matches("[A-Za-z0-9_-]{1,160}"))
+                return buildErrorEnvelope("unknown", "VALIDATION_ERROR", "Invalid request identifier");
+            requestId = (String) id;
             String version = req.optString("version", "");
 
             if (!CONTRACT_VERSION.equals(version)) {
                 return buildErrorEnvelope(
                     requestId,
                     "VERSION_MISMATCH",
-                    "Bridge version mismatch: expected " + CONTRACT_VERSION + ", got " + version
+                    "Unsupported bridge version"
                 );
             }
 
@@ -202,11 +338,13 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
                 return buildErrorEnvelope(
                     requestId,
                     "UNKNOWN_OPERATION",
-                    "Operation not in whitelist: " + operation
+                    "Unsupported operation"
                 );
             }
 
             JSONObject payload = req.optJSONObject("payload");
+            if (payload == null && req.has("payload") && !req.isNull("payload"))
+                return buildErrorEnvelope(requestId, "VALIDATION_ERROR", "Invalid payload");
             if (payload == null) {
                 payload = new JSONObject();
             }
@@ -222,9 +360,9 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             if(serialized.getBytes(StandardCharsets.UTF_8).length>MAX_BRIDGE_PAYLOAD_BYTES)return buildErrorEnvelope(requestId,"PAYLOAD_TOO_LARGE","Native response exceeds the 5 MiB bridge limit");
             return serialized;
         } catch (BridgeExecutionException bex) {
-            return buildErrorEnvelope(requestId, bex.code, bex.getMessage());
+            return buildErrorEnvelope(requestId, bex.code, "Android operation could not be completed");
         } catch (Exception ex) {
-            String msg = ex.getMessage() != null ? ex.getMessage() : "Android SQLite execution error";
+            String msg = "Android storage operation failed";
             return buildErrorEnvelope(requestId, "STORAGE_ERROR", msg);
         }
     }

@@ -11,7 +11,7 @@ import {
 test('encrypted export refuses a backup whose Base64 envelope would exceed the import limit', async () => {
   const envelope = createPlainBackupEnvelope(sampleData);
   envelope.payload.notes[0].content = 'آ'.repeat(12 * 1024 * 1024);
-  await assert.rejects(() => createEncryptedBackupEnvelope(envelope, 'backup-test'), /۳۲ میبی‌بایت/);
+  await assert.rejects(() => createEncryptedBackupEnvelope(envelope, 'three test words for size'), /۳۲ میبی‌بایت/);
 });
 
 const sampleData = {
@@ -72,10 +72,10 @@ test('Canonical BackupEnvelopeV2 round-trip and schema validation preview works 
 });
 
 test('Encrypted backup round-trip with PBKDF2 + AES-GCM succeeds with correct password and fails with wrong password or tampered ciphertext (FIX-08)', async () => {
-  const encryptedEnvelope = await createEncryptedBackupEnvelope(sampleData, 'SecretPass123!');
+  const encryptedEnvelope = await createEncryptedBackupEnvelope(sampleData, 'a fresh lantern on the roof');
   assert.equal(encryptedEnvelope.formatVersion, 2);
   assert.equal(encryptedEnvelope.schemaVersion, 2);
-  assert.equal(encryptedEnvelope.kdf.iterations, 100_000);
+  assert.equal(encryptedEnvelope.kdf.iterations, 600_000);
   const rawEncrypted = JSON.stringify(encryptedEnvelope);
 
   // Direct preview detects encryption requirement
@@ -99,13 +99,13 @@ test('Encrypted backup round-trip with PBKDF2 + AES-GCM succeeds with correct pa
   };
   const tamperedResult = await decryptBackupEnvelope(
     JSON.stringify(tamperedEnvelope),
-    'SecretPass123!'
+    'a fresh lantern on the roof'
   );
   assert.equal(tamperedResult.valid, false);
   assert.equal(tamperedResult.encrypted, true);
 
   // Correct password decrypts and validates schema
-  const decryptedPreview = await decryptBackupEnvelope(rawEncrypted, 'SecretPass123!');
+  const decryptedPreview = await decryptBackupEnvelope(rawEncrypted, 'a fresh lantern on the roof');
   assert.equal(decryptedPreview.valid, true);
   assert.equal(decryptedPreview.counts?.tasks, 1);
   assert.equal(decryptedPreview.data?.tasks[0].title, 'تکمیل معماری کایروس');
@@ -258,4 +258,30 @@ test('Legacy v1 backup format is migrated cleanly to canonical BackupEnvelopeV2 
   assert.equal(preview.envelope?.schemaVersion, 2);
   assert.equal(preview.envelope?.payload.tasks.length, 1);
   assert.equal(preview.envelope?.payload.habitEntries.length, 1);
+});
+
+test('v2.2.1 encrypted fixture keeps its short password on import only', async () => {
+  const legacy = "{\"appId\":\"kairos\",\"app\":\"Kairos\",\"formatVersion\":2,\"schemaVersion\":2,\"exportedAt\":\"2026-11-20T07:39:50.161Z\",\"encrypted\":true,\"kdf\":{\"algorithm\":\"PBKDF2\",\"hash\":\"SHA-256\",\"iterations\":100000,\"saltBase64\":\"VDNZiMWD7/1keThJcUt5gQ==\"},\"cipher\":{\"algorithm\":\"AES-GCM\",\"ivBase64\":\"vqOZ3MCoMk4wkmQr\",\"ciphertextBase64\":\"aM0xfm+X53dSpNv0ksvDqdPHVKMH5e9KzI7+t/yM55LNCf6US5ieWkww5RiHLtf46TfjAC2lsWG3UU6rKYzdL+X7oauqy8FGU0mop35ESGPDhOAZmXwNXEc5lntPoSeG6NBTmeTsBh4h5WoyVYBYZPqwJ86YAh6Y+oWyrr3sVwvb5WRcbIEWZyCy7icvIrjLOVPTsO5RLJkx/odpiWecw8zkUWKlXsSzVUAWEHHkucSsD7t7Bel6JblVQoYeDq+SP4IRzrU+UXji9NXRXOEqXIq2JeJomKgevQYjovggBbJeOWFu1He9oJa2FdRrphbOL+dZ5FfzqaVijha18Ilk8uUudPXt2lSYRGwBlUUD5wjcyw==\"}}";
+  assert.equal((await decryptBackupEnvelope(legacy, 'old4')).valid, true);
+  for (const password of ['old4', 'passwordpassword', '1234567890123456']) {
+    await assert.rejects(createEncryptedBackupEnvelope(sampleData, password), /۱۵/);
+  }
+});
+
+test('malformed encrypted inputs are rejected before Web Crypto', async (t) => {
+  const original = JSON.parse("{\"appId\":\"kairos\",\"app\":\"Kairos\",\"formatVersion\":2,\"schemaVersion\":2,\"exportedAt\":\"2026-11-20T07:39:50.161Z\",\"encrypted\":true,\"kdf\":{\"algorithm\":\"PBKDF2\",\"hash\":\"SHA-256\",\"iterations\":100000,\"saltBase64\":\"VDNZiMWD7/1keThJcUt5gQ==\"},\"cipher\":{\"algorithm\":\"AES-GCM\",\"ivBase64\":\"vqOZ3MCoMk4wkmQr\",\"ciphertextBase64\":\"aM0xfm+X53dSpNv0ksvDqdPHVKMH5e9KzI7+t/yM55LNCf6US5ieWkww5RiHLtf46TfjAC2lsWG3UU6rKYzdL+X7oauqy8FGU0mop35ESGPDhOAZmXwNXEc5lntPoSeG6NBTmeTsBh4h5WoyVYBYZPqwJ86YAh6Y+oWyrr3sVwvb5WRcbIEWZyCy7icvIrjLOVPTsO5RLJkx/odpiWecw8zkUWKlXsSzVUAWEHHkucSsD7t7Bel6JblVQoYeDq+SP4IRzrU+UXji9NXRXOEqXIq2JeJomKgevQYjovggBbJeOWFu1He9oJa2FdRrphbOL+dZ5FfzqaVijha18Ilk8uUudPXt2lSYRGwBlUUD5wjcyw==\"}}");
+  const spy = t.mock.method(crypto.subtle, 'importKey', () => { throw Error('unexpected crypto'); });
+  const reject = async (input: string) => assert.equal((await decryptBackupEnvelope(input, 'old4')).valid, false);
+  for (const iterations of [2147483647, 600001, 99999, -1, 0, 100000.5, '100000', null, undefined]) {
+    await reject(JSON.stringify({...original, kdf: {...original.kdf, iterations}}));
+  }
+  for (const [section, patch] of [
+    ['kdf', {saltBase64: 'AA=='}], ['kdf', {algorithm: 'other'}], ['kdf', {hash: 'SHA-1'}],
+    ['cipher', {ivBase64: 'A==='}], ['cipher', {ciphertextBase64: 'bad!'}],
+    ['cipher', {ciphertextBase64: 'AAAA'}], ['cipher', {algorithm: 'other'}],
+  ] as const) await reject(JSON.stringify({...original, [section]: {...original[section], ...patch}}));
+  for (const patch of [{appId:'other'}, {app:undefined}, {schemaVersion:3}, {formatVersion:'2'},
+    {exportedAt:null}, {cipher:null}, {kdf:null}, {encrypted:false}]) await reject(JSON.stringify({...original,...patch}));
+  await reject(' '.repeat(32 * 1024 * 1024 + 1));
+  assert.equal(spy.mock.callCount(), 0);
 });

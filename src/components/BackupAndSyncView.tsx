@@ -27,7 +27,6 @@ import {
   Idea,
   FocusSession,
   UsefulInfoItem,
-  GitHubSyncConfig,
 } from '../types';
 import { BackupEnvelopeV2 } from '../domain/models';
 import { usePlatform } from '../app/PlatformContext';
@@ -36,6 +35,7 @@ import {hasPlanningContent} from '../infrastructure/planningRecords';
 import { toPersianNum } from '../utils/persianDate';
 import {
   createEncryptedBackupEnvelope,
+  validExportPassphrase, MAX_BACKUP_BYTES, PASSPHRASE_HINT,
   decryptBackupEnvelope,
   validateAndPreviewBackupPayload,
   BackupPreviewSummary,
@@ -93,15 +93,7 @@ interface BackupAndSyncViewProps {
   notificationPermission?: NotificationPermission;
   onRequestNotificationPermission?: () => void;
   onTriggerTestNotification?: () => void;
-  // Optional legacy props kept for type compatibility
-  githubConfig?: GitHubSyncConfig;
-  onSaveGitHubConfig?: (config: GitHubSyncConfig) => void;
-  onPullFromGitHub?: () => Promise<void>;
-  onPushToGitHub?: () => Promise<void>;
-  isGitHubSyncing?: boolean;
-  lastKnownSha?: string | null;
-  lastSyncedAt?: string | null;
-  githubSyncError?: string | null;
+
 }
 
 export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
@@ -149,6 +141,10 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
   }, [planningMergeUnsupported]);
   const [isRestoring, setIsRestoring] = useState(false);
   const [decryptPassword, setDecryptPassword] = useState('');
+
+  const importGeneration = useRef(0);
+  const [decrypting, setDecrypting] = useState(false);
+  useEffect(() => () => { importGeneration.current++; }, []);
 
   // Pre-restore snapshot rollback state
   const [preRestoreSnapshot, setPreRestoreSnapshot] = useState<{
@@ -223,8 +219,8 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
   const handleExportEncryptedBackup = async () => {
     setImportError(null);
     setImportErrorDetails([]);
-    if (!exportPassword || exportPassword.trim().length < 4) {
-      setImportError('لطفاً برای رمزگذاری پشتیبان یک گذرواژهٔ حداقل ۴ کاراکتری وارد کنید.');
+    if (!validExportPassphrase(exportPassword)) {
+      setImportError(PASSPHRASE_HINT);
       return;
     }
     setIsExportingEncrypted(true);
@@ -264,8 +260,16 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
     setImportPreview(null);
     setPendingRawFile(null);
 
+    const generation = ++importGeneration.current;
+    setDecryptPassword('');
+    if (file.size > MAX_BACKUP_BYTES) {
+      setImportError('حجم فایل پشتیبان بیش از ۳۲ میبی‌بایت است.');
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
+      if (generation !== importGeneration.current) return;
       const raw = String(event.target?.result || '');
       const preview = validateAndPreviewBackupPayload(raw, { verifyChecksum: true });
       if (preview.encrypted) {
@@ -284,8 +288,12 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
 
   const handleDecryptPendingFile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pendingRawFile || !decryptPassword) return;
+    if (!pendingRawFile || !decryptPassword || decrypting) return;
+    const generation = importGeneration.current;
+    setDecrypting(true);
     const preview = await decryptBackupEnvelope(pendingRawFile, decryptPassword);
+    setDecrypting(false);
+    if (generation !== importGeneration.current) return;
     if (!preview.valid) {
       setImportError(preview.error || 'گذرواژه اشتباه است.');
       setImportErrorDetails(preview.errors.slice(0, 5));
@@ -517,7 +525,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                 <span>۲. خروجی رمزگذاری‌شده (AES-256-GCM)</span>
               </h4>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                فایل خروجی را با گذرواژهٔ شما (PBKDF2-SHA256) رمزنگاری می‌کند تا در صورت نگهداری فایل در فضای ابری یا فلش امن باشد. توجه: در صورت فراموشی گذرواژه، امکان بازگشایی این فایل وجود ندارد.
+                فایل خروجی را با گذرواژهٔ شما (PBKDF2-SHA256) رمزنگاری می‌کند تا در صورت نگهداری فایل در فضای ابری یا فلش امن باشد. {PASSPHRASE_HINT} این رمز فقط برای فایل خروجی است. آن را برای بازیابی نگه دار.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -525,7 +533,7 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                 type="password"
                 value={exportPassword}
                 onChange={(e) => setExportPassword(e.target.value)}
-                placeholder="گذرواژهٔ رمزگذاری (حداقل ۴ کاراکتر)..."
+                placeholder="عبارت عبور (حداقل ۱۵ نویسه)" autoComplete="new-password"
                 aria-label="گذرواژه رمزگذاری پشتیبان"
                 className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
@@ -598,15 +606,18 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                   className="flex-1 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-amber-500/30 text-xs text-slate-800 dark:text-white"
                 />
                 <button
-                  type="submit"
+                  type="submit" disabled={decrypting}
                   className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
                 >
-                  رمزگشایی و بررسی
+                  {decrypting ? 'در حال رمزگشایی…' : 'رمزگشایی و بررسی'}
                 </button>
                 <button
                   type="button"
+                  disabled={decrypting}
                   onClick={() => {
                     setImportPreview(null);
+                    importGeneration.current++;
+                    setDecryptPassword('');
                     setPendingRawFile(null);
                   }}
                   className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"
@@ -723,8 +734,11 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                 <button
                   type="button"
                   disabled={isRestoring}
+                  disabled={decrypting}
                   onClick={() => {
                     setImportPreview(null);
+                    importGeneration.current++;
+                    setDecryptPassword('');
                     setPendingRawFile(null);
                   }}
                   className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"

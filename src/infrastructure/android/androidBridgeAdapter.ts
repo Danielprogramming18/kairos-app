@@ -50,6 +50,7 @@ import { hasPlanningContent, upgradeLegacyPlanningLayout, splitPlanningRecords }
 import type { PlanningRepository } from '../../application/repositories';
 
 export interface SketchwareAndroidJavascriptInterface {
+  onmessage?: ((event: MessageEvent<string>) => void) | null;
   postMessage(rawRequestJson: string): string | void;
 }
 
@@ -72,6 +73,9 @@ export class AndroidSketchwareBridgeTransport {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      if (window.KairosAndroidBridge) {
+        window.KairosAndroidBridge.onmessage = event => this.handleIncomingResponse(event.data);
+      }
       window.__onKairosNativeBridgeResponse = (rawResponseJson: string) => {
         this.handleIncomingResponse(rawResponseJson);
       };
@@ -87,6 +91,7 @@ export class AndroidSketchwareBridgeTransport {
   }
 
   private handleIncomingResponse(rawResponseJson: string) {
+    if (typeof rawResponseJson !== 'string' || rawResponseJson.length > MAX_BRIDGE_PAYLOAD_BYTES) return;
     let parsed: BridgeResponseEnvelope;
     try {
       parsed = JSON.parse(rawResponseJson);
