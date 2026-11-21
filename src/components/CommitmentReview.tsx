@@ -95,12 +95,9 @@ export function CommitmentReview({tasks,sessions,timerMinutes,onReload}:{
         if (confirmed.status==='refresh' || (scenario && confirmed.adjusted)) {
           await calculate(source,now,signal,confirmed.result);setMessage(confirmed.reason+' پیش‌نمایش تازه را تأیید کن.');return;
         }
-        const origins = new Map(scope.rows.map(r=>[r.task.id,r.basis]));
-        const approved = confirmed.result.allocations.map(a=>{
-          const basis = origins.get(a.taskId);
-          const oldBasis = source.state.allocations.find(slot=>slot.taskId===a.taskId && slot.durationBasis)?.durationBasis;
-          return {...a,durationBasis:(basis==='approved' ? oldBasis??basis : basis) as Allocation['durationBasis']};
-        });
+        const origins = new Map(scope.rows.map(r=>[r.task.id,r.previousBasis ?? r.basis]));
+        const approved = confirmed.result.allocations.map(a=>({...a,
+          durationBasis:origins.get(a.taskId) as Allocation['durationBasis']}));
         try {
           await container.planning.savePlanning({...source.state,revision:source.state.revision+1,
             allocations:replacePendingSchedule(source.state.allocations,approved,scope.inputs,now.getTime()),
@@ -147,7 +144,7 @@ export function CommitmentReview({tasks,sessions,timerMinutes,onReload}:{
     <div className="kp-actions"><button onClick={check}>{busy?'در حال بررسی…':'بررسی ظرفیت و پیش‌نمایش'}</button>{(review||scenario) && <button onClick={()=>{clear();setScenario(false);setDraft(newDraft());}}>لغو پیش‌نمایش</button>}</div>
     {review && result && <section aria-label="نتیجهٔ بررسی"><h3>پیش‌نمایش برنامه</h3>
       <p>زمان مبنا: {displayTime(result.baseTime)} · {result.timezone}</p>
-      <h4>تعهدهای لحاظ‌شده</h4>{review.scope.rows.map(r=><p key={r.task.id}>{r.task.title} · {r.minutes} دقیقه · {basisLabels[r.basis]}{r.task.planning?.waiting?' · در انتظار':''}</p>)}
+      <h4>تعهدهای لحاظ‌شده</h4>{review.scope.rows.map(r=><p key={r.task.id}>{r.task.title} · {r.minutes} دقیقه · {basisLabels[r.basis]}{r.previousBasis && r.previousBasis!=='approved' && ' ('+basisLabels[r.previousBasis]+')'}{r.task.planning?.waiting?' · در انتظار':''}</p>)}
       {review.source.state.commitments.map(w=><p key={w.id}>تعهد ثابت · {w.date ?? ['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'][w.weekday!]} · {w.start} تا {w.end}</p>)}
       {currentSlots.filter(a=>a.locked).map(a=><p key={a.taskId+a.start}>بازهٔ قفل‌شده · {review.source.tasks.find(t=>t.id===a.taskId)?.title} · {displayTime(a.start)} تا {displayTime(a.end)}</p>)}
       {review.scope.omitted.map(t=><p key={t.id}>فعلاً لحاظ نشده: {t.title} · در انتظار و خارج از دامنهٔ این بررسی{review.scope.calendar.reservedOutsideScope.some(a=>a.taskId===t.id) && (' · زمان رزروشده حفظ شد: '+periods(currentSlots,t.id))}</p>)}

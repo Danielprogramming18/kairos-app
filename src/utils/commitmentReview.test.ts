@@ -52,3 +52,17 @@ test('explicit manual estimate, comparable work history and timer assumption rem
     assert.equal(review.assumptions.length,basis==='timer'?1:0);
   }
 });
+
+test('a different selected task cannot relabel or resize the duration of a locked commitment',()=>{
+  const existing=hypotheticalTask({...draft,id:'locked',minutes:'25'},45,now);
+  const target=hypotheticalTask(draft,45,now);
+  const state={...calendar(),allocations:[{taskId:existing.id,start:time('09:30'),end:time('10:30'),locked:true,
+    plannedTaskMinutes:60,durationBasis:'history' as const}]};
+  const view=commitmentInputs(state,[existing,target],[],target,false,[],now);
+  const row=view.rows.find(r=>r.task.id==='locked')!;
+  assert.equal(row.minutes,60);assert.equal(row.basis,'approved');assert.equal(row.previousBasis,'history');
+  assert.equal(existing.duration,25);
+  const result=planCapacity(view.calendar,view.inputs,now,1);
+  assert.equal(result.status,'ready');
+  assert.equal(confirmSchedule(view.calendar,view.inputs,result,now).status,'accepted');
+});

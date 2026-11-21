@@ -25,8 +25,9 @@ export function hypotheticalTask(draft: ScenarioDraft, timerMinutes: number, now
 
 export function commitmentInputs(state: PlanningState, tasks: Task[], sessions: FocusSession[], target: Task | undefined,
   hypothetical: boolean, extraWaiting: string[], now: Date) {
-  const reserved = new Map(withConfirmedScheduleDurations(state.allocations, now)
-    .filter(slot => Date.parse(slot.end) > now.getTime()).map(slot => [slot.taskId, slot.plannedTaskMinutes]));
+  const upcoming = withConfirmedScheduleDurations(state.allocations, now).filter(slot=>Date.parse(slot.end)>now.getTime());
+  const reserved = new Map(upcoming.map(slot=>[slot.taskId,slot]));
+  const locked = new Set(upcoming.filter(slot=>slot.locked).map(slot=>slot.taskId));
   const active = tasks.filter(t => !t.completed && !t.deletedAt && t.status !== 'archived');
   const omitted: Task[] = [];
   const included = active.filter(t => {
@@ -38,16 +39,16 @@ export function commitmentInputs(state: PlanningState, tasks: Task[], sessions: 
   const estimate = target ? estimateDuration(target, tasks, sessions, state.minimumSamples, now.getTime()) : null;
   const rows = (hypothetical && target ? [...included, target] : included).map(t => {
     const isTarget = t.id === target?.id;
-    const approved = reserved.get(t.id);
-    const locked = isTarget && state.allocations.some(a => a.taskId === t.id && a.locked && Date.parse(a.end) > now.getTime());
+    const saved = reserved.get(t.id);
+    const approved = saved?.plannedTaskMinutes;
     let minutes = t.duration;
     let basis = t.planning?.initialEstimate ? 'manual' : t.planning?.durationSource ?? 'timer';
-    if (approved !== undefined && (hypothetical || locked)) { minutes = approved; basis = 'approved'; }
+    if (approved !== undefined && (hypothetical || locked.has(t.id))) { minutes = approved; basis = 'approved'; }
     else if (t.planning?.remainingMinutes !== undefined) { minutes = t.planning.remainingMinutes; basis = 'remaining'; }
     else if (isTarget && estimate?.source === 'history' && !(hypothetical && t.planning?.initialEstimate)) {
       minutes = estimate.minutes!; basis = 'history';
     }
-    return {task:t, minutes, basis};
+    return {task:t, minutes, basis, previousBasis:basis==='approved' ? saved?.durationBasis : undefined};
   });
   const inputs = rows.map(({task, minutes, basis}) => ({...task, duration:minutes,
     planning:basis === 'approved' ? {...task.planning,remainingMinutes:minutes} : task.planning}));
