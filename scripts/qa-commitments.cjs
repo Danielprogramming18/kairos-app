@@ -71,12 +71,17 @@ async function database(page, operation, data) {
     for(const width of [320,390]) {
       await page.setViewportSize({width,height:800});
       const password=label('گذرواژه رمزگذاری پشتیبان'), secure=button('دانلود امن');
+      await page.evaluate(()=>document.fonts.ready);
       for(const element of [password,secure]) {
-        await element.scrollIntoViewIfNeeded();
-        assert.ok(await element.evaluate(el=>{
-          const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
-          return r.left>=0 && r.right<=innerWidth+0.5 && r.height>=44 && (el===hit||el.contains(hit));
-        }),theme+'/'+width+' fully visible tap target');
+        await element.evaluate(el=>el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}));
+        // Wait for layout and overlays to settle exactly as a real touch action would.
+        await element.tap({trial:true});
+        const bounds=await element.evaluate(el=>{
+          const r=el.getBoundingClientRect();
+          return {left:r.left,right:r.right,height:r.height,viewport:innerWidth,control:el.tagName};
+        });
+        assert.ok(bounds.left>=0 && bounds.right<=width+0.5 && bounds.height>=44 && bounds.viewport===width,
+          theme+'/'+width+' touch target '+JSON.stringify(bounds));
       }
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
       await password.fill(key);
