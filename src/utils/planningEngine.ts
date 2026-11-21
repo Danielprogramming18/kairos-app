@@ -37,6 +37,12 @@ function onDate(w: TimeWindow, d: Date): Interval | null {
     end: new Date(`${day}T${w.end}:00`).getTime()
   };
 }
+/** Ephemeral busy time belonging to waiting tasks outside this commitment review. */
+export type ReviewCalendar = PlanningState & {reservedOutsideScope?: Allocation[]};
+function reservedIntervals(state:ReviewCalendar): Interval[] {
+  const gap = state.breakMinutes * 60000;
+  return (state.reservedOutsideScope ?? []).map(a=>({start:Date.parse(a.start)-gap,end:Date.parse(a.end)+gap}));
+}
 export interface ScheduleResult {
   status: 'ready' | 'needs_data' | 'no_plan';
   messages: string[];
@@ -50,8 +56,8 @@ export interface ScheduleResult {
   timezone: string;
 }
 export const currentTimezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || `UTC-offset:${new Date().getTimezoneOffset()}`;
-export function scheduleFingerprint(state: PlanningState, tasks: Task[]): string {
-  return JSON.stringify([state.availability, state.commitments, state.excludedDates, state.breakMinutes, state.allocations, tasks.map(t => [t.id, t.revision, t.updatedAt, t.duration, t.priority, t.dueAt, t.completed, t.status, t.deletedAt, [t.planning?.remainingMinutes,t.planning?.splittable,t.planning?.minimumChunk,t.planning?.waiting]]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
+export function scheduleFingerprint(state: ReviewCalendar, tasks: Task[]): string {
+  return JSON.stringify([state.availability, state.commitments, state.excludedDates, state.breakMinutes, state.allocations, tasks.map(t => [t.id, t.revision, t.updatedAt, t.duration, t.priority, t.dueAt, t.completed, t.status, t.deletedAt, [t.planning?.remainingMinutes,t.planning?.splittable,t.planning?.minimumChunk,t.planning?.waiting]]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), state.reservedOutsideScope ?? []]);
 }
 
 /** Backfill older confirmed schedules from their saved intervals, without changing task estimates. */
@@ -71,7 +77,7 @@ function scheduledTaskMinutes(task: Task, slots: Allocation[]): number {
   return slots.find(slot => slot.plannedTaskMinutes !== undefined)?.plannedTaskMinutes
     ?? task.planning?.remainingMinutes ?? task.duration;
 }
-export function planCapacity(state: PlanningState, tasks: Task[], now = new Date(), horizonDays = 30): ScheduleResult {
+export function planCapacity(state: ReviewCalendar, tasks: Task[], now = new Date(), horizonDays = 30): ScheduleResult {
   horizonDays = Number.isFinite(horizonDays) ? Math.max(1, Math.min(90, Math.floor(horizonDays))) : 30;
   const result: ScheduleResult = {
     status: 'needs_data',
@@ -96,7 +102,7 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     return result;
   }
   if (active.some(t => t.planning?.waiting)) {
-    result.messages.push('زمان انتظار بعضی کارها نامعلوم است؛ ابتدا وضعیت انتظار را در جزئیات کار تعیین تکلیف کن.');
+    result.messages.push('زمان پایان انتظار نامعلوم است: ' + active.filter(t => t.planning?.waiting).map(t => t.title).join('، ') + '؛ ابتدا وضعیت انتظار این تعهدها را مشخص کن.');
     return result;
   }
   if (active.some(t => t.dueAt && !Number.isFinite(Date.parse(t.dueAt)))) {
@@ -104,7 +110,7 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     return result;
   }
   const free: Interval[] = [],
-    busy: Interval[] = [];
+    busy: Interval[] = reservedIntervals(state);
   for (let n = 0; n < horizonDays; n++) {
     const d = new Date(now);
     d.setDate(d.getDate() + n);
@@ -198,6 +204,7 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     if (i + 1 < q.length) [q[i], q[i + 1]] = [q[i + 1], q[i]];
     return q;
   })];
+  const blocked = new Set<string>();
   for (const order of orders) {
     result.attempts++;
     let windows = available.map(x => ({
@@ -240,6 +247,9 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
         if (remaining <= 0) break;
       }
       if (remaining > 0) {
+        blocked.add('برای «' + t.title + '» ' + minutes + ' دقیقه' +
+          (t.planning?.splittable ? ' با حداقل طول جلسهٔ تعیین‌شده' : ' پیوسته') +
+          (t.dueAt ? ' تا ' + new Date(t.dueAt).toLocaleString('fa-IR') : ' در افق بررسی') + ' پیدا نشد.');
         failed = true;
         break;
       }
@@ -256,7 +266,7 @@ export function planCapacity(state: PlanningState, tasks: Task[], now = new Date
     }
   }
   result.status = 'no_plan';
-  result.messages = [`در افق ${horizonDays} روز و ${result.attempts} ترتیب بررسی‌شده، برنامه‌ای سازگار پیدا نشد؛ این به معنی اثبات ناممکن‌بودن نیست.`];
+  result.messages = [`در افق ${horizonDays} روز و ${result.attempts} ترتیب بررسی‌شده، برنامه‌ای سازگار پیدا نشد؛ این به معنی اثبات ناممکن‌بودن نیست.`, ...blocked];
   return result;
 }
 export interface ScheduleValidation {
@@ -271,8 +281,8 @@ export interface ScheduleValidationOptions {
   ignoreInactive?: boolean;
 }
 
-function capacityFor(state: PlanningState, now: Date, horizonDays: number): Interval[] {
-  const free: Interval[] = [], busy: Interval[] = [];
+function capacityFor(state: ReviewCalendar, now: Date, horizonDays: number): Interval[] {
+  const free: Interval[] = [], busy: Interval[] = reservedIntervals(state);
   for (let day = 0; day < Math.max(1, Math.min(90, horizonDays)); day++) {
     const date = new Date(now); date.setDate(date.getDate() + day);
     const key = localDate(date);
@@ -290,7 +300,7 @@ function capacityFor(state: PlanningState, now: Date, horizonDays: number): Inte
 }
 
 /** Validate the proposal itself, rather than comparing two clock-dependent solver outputs. */
-export function validateScheduleAllocations(state: PlanningState, tasks: Task[], allocations: Allocation[], now = new Date(), options: ScheduleValidationOptions = {}): ScheduleValidation {
+export function validateScheduleAllocations(state: ReviewCalendar, tasks: Task[], allocations: Allocation[], now = new Date(), options: ScheduleValidationOptions = {}): ScheduleValidation {
   const messages: string[] = [];
   const active = new Map(tasks.filter(t => !t.deletedAt && !t.completed && t.status !== 'archived').map(t => [t.id, t]));
   const horizonDays = options.horizonDays ?? 90;
@@ -376,7 +386,7 @@ function scheduleChangeReason(previous: string, current: string, tasks: Task[]):
 }
 export const CONFIRMATION_GRACE_MS = 5 * 60000;
 
-export function confirmSchedule(state: PlanningState, tasks: Task[], preview: ScheduleResult, now = new Date()): ScheduleConfirmation {
+export function confirmSchedule(state: ReviewCalendar, tasks: Task[], preview: ScheduleResult, now = new Date()): ScheduleConfirmation {
   const refresh = (reason: string, result = planCapacity(state, tasks, now, preview.horizonDays)): ScheduleConfirmation => ({ status: 'refresh', result, adjusted: false, reason });
   const fingerprint = scheduleFingerprint(state, tasks);
   if (preview.fingerprint !== fingerprint) return refresh(scheduleChangeReason(preview.fingerprint, fingerprint, tasks) + ' پیش‌نمایش تازه را بررسی کن.');

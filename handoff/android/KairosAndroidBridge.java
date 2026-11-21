@@ -70,6 +70,7 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         "settings.save",
         "planning.get",
         "planning.save",
+        "planning.createTaskAndSave",
         "backup.export",
         "backup.restore",
         "backup.hasPreRestoreSnapshot",
@@ -565,6 +566,7 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             }
 
             case "planning.get": return getPlanningPage(db,payload);
+            case "planning.createTaskAndSave": payload.getJSONObject("createTask");
             case "planning.save": return savePlanningPatch(db,payload);
             // Capture, validate, and apply against the same SQLite snapshot.
             case "backup.export": {
@@ -743,6 +745,12 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             if(actual!=expected||revision!=actual+1)throw new BridgeExecutionException("CONFLICT_STALE_REVISION","Planning changed; refresh before saving");
             if(payload.optInt("storageVersion",-1)!=1)throw new BridgeExecutionException("VALIDATION_ERROR","Unsupported planning storage version");
             JSONArray upserts=payload.getJSONArray("upserts"),deletes=payload.getJSONArray("deletes");for(int i=0;i<upserts.length();i++)writePlanningRecord(db,upserts.getJSONObject(i));for(int i=0;i<deletes.length();i++)db.execSQL("DELETE FROM kairos_records WHERE collection='planningRecords' AND id=?",new Object[]{deletes.getString(i)});
+            if (payload.optJSONObject("createTask") != null) {
+                JSONObject task = payload.getJSONObject("createTask");
+                if (getRecord(db, "tasks", task.getString("id")) != JSONObject.NULL)
+                    throw new BridgeExecutionException("CONFLICT_STALE_REVISION", "Task already exists");
+                upsertRecordInTransaction(db, "tasks", task, null);
+            }
             if(joinPlanning(readPlanningRecords(db)).getLong("revision")!=revision)throw new BridgeExecutionException("VALIDATION_ERROR","Planning metadata revision mismatch");db.setTransactionSuccessful();return new JSONObject().put("revision",revision);
         }finally{db.endTransaction();}
     }

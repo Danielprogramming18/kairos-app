@@ -389,6 +389,7 @@ impl KairosSqliteDatabase {
             "settings.save" => self.save_settings(payload),
             "planning.get" => self.get_planning_page(payload),
             "planning.save" => self.save_planning_patch(payload),
+            "planning.createTaskAndSave" if payload["createTask"].is_object() => self.save_planning_patch(payload),
 
             // ================= BACKUP & RESTORE =================
             "backup.export" => self.export_backup(),
@@ -1278,6 +1279,12 @@ impl KairosSqliteDatabase {
             let rows=statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))?;
             let mut count=0;for row in rows {let(id,revision)=row?;count+=1;if expected.get(&id).and_then(Value::as_i64)!=Some(revision){return Err(DbError::conflict("tasks",-1,-1));}}
             if count!=expected.len(){return Err(DbError::conflict("tasks",-1,-1));}
+        }
+        if let Some(task) = payload.get("createTask").filter(|v| !v.is_null()) {
+            let id = task["id"].as_str().ok_or_else(|| DbError::validation("شناسهٔ کار الزامی است."))?;
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)", [id], |row| row.get(0))?;
+            if exists { return Err(DbError::conflict(id, 0, 1)); }
+            Self::upsert_task_in_tx(&tx, task.clone(), None)?;
         }
         let actual = Self::planning_revision(&tx)?;
         let expected=payload.get("expectedRevision").and_then(Value::as_i64).unwrap_or(-1);let revision=payload.get("revision").and_then(Value::as_i64).unwrap_or(-1);

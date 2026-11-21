@@ -4,6 +4,7 @@ export interface TaskPlanning {
   resume?: string;
   templateId?: string;
   templateItemId?: string;
+  durationSource?: 'history' | 'timer';
   workType?: string;
   units?: number;
   unitName?: string;
@@ -72,6 +73,7 @@ export interface Allocation {
   locked?: boolean;
   /** Total task minutes approved for this schedule, shared by all of its fragments. */
   plannedTaskMinutes?: number;
+  durationBasis?: 'manual' | 'history' | 'timer' | 'remaining' | 'approved';
 }
 export interface LayoutPreference {
   order: string[];
@@ -180,6 +182,7 @@ function collection(v: unknown, name: string): any[] {
 }
 export function validateTaskPlanning(value: unknown): TaskPlanning {
   requireValid(obj(value), 'اطلاعات تکمیلی کار نامعتبر است.');
+  requireValid(value.durationSource === undefined || ['history','timer'].includes(value.durationSource), 'منشأ مدت کار نامعتبر است.');
   for (const k of ['stageId', 'resume', 'templateId', 'templateItemId', 'workType', 'unitName', 'timerCoverageFingerprint']) if (value[k] !== undefined) requireValid(str(value[k]), `فیلد ${k} نامعتبر است.`);
   for (const k of ['units', 'initialEstimate', 'remainingMinutes', 'actualMinutes', 'minimumChunk']) if (value[k] !== undefined) requireValid(number(value[k]) && value[k] >= 0 && value[k] <= 10000000, `مقدار ${k} نامعتبر است.`);
   for (const k of ['actualConfirmed', 'timerCoverageConfirmed', 'splittable', 'waiting', 'coachDisabled']) if (value[k] !== undefined) requireValid(typeof value[k] === 'boolean', `فیلد ${k} نامعتبر است.`);
@@ -219,6 +222,7 @@ export function validatePlanning(value: unknown): PlanningState {
     requireValid(Array.isArray(value[key]) && value[key].length <= 20000, 'برنامهٔ زمانی نامعتبر است.');
     for (const a of value[key]) {
       requireValid(obj(a) && str(a.taskId) && !!a.taskId && timestamp(a.start) && timestamp(a.end) && Date.parse(a.start) < Date.parse(a.end) && (a.locked === undefined || typeof a.locked === 'boolean'), 'زمان تخصیص‌یافته نامعتبر است.');
+      requireValid(a.durationBasis === undefined || ['manual','remaining','timer','history','approved'].includes(a.durationBasis), 'منشأ مدت برنامه نامعتبر است.');
       requireValid(a.plannedTaskMinutes === undefined || number(a.plannedTaskMinutes) && a.plannedTaskMinutes > 0 && a.plannedTaskMinutes <= 10000000, 'مدت مبنای برنامه نامعتبر است.');
     }
   }

@@ -68,3 +68,17 @@ fn native_planning_pages_are_bounded_and_revision_checked(){
     let page=db.get_planning_page(&json!({"cursor":0})).unwrap();assert!(page["records"].to_string().len()<=planning::PAGE_LIMIT+1024);assert!(page["nextCursor"].is_number());assert_eq!(page["revision"],1);
     assert_eq!(db.get_planning_page(&json!({"cursor":page["nextCursor"],"expectedRevision":2})).unwrap_err().code,"CONFLICT_STALE_REVISION");
 }
+
+#[test]
+fn scenario_confirmation_rolls_back_the_task_on_failure() {
+    let db = database();
+    let task = json!({"id":"offer","title":"Offer","duration":30,"targetDate":"2030-01-02","priority":3});
+    let mut patch = json!({"storageVersion":1,"expectedRevision":0,"revision":1,"createTask":task,
+        "expectedTaskRevisions":{},"upserts":[], "deletes":[]});
+    assert!(db.dispatch("planning.createTaskAndSave", &patch).is_err());
+    assert!(db.export_backup().unwrap()["payload"]["tasks"].as_array().unwrap().is_empty());
+    patch["upserts"] = json!(planning::split(&state()).unwrap());
+    db.dispatch("planning.createTaskAndSave", &patch).unwrap();
+    assert_eq!(db.export_backup().unwrap()["payload"]["tasks"][0]["id"], "offer");
+    assert!(db.dispatch("planning.createTaskAndSave", &patch).is_err());
+}

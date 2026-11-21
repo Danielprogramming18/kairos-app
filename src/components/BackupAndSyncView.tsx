@@ -528,20 +528,20 @@ export const BackupAndSyncView: React.FC<BackupAndSyncViewProps> = ({
                 فایل خروجی را با گذرواژهٔ شما (PBKDF2-SHA256) رمزنگاری می‌کند تا در صورت نگهداری فایل در فضای ابری یا فلش امن باشد. {PASSPHRASE_HINT} این رمز فقط برای فایل خروجی است. آن را برای بازیابی نگه دار.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 type="password"
                 value={exportPassword}
                 onChange={(e) => setExportPassword(e.target.value)}
                 placeholder="عبارت عبور (حداقل ۱۵ نویسه)" autoComplete="new-password"
                 aria-label="گذرواژه رمزگذاری پشتیبان"
-                className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="min-w-0 min-h-11 w-full sm:flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <button
                 type="button"
                 disabled={isExportingEncrypted || !hostCaps.hasWebCryptoSubtle}
                 onClick={handleExportEncryptedBackup}
-                className="py-2 px-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 disabled:opacity-50"
+                className="min-h-11 justify-center py-2 px-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 disabled:opacity-50"
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>دانلود امن</span>

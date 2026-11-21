@@ -1655,7 +1655,7 @@ export default function App() {
           }} />}
           {activeTab === 'events' && <EventsView />}
           {activeTab === 'tracking' && <TrackingView />}
-          {activeTab === 'capacity' && <CapacityView tasks={tasks} sessions={focusSessions} onReload={reloadAllFromRepository} />}
+          {activeTab === 'capacity' && <CapacityView timerMinutes={pomodoroController.timerState.selectedPresetMinutes} tasks={tasks} sessions={focusSessions} onReload={reloadAllFromRepository} />}
           {activeTab === 'customize' && <CustomizeView onNavigate={setActiveTab} />}
           {activeTab === 'more' && <MoreFeaturesView onNavigate={(tab,section)=>{setActiveTab(tab,section?TAB_TO_HASH[tab]+'?section='+encodeURIComponent(section):undefined);if(section==='templates')window.setTimeout(()=>document.getElementById('project-templates')?.scrollIntoView({block:'start'}),50);}} />}
           {activeTab === 'dashboard' && <ScheduleBoard tasks={tasks} date="today" title="برنامهٔ تأییدشدهٔ امروز" onEdit={handleOpenTaskModal} />}

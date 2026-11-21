@@ -58,7 +58,8 @@ export function createPlanningBridgeRepository(invoke: <T>(operation: BridgeOper
       try {
         const result = await invoke<{
           revision: number;
-        }>('planning.save', {
+        }>(options.createTask ? 'planning.createTaskAndSave' : 'planning.save', {
+          createTask: options.createTask,
           ...patch,
           expectedTaskRevisions: options.expectedTaskRevisions
         });

@@ -398,3 +398,21 @@ test('early Android flat V2 backups preserve planning settings and notes during 
     const validated=validateBackupEnvelopeObject(flat);assert.equal(validated.valid,true,validated.errors.join(' | '));await adapter.backup.restoreBackup(validated.envelope!,'replace');assert.equal((await adapter.planning.getPlanning()).projects[0].id,'پروژه/۱');assert.equal((await adapter.notes.listNotes())[0].id,'android-note');
   }finally{await db.delete();}
 });
+
+test('accepting a scenario creates its task and plan together and rejects a retry or stale snapshot', async () => {
+  const {db,adapter}=setup();
+  const task={id:'offer',title:'کار',status:'todo' as const,completed:false,priority:3,duration:30,targetDate:'2030-01-02',
+    category:'work',tags:[],subtasks:[],createdAt:'2030-01-02T08:00:00Z',updatedAt:'2030-01-02T08:00:00Z',revision:1};
+  try {
+    const original=await adapter.planning.getPlanning();
+    const plan={...original,revision:1,allocations:[{taskId:task.id,start:'2030-01-02T09:00:00Z',end:'2030-01-02T09:30:00Z',plannedTaskMinutes:30}]};
+    const options={expectedRevision:0,expectedTaskRevisions:{},createTask:task};
+    await assert.rejects(adapter.planning.savePlanning(plan,{...options,expectedTaskRevisions:{missing:1}}));
+    assert.equal(await adapter.tasks.getTaskById(task.id),null);
+    assert.deepEqual(await adapter.planning.getPlanning(),original);
+    await adapter.planning.savePlanning(plan,options);
+    await assert.rejects(adapter.planning.savePlanning({...plan,revision:2},{expectedRevision:1,createTask:task}));
+    assert.equal((await adapter.tasks.listTasks()).length,1);
+    assert.deepEqual(await adapter.planning.getPlanning(),plan);
+  } finally {await db.delete();}
+});

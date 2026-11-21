@@ -39,7 +39,7 @@ if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'servic
       .catch(() => {});
   } else if (protocol === 'https:' || protocol === 'http:') {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+      navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' }).catch(() => {});
     });
   }
 }

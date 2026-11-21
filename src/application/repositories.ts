@@ -73,7 +73,7 @@ export interface SettingsRepository {
 
 export interface PlanningRepository {
   getPlanning(): Promise<PlanningState>;
-  savePlanning(next: PlanningState, options: { expectedRevision: number; expectedTaskRevisions?:Record<string,number> }): Promise<PlanningState>;
+  savePlanning(next: PlanningState, options: { expectedRevision: number; expectedTaskRevisions?:Record<string,number>; createTask?: TaskEntity }): Promise<PlanningState>;
 }
 
 export interface BackupValidationResult {

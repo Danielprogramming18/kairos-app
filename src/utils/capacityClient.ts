@@ -16,10 +16,10 @@ export interface CapacityOptions {
   timeoutMs?: number;
 }
 
-function scheduleInputs(state: PlanningState, tasks: Task[]) {
+function scheduleInputs(state: import('./planningEngine').ReviewCalendar, tasks: Task[]) {
   // Metrics, notes and coaching histories do not participate in scheduling and
   // need not be copied to a Worker or serialized on the interface thread.
-  const schedule: PlanningState = {...emptyPlanning(), revision:state.revision,availability:state.availability,commitments:state.commitments,excludedDates:state.excludedDates,allocations:state.allocations,breakMinutes:state.breakMinutes};
+  const schedule = {...emptyPlanning(), reservedOutsideScope:state.reservedOutsideScope,revision:state.revision,availability:state.availability,commitments:state.commitments,excludedDates:state.excludedDates,allocations:state.allocations,breakMinutes:state.breakMinutes};
   const relevant = tasks.map(t => ({id:t.id,title:t.title,duration:t.duration,priority:t.priority,targetDate:t.targetDate,dueAt:t.dueAt,completed:t.completed,status:t.status,deletedAt:t.deletedAt,revision:t.revision,updatedAt:t.updatedAt,planning:{remainingMinutes:t.planning?.remainingMinutes,splittable:t.planning?.splittable,minimumChunk:t.planning?.minimumChunk,waiting:t.planning?.waiting}}));
   return {state:schedule,tasks:relevant};
 }

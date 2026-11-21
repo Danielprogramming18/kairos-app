@@ -65,6 +65,7 @@ export function createDexiePlanningRepository(db: KairosWebDatabase, notify: () 
         const previous = await db.planningRecords.toArray();
         const current = joinPlanningRecords(previous);
         if (current.revision !== options.expectedRevision || next.revision !== current.revision + 1) throw Error('اطلاعات برنامه‌ریزی در پنجرهٔ دیگری تغییر کرده؛ تازه‌سازی کن.');
+        if (options.createTask) await db.tasks.add(options.createTask);
         const patch = diffPlanningRecords(previous, records, options.expectedRevision);
         if (patch.deletes.length) await db.planningRecords.bulkDelete(patch.deletes);
         if (patch.upserts.length) await db.planningRecords.bulkPut(patch.upserts);

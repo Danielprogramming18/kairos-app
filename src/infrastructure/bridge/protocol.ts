@@ -42,6 +42,7 @@ export type BridgeOperation =
   | 'settings.save'
   | 'planning.get'
   | 'planning.save'
+  | 'planning.createTaskAndSave'
   | 'backup.export'
   | 'backup.restore'
   | 'backup.hasPreRestoreSnapshot'
@@ -81,6 +82,7 @@ export const ALLOWED_BRIDGE_OPERATIONS = new Set<BridgeOperation>([
   'settings.save',
   'planning.get',
   'planning.save',
+  'planning.createTaskAndSave',
   'backup.export',
   'backup.restore',
   'backup.hasPreRestoreSnapshot',

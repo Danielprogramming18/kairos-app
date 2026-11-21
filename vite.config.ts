@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import manifest from './package.json' with {type:'json'};
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -15,7 +16,10 @@ export default defineConfig(({ mode }) => {
         apply: 'build',
         transformIndexHtml: {
           order: 'post',
-          handler: () => [{ tag: 'meta', attrs: {
+          handler: () => [
+            {tag:'meta', attrs:{name:'kairos-version', content:manifest.version}},
+            {tag:'meta', attrs:{name:'kairos-build', content:process.env.GITHUB_SHA || 'local'}},
+            { tag: 'meta', attrs: {
             'http-equiv': 'Content-Security-Policy',
             content: "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'" + (mode === 'desktop' ? ' ipc: http://ipc.localhost' : ''),
           }, injectTo: 'head-prepend' as const }],

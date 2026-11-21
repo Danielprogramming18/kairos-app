@@ -43,7 +43,10 @@ async function checkLocalFile(browser, blockWorkers) {
     await page.getByRole('button', {name:'افزودن بازه'}).click();
     await page.getByRole('button', {name:'برداشتن بازه'}).waitFor();
     await page.getByRole('button', {name:'بررسی ظرفیت و پیش‌نمایش'}).click();
-    await page.getByRole('button', {name:'تأیید و اعمال برنامه'}).click();
+    const apply = page.getByRole('button', {name:'تأیید و اعمال برنامه'});
+    await apply.waitFor();
+    if (await apply.isDisabled()) await page.getByRole('checkbox', {name:/این مدت‌های فرضی/}).check();
+    await apply.click();
     await page.locator('.kp-schedule-row').filter({hasText:title}).waitFor();
     const responses = await page.evaluate(() => window.planningWorkerResponses);
     assert.equal(blockWorkers ? responses === 0 : responses >= 2, true, 'expected scheduling execution path');
