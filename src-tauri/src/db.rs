@@ -1,9 +1,13 @@
+use time::{macros::format_description, OffsetDateTime};
+use crate::planning;
+#[cfg(test)]
+#[path = "planning_tests.rs"]
+mod planning_storage_tests;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PRE_RESTORE_SNAPSHOT_KEY: &str = "kairos_pre_restore_snapshot_v2";
 pub const ACTIVE_TIMER_STATE_KEY: &str = "kairos_active_timer_state_v2";
@@ -51,12 +55,35 @@ pub struct KairosSqliteDatabase {
     conn: Mutex<Connection>,
 }
 
+fn iso_utc(time: OffsetDateTime) -> String {
+    time.format(format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"))
+        .expect("formatting a UTC timestamp")
+}
+
 fn now_iso_string() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("unix_{}", secs)
+    iso_utc(OffsetDateTime::now_utc())
+}
+
+fn legacy_timestamp_to_iso(value: &str) -> Option<String> {
+    let seconds = value.strip_prefix("unix_")?;
+    if seconds.is_empty() || !seconds.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let seconds = seconds.parse::<i64>().ok()?;
+    OffsetDateTime::from_unix_timestamp(seconds).ok().map(iso_utc)
+}
+
+fn normalize_record_timestamps(record: &mut Value) -> bool {
+    let Some(fields) = record.as_object_mut() else { return false; };
+    let mut changed = false;
+    for key in ["createdAt", "updatedAt", "deletedAt", "completedAt", "startedAt", "endedAt", "exportedAt"] {
+        let normalized = fields.get(key).and_then(Value::as_str).and_then(legacy_timestamp_to_iso);
+        if let Some(timestamp) = normalized {
+            fields.insert(key.to_string(), json!(timestamp));
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn compute_fnv1a_checksum(serialized: &str) -> String {
@@ -188,6 +215,10 @@ impl KairosSqliteDatabase {
                 key TEXT PRIMARY KEY,
                 updated_at TEXT NOT NULL,
                 json_value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS planning_records (
+                key TEXT PRIMARY KEY,
+                json_data TEXT NOT NULL
             );",
         )?;
 
@@ -228,7 +259,87 @@ impl KairosSqliteDatabase {
             )?;
         }
 
+        Self::migrate_legacy_timestamps_in_tx(&tx)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    fn migrate_legacy_timestamps_in_tx(tx: &rusqlite::Transaction<'_>) -> Result<(), DbError> {
+        let applied: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = 3)",
+            [], |row| row.get(0),
+        )?;
+        if applied { return Ok(()); }
+
+        // Only metadata emitted by the old native clock is converted. User text,
+        // calendar dates, revisions and unknown/malformed values stay untouched.
+        for table in ["tasks", "habits", "habit_entries", "notes", "focus_sessions", "settings"] {
+            let deleted = if table == "settings" { "NULL" } else { "deleted_at" };
+            let started = if table == "focus_sessions" { "started_at" } else { "NULL" };
+            let query = format!("SELECT id, updated_at, json_data, {}, {} FROM {}", deleted, started, table);
+            let records = {
+                let mut statement = tx.prepare(&query)?;
+                let rows = statement.query_map([], |row| Ok((
+                    row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?,
+                )))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            for (id, updated, raw, deleted, started) in records {
+                let Ok(mut record) = serde_json::from_str::<Value>(&raw) else { continue; };
+                let changed = normalize_record_timestamps(&mut record);
+                let next_updated = legacy_timestamp_to_iso(&updated).unwrap_or_else(|| updated.clone());
+                let next_deleted = deleted.as_ref().map(|s| legacy_timestamp_to_iso(s).unwrap_or_else(|| s.clone()));
+                let next_started = started.as_ref().map(|s| legacy_timestamp_to_iso(s).unwrap_or_else(|| s.clone()));
+                if !changed && next_updated == updated && next_deleted == deleted && next_started == started { continue; }
+                let query = if table == "settings" {
+                    "UPDATE settings SET updated_at = ?1, json_data = ?2 WHERE id = ?3".to_string()
+                } else if table == "focus_sessions" {
+                    "UPDATE focus_sessions SET updated_at = ?1, json_data = ?2, deleted_at = ?4, started_at = ?5 WHERE id = ?3".to_string()
+                } else {
+                    format!("UPDATE {} SET updated_at = ?1, json_data = ?2, deleted_at = ?4 WHERE id = ?3", table)
+                };
+                if table == "settings" {
+                    tx.execute(&query, params![next_updated, record.to_string(), id])?;
+                } else if table == "focus_sessions" {
+                    tx.execute(&query, params![next_updated, record.to_string(), id, next_deleted, next_started])?;
+                } else {
+                    tx.execute(&query, params![next_updated, record.to_string(), id, next_deleted])?;
+                }
+            }
+        }
+
+        let snapshot: Option<(String, String)> = tx.query_row(
+            "SELECT updated_at, json_value FROM kv_state WHERE key = ?1",
+            params![PRE_RESTORE_SNAPSHOT_KEY], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((updated, raw)) = snapshot {
+            if let Ok(mut envelope) = serde_json::from_str::<Value>(&raw) {
+                let mut changed = normalize_record_timestamps(&mut envelope);
+                let mut payload_changed = false;
+                if let Some(payload) = envelope.get_mut("payload").and_then(Value::as_object_mut) {
+                    for collection in ["tasks", "habits", "habitEntries", "notes", "focusSessions"] {
+                        if let Some(records) = payload.get_mut(collection).and_then(Value::as_array_mut) {
+                            for record in records { payload_changed |= normalize_record_timestamps(record); }
+                        }
+                    }
+                    if let Some(settings) = payload.get_mut("settings") {
+                        payload_changed |= normalize_record_timestamps(settings);
+                    }
+                }
+                if payload_changed {
+                    let checksum = compute_fnv1a_checksum(&envelope["payload"].to_string());
+                    envelope["checksum"] = json!(checksum);
+                    changed = true;
+                }
+                let next_updated = legacy_timestamp_to_iso(&updated).unwrap_or_else(|| updated.clone());
+                if changed || next_updated != updated {
+                    tx.execute("UPDATE kv_state SET updated_at = ?1, json_value = ?2 WHERE key = ?3",
+                        params![next_updated, envelope.to_string(), PRE_RESTORE_SNAPSHOT_KEY])?;
+                }
+            }
+        }
+        tx.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?1)", params![now_iso_string()])?;
         Ok(())
     }
 
@@ -276,6 +387,9 @@ impl KairosSqliteDatabase {
             // ================= SETTINGS =================
             "settings.get" => self.get_settings(),
             "settings.save" => self.save_settings(payload),
+            "planning.get" => self.get_planning_page(payload),
+            "planning.save" => self.save_planning_patch(payload),
+            "planning.createTaskAndSave" if payload["createTask"].is_object() => self.save_planning_patch(payload),
 
             // ================= BACKUP & RESTORE =================
             "backup.export" => self.export_backup(),
@@ -1051,6 +1165,10 @@ impl KairosSqliteDatabase {
             .conn
             .lock()
             .map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
+        Self::read_settings(&conn)
+    }
+
+    fn read_settings(conn: &Connection) -> Result<Value, DbError> {
         let raw: Option<String> = conn
             .query_row(
                 "SELECT json_data FROM settings WHERE id = 'default'",
@@ -1080,8 +1198,12 @@ impl KairosSqliteDatabase {
             .get("settings")
             .and_then(|v| v.as_object())
             .ok_or_else(|| DbError::validation("فیلد settings الزامی است."))?;
+        if partial.contains_key("planning") { return Err(DbError::validation("این نسخه از مخزن مستقل برنامه‌ریزی استفاده می‌کند؛ رابط برنامه را به‌روز کن.")); }
 
-        let mut current = self.get_settings()?;
+        // Read, compare and write while holding the same database lock.
+        let conn = self.conn.lock().map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
+        let raw: String = conn.query_row("SELECT json_data FROM settings WHERE id = 'default'", [], |row| row.get(0))?;
+        let mut current: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
         let now = now_iso_string();
         if let Some(obj) = current.as_object_mut() {
             for (k, v) in partial {
@@ -1091,10 +1213,6 @@ impl KairosSqliteDatabase {
             obj.insert("updatedAt".to_string(), json!(now));
         }
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
         conn.execute(
             "INSERT OR REPLACE INTO settings (id, updated_at, json_data) VALUES ('default', ?1, ?2)",
             params![now, current.to_string()],
@@ -1102,24 +1220,121 @@ impl KairosSqliteDatabase {
         Ok(current)
     }
 
-    fn export_backup(&self) -> Result<Value, DbError> {
-        let tasks = self.list_tasks(&json!({ "includeDeleted": true }))?;
-        let habits = self.list_habits(&json!({ "includeDeleted": true }))?;
-        let habit_entries = self.list_habit_entries(&json!({}))?;
-        let notes = self.list_notes(&json!({ "includeDeleted": true }))?;
-        let focus_sessions = self.list_focus_sessions(&json!({ "includeDeleted": true }))?;
-        let settings = self.get_settings()?;
+    fn read_planning_records(conn: &Connection) -> Result<Vec<Value>, DbError> {
+        let mut statement=conn.prepare("SELECT json_data FROM planning_records ORDER BY key")?;
+        let rows=statement.query_map([],|row|row.get::<_,String>(0))?;
+        let mut records=Vec::new();for raw in rows {records.push(serde_json::from_str(&raw?).map_err(|e|DbError::storage(e.to_string()))?);}Ok(records)
+    }
 
-        let backup_payload = json!({
-            "tasks": tasks,
-            "habits": habits,
-            "habitEntries": habit_entries,
-            "notes": notes,
-            "focusSessions": focus_sessions,
-            "settings": settings
+    fn planning_revision(conn: &Connection) -> Result<i64, DbError> {
+        let raw: String = conn.query_row("SELECT json_data FROM planning_records WHERE key='meta'", [], |row| row.get(0))?;
+        let meta: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
+        meta.pointer("/value/revision").and_then(Value::as_i64)
+            .ok_or_else(|| DbError::storage("نسخهٔ جاری برنامه‌ریزی نامعتبر است."))
+    }
+
+    fn ensure_planning_records(&self) -> Result<(), DbError> {
+        let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;
+        let tx=conn.transaction()?;
+        let present:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM planning_records WHERE key='meta')",[],|r|r.get(0))?;
+        if !present {
+            let raw:Option<String>=tx.query_row("SELECT json_data FROM settings WHERE id='default'",[],|r|r.get(0)).optional()?;
+            let mut settings:Value=raw.as_ref().map(|s|serde_json::from_str(s)).transpose().map_err(|e|DbError::storage(e.to_string()))?.unwrap_or(json!({"id":"default"}));
+            let legacy=settings.get("planning").cloned();let state=legacy.clone().unwrap_or_else(planning::empty_state);
+            let records=planning::split(&state)?;
+            if let Some(legacy)=legacy {tx.execute("INSERT OR IGNORE INTO kv_state (key,updated_at,json_value) VALUES (?1,?2,?3)",params![planning::RECOVERY_KEY,now_iso_string(),legacy.to_string()])?;}
+            for record in records {tx.execute("INSERT INTO planning_records (key,json_data) VALUES (?1,?2)",params![record["key"].as_str(),record.to_string()])?;}
+            let verified=planning::join(&Self::read_planning_records(&tx)?)?;
+            if verified!=state {return Err(DbError::storage("تأیید مهاجرت برنامه‌ریزی شکست خورد؛ دادهٔ قبلی حفظ شد."));}
+            if let Some(settings)=settings.as_object_mut() {settings.remove("planning");}
+            if raw.is_some(){tx.execute("UPDATE settings SET json_data=?1 WHERE id='default'",params![settings.to_string()])?;}
+            tx.execute("INSERT OR IGNORE INTO schema_migrations (version,applied_at) VALUES (4,?1)",params![now_iso_string()])?;
+        }
+        tx.commit()?;Ok(())
+    }
+
+    fn get_planning_page(&self,payload:&Value)->Result<Value,DbError>{
+        self.ensure_planning_records()?;
+        let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;let tx=conn.transaction()?;
+        let revision = Self::planning_revision(&tx)?;
+        if let Some(expected)=payload.get("expectedRevision").and_then(Value::as_i64){if expected!=revision{return Err(DbError::conflict("planning",expected,revision));}}
+        let cursor = match payload.get("cursor") {
+            None | Some(Value::Null) => 0,
+            Some(value) => value.as_i64().filter(|n| *n >= 0)
+                .ok_or_else(|| DbError::validation("شمارهٔ صفحه باید عدد صحیح نامنفی باشد."))?,
+        };
+        let total: i64 = tx.query_row("SELECT COUNT(*) FROM planning_records", [], |row| row.get(0))?;
+        if cursor>total{return Err(DbError::validation("صفحهٔ برنامه‌ریزی نامعتبر است."));}
+        let mut page=Vec::new();let mut bytes=0;let mut next=cursor;
+        {let mut statement=tx.prepare("SELECT json_data FROM planning_records ORDER BY key LIMIT -1 OFFSET ?1")?;let rows=statement.query_map(params![cursor],|row|row.get::<_,String>(0))?;
+        for raw in rows {let raw=raw?;let size=raw.len();if !page.is_empty()&&bytes+size>planning::PAGE_LIMIT{break;}bytes+=size;page.push(serde_json::from_str::<Value>(&raw).map_err(|e|DbError::storage(e.to_string()))?);next+=1;}}
+        tx.commit()?;Ok(json!({"revision":revision,"records":page,"nextCursor":if next<total{Some(next)}else{None}}))
+    }
+
+    fn save_planning_patch(&self,payload:&Value)->Result<Value,DbError>{
+        self.ensure_planning_records()?;
+        let mut conn=self.conn.lock().map_err(|_|DbError::storage("قفل پایگاه‌داده در دسترس نیست."))?;let tx=conn.transaction()?;
+        if let Some(expected)=payload.get("expectedTaskRevisions").and_then(Value::as_object){
+            let mut statement=tx.prepare("SELECT id,revision FROM tasks WHERE deleted_at IS NULL OR deleted_at='' ")?;
+            let rows=statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))?;
+            let mut count=0;for row in rows {let(id,revision)=row?;count+=1;if expected.get(&id).and_then(Value::as_i64)!=Some(revision){return Err(DbError::conflict("tasks",-1,-1));}}
+            if count!=expected.len(){return Err(DbError::conflict("tasks",-1,-1));}
+        }
+        if let Some(task) = payload.get("createTask").filter(|v| !v.is_null()) {
+            let id = task["id"].as_str().ok_or_else(|| DbError::validation("شناسهٔ کار الزامی است."))?;
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)", [id], |row| row.get(0))?;
+            if exists { return Err(DbError::conflict(id, 0, 1)); }
+            Self::upsert_task_in_tx(&tx, task.clone(), None)?;
+        }
+        let actual = Self::planning_revision(&tx)?;
+        let expected=payload.get("expectedRevision").and_then(Value::as_i64).unwrap_or(-1);let revision=payload.get("revision").and_then(Value::as_i64).unwrap_or(-1);
+        if !(0..9_007_199_254_740_991_i64).contains(&actual) {
+            return Err(DbError::validation("نسخهٔ برنامه‌ریزی خارج از محدوده است."));
+        }
+        if actual!=expected||revision!=actual+1{return Err(DbError::conflict("planning",expected,actual));}
+        if payload.get("storageVersion").and_then(Value::as_i64)!=Some(1){return Err(DbError::validation("نسخهٔ ذخیره‌سازی برنامه‌ریزی نامعتبر است."));}
+        let upserts=payload.get("upserts").and_then(Value::as_array).ok_or_else(||DbError::validation("تغییرهای برنامه‌ریزی نامعتبرند."))?;
+        let deletes=payload.get("deletes").and_then(Value::as_array).ok_or_else(||DbError::validation("تغییرهای برنامه‌ریزی نامعتبرند."))?;
+        for row in upserts {planning::validate_record(row)?;tx.execute("INSERT OR REPLACE INTO planning_records (key,json_data) VALUES (?1,?2)",params![row["key"].as_str(),row.to_string()])?;}
+        for key in deletes {let key=key.as_str().ok_or_else(||DbError::validation("شناسهٔ تغییر نامعتبر است."))?;tx.execute("DELETE FROM planning_records WHERE key=?1",params![key])?;}
+        let state=planning::join(&Self::read_planning_records(&tx)?)?;
+        if state.get("revision").and_then(Value::as_i64)!=Some(revision){return Err(DbError::validation("نسخهٔ رکورد پایه با تغییرها سازگار نیست."));}
+        tx.commit()?;Ok(json!({"revision":revision}))
+    }
+
+    fn export_backup(&self) -> Result<Value, DbError> {
+        self.ensure_planning_records()?;
+        let mut conn = self.conn.lock().map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
+        let tx = conn.transaction()?;
+        let envelope = Self::backup_in_tx(&tx)?;
+        tx.commit()?;
+        Ok(envelope)
+    }
+
+    fn backup_in_tx(tx: &rusqlite::Transaction<'_>) -> Result<Value, DbError> {
+        let mut backup_payload = json!({
+            "settings": Self::read_settings(tx)?,
+            "planning": planning::join(&Self::read_planning_records(tx)?)?,
         });
+        for (name, query) in [
+            ("tasks", "SELECT json_data FROM tasks ORDER BY priority ASC, updated_at DESC"),
+            ("habits", "SELECT json_data FROM habits ORDER BY updated_at DESC"),
+            ("habitEntries", "SELECT json_data FROM habit_entries"),
+            ("notes", "SELECT json_data FROM notes ORDER BY pinned DESC, updated_at DESC"),
+            ("focusSessions", "SELECT json_data FROM focus_sessions ORDER BY started_at DESC"),
+        ] {
+            let mut statement = tx.prepare(query)?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            let mut items = Vec::new();
+            for row in rows {
+                let item = serde_json::from_str(&row?).map_err(|e| DbError::storage(e.to_string()))?;
+                items.push(item);
+            }
+            backup_payload[name] = Value::Array(items);
+        }
 
         let payload_str = backup_payload.to_string();
+        if payload_str.len()+2048>crate::MAX_BRIDGE_PAYLOAD_BYTES {return Err(DbError{code:"PAYLOAD_TOO_LARGE".to_string(),message:"اندازهٔ پشتیبان بومی از محدودیت ۵ میبی‌بایت پل بیشتر است؛ خروجی ساخته نشد و داده‌ها تغییری نکردند.".to_string()});}
         let checksum = compute_fnv1a_checksum(&payload_str);
 
         Ok(json!({
@@ -1147,16 +1362,25 @@ impl KairosSqliteDatabase {
         let data_payload = envelope
             .get("payload")
             .ok_or_else(|| DbError::validation("فیلد envelope.payload الزامی است."))?;
-
-        // 1. Capture pre-restore snapshot before mutating tables
-        let snapshot_envelope = self.export_backup()?;
-        let snap_now = now_iso_string();
+        if !matches!(strategy, "replace" | "merge") {
+            return Err(DbError::validation("روش بازیابی نامعتبر است."));
+        }
+        self.ensure_planning_records()?;
 
         let mut conn = self
             .conn
             .lock()
             .map_err(|_| DbError::storage("قفل دیتابیس در دسترس نیست."))?;
         let tx = conn.transaction()?;
+        let snapshot_envelope = Self::backup_in_tx(&tx)?;
+        let snap_now = now_iso_string();
+        if strategy == "merge" && [
+            snapshot_envelope.pointer("/payload/planning"),
+            data_payload.get("planning"),
+            data_payload.pointer("/settings/planning"),
+        ].into_iter().flatten().any(planning::has_content) {
+            return Err(DbError::validation("ادغام برنامه‌ریزی پشتیبانی نمی‌شود؛ از جایگزینی کامل استفاده کن."));
+        }
 
         tx.execute(
             "INSERT OR REPLACE INTO kv_state (key, updated_at, json_value) VALUES (?1, ?2, ?3)",
@@ -1207,6 +1431,19 @@ impl KairosSqliteDatabase {
         data_payload: &Value,
         strategy: &str,
     ) -> Result<(), DbError> {
+        if strategy=="replace" {
+            let mut state=data_payload.get("planning").or_else(||data_payload.pointer("/settings/planning")).cloned().unwrap_or_else(planning::empty_state);
+            let current = Self::planning_revision(tx)?;
+            let imported = state["revision"].as_i64().ok_or_else(|| DbError::validation("نسخهٔ پشتیبان برنامه‌ریزی نامعتبر است."))?;
+            let limit: i64 = 9_007_199_254_740_991;
+            if !(0..limit).contains(&current) || !(0..=limit).contains(&imported) {
+                return Err(DbError::validation("نسخهٔ برنامه‌ریزی خارج از محدوده است."));
+            }
+            state["revision"] = json!(imported.max(current + 1));
+            let records=planning::split(&state)?;
+            tx.execute("DELETE FROM planning_records",[])?;
+            for record in records {tx.execute("INSERT INTO planning_records (key,json_data) VALUES (?1,?2)",params![record["key"].as_str(),record.to_string()])?;}
+        }
         if strategy == "replace" {
             tx.execute_batch(
                 "DELETE FROM tasks;
@@ -1344,11 +1581,19 @@ impl KairosSqliteDatabase {
 
         if let Some(settings) = data_payload.get("settings") {
             if settings.is_object() {
+                let mut settings=settings.clone();if let Some(object)=settings.as_object_mut(){object.remove("planning");}
                 let now = now_iso_string();
                 tx.execute(
                     "INSERT OR REPLACE INTO settings (id, updated_at, json_data) VALUES ('default', ?1, ?2)",
                     params![now, settings.to_string()],
                 )?;
+            }
+        } else if strategy == "replace" {
+            let raw: Option<String> = tx.query_row("SELECT json_data FROM settings WHERE id = 'default'", [], |row| row.get(0)).optional()?;
+            if let Some(raw) = raw {
+                let mut settings: Value = serde_json::from_str(&raw).map_err(|e| DbError::storage(e.to_string()))?;
+                if let Some(obj) = settings.as_object_mut() { obj.remove("planning"); }
+                tx.execute("UPDATE settings SET updated_at = ?1, json_data = ?2 WHERE id = 'default'", params![now_iso_string(), settings.to_string()])?;
             }
         }
 
@@ -1374,6 +1619,7 @@ impl KairosSqliteDatabase {
     }
 
     fn rollback_last_restore(&self) -> Result<Value, DbError> {
+        self.ensure_planning_records()?;
         let mut conn = self
             .conn
             .lock()
@@ -1412,5 +1658,123 @@ impl KairosSqliteDatabase {
                 "focusSessions": snap_payload.get("focusSessions").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)
             }
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_iso_timestamp(value: &Value) {
+        let timestamp = value.as_str().expect("timestamp must be a string");
+        OffsetDateTime::parse(timestamp, &time::format_description::well_known::Rfc3339).expect("timestamp must be valid RFC3339");
+        assert_eq!(timestamp.len(), 24, "use the same millisecond precision as JavaScript");
+        assert!(timestamp.ends_with('Z'), "timestamp must explicitly use UTC");
+    }
+
+    #[test]
+    fn native_clock_returns_javascript_compatible_utc_timestamps() {
+        assert_iso_timestamp(&json!(now_iso_string()));
+    }
+
+    #[test]
+    fn settings_trash_and_backup_keep_valid_iso_timestamps() {
+        let db = KairosSqliteDatabase {
+            db_path: PathBuf::from(":memory:"),
+            conn: Mutex::new(Connection::open_in_memory().expect("open test database")),
+        };
+        db.run_migrations().expect("initialize test schema");
+
+        let initial_settings = db.get_settings().expect("read initial settings");
+        assert_iso_timestamp(&initial_settings["updatedAt"]);
+        let saved_settings = db
+            .save_settings(&json!({ "settings": { "theme": "dark" } }))
+            .expect("save settings");
+        assert_iso_timestamp(&saved_settings["updatedAt"]);
+
+        let task = db
+            .upsert_task(&json!({ "task": {
+                "id": "iso-regression-task",
+                "title": "Timestamp regression",
+                "targetDate": "2026-11-17",
+                "createdAt": now_iso_string(),
+                "duration": 20,
+                "completed": false
+            } }))
+            .expect("create task with a native update timestamp");
+        assert_iso_timestamp(&task["updatedAt"]);
+        db.soft_delete_row("tasks", &json!({ "id": "iso-regression-task" }))
+            .expect("move task to trash");
+
+        let backup = db.export_backup().expect("export native backup");
+        assert_iso_timestamp(&backup["exportedAt"]);
+        assert_iso_timestamp(&backup["payload"]["settings"]["updatedAt"]);
+        let trashed_task = &backup["payload"]["tasks"][0];
+        assert_eq!(trashed_task["id"], "iso-regression-task");
+        assert_iso_timestamp(&trashed_task["deletedAt"]);
+        assert_iso_timestamp(&trashed_task["updatedAt"]);
+    }
+
+    #[test]
+    fn legacy_timestamp_migration_preserves_trash_and_restore_snapshots() {
+        let db = KairosSqliteDatabase {
+            db_path: PathBuf::from(":memory:"),
+            conn: Mutex::new(Connection::open_in_memory().expect("open test database")),
+        };
+        db.run_migrations().expect("initialize test schema");
+        let old_task = json!({
+            "id": "legacy-trash", "title": "Keep this task", "description": "unix_0",
+            "createdAt": "unix_0", "updatedAt": "unix_1000", "deletedAt": "unix_1000",
+            "targetDate": "2026-11-17", "completed": false, "revision": 7,
+            "planning": { "resume": "unix_0" }
+        });
+        let old_snapshot = json!({
+            "exportedAt": "unix_1000", "checksum": "old-checksum",
+            "payload": { "tasks": [old_task.clone()] }
+        });
+        {
+            let conn = db.conn.lock().expect("lock test database");
+            // Simulate an existing version-2 database before startup migration.
+            conn.execute("DELETE FROM schema_migrations WHERE version = 3", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, target_date, updated_at, deleted_at, revision, json_data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params!["legacy-trash", "2026-11-17", "unix_1000", "unix_1000", 7, old_task.to_string()],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO kv_state (key, updated_at, json_value) VALUES (?1, ?2, ?3)",
+                params![PRE_RESTORE_SNAPSHOT_KEY, "unix_1000", old_snapshot.to_string()],
+            ).unwrap();
+        }
+
+        db.run_migrations().expect("migrate legacy timestamps");
+        let task = db.get_by_id("tasks", &json!({ "id": "legacy-trash" })).unwrap();
+        assert_eq!(task["createdAt"], "1970-01-01T00:00:00.000Z");
+        assert_eq!(task["updatedAt"], "1970-01-01T00:16:40.000Z");
+        assert_eq!(task["deletedAt"], "1970-01-01T00:16:40.000Z");
+        assert_eq!(task["revision"], 7);
+        assert_eq!(task["description"], "unix_0");
+        assert_eq!(task["planning"]["resume"], "unix_0");
+        {
+            let conn = db.conn.lock().unwrap();
+            let (updated, deleted): (String, String) = conn.query_row(
+                "SELECT updated_at, deleted_at FROM tasks WHERE id = 'legacy-trash'", [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(updated, task["updatedAt"].as_str().unwrap());
+            assert_eq!(deleted, task["deletedAt"].as_str().unwrap());
+            let raw: String = conn.query_row(
+                "SELECT json_value FROM kv_state WHERE key = ?1", params![PRE_RESTORE_SNAPSHOT_KEY],
+                |row| row.get(0),
+            ).unwrap();
+            let snapshot: Value = serde_json::from_str(&raw).unwrap();
+            assert_iso_timestamp(&snapshot["exportedAt"]);
+            assert_eq!(snapshot["payload"]["tasks"][0]["deletedAt"], task["deletedAt"]);
+            assert_eq!(snapshot["checksum"], compute_fnv1a_checksum(&snapshot["payload"].to_string()));
+        }
+        db.run_migrations().expect("migration is idempotent");
+        assert_eq!(db.get_by_id("tasks", &json!({ "id": "legacy-trash" })).unwrap(), task);
+        for malformed in ["unix_", "unix_bad", "unix_-1", "unix_999999999999999999999999"] {
+            assert!(legacy_timestamp_to_iso(malformed).is_none());
+        }
     }
 }

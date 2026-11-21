@@ -46,9 +46,9 @@ test('runSubsystemSelfDiagnostics reports failed storage_check if storage port t
 
 test('getPlatformHandoffSnippets returns Sketchware WebSettings Java snippet and Windows build commands', () => {
   const snippets = getPlatformHandoffSnippets();
-  assert.ok(snippets.sketchwareWebSettingsJava.includes('setDomStorageEnabled(true)'));
+  assert.ok(snippets.sketchwareWebSettingsJava.includes('KairosAndroidBridge.start'));
   assert.ok(
-    snippets.sketchwareWebSettingsJava.includes('file:///android_asset/www/index.html')
+    snippets.sketchwareWebSettingsJava.includes('"www", false')
   );
   assert.ok(snippets.windowsBuildCommands.includes('npm run build'));
 });

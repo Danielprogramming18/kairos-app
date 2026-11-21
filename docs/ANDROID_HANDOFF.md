@@ -1,81 +1,26 @@
-# راهنمای تحویل و بسته‌بندی اندروید (Sketchware WebView Handoff)
+# اتصال Kairos ۲.۲.۲ به Sketchware یا Android Studio
 
-این سند راهنمای گام‌به‌گام استفاده از خروجی وب «کایروس» در داخل `WebView` اندروید (Sketchware / Android Studio) است.
+در میزبان آزمون با همان شناسهٔ برنامه و کلید امضای نصب قبلی کار کنید. پروژهٔ Gradle و APK نهایی در این مخزن نیست. این تحویل برای API 24 به بالا نوشته شده است. سازگاری Gradle، WebView و انتخابگر فایل را در پروژهٔ اصلی بسنجید.
 
-> **نکتهٔ مهم معماری (`FIX-12`):** کایروس به‌گونه‌ای طراحی شده است که **وجود SQLite، پل بومی (`Bridge`)، مدیریت فایل بومی یا اعلان بومی را از پیش فرض نمی‌گیرد**. در حالت پیش‌فرض (فقط بسته‌بندی فایل‌های استاتیک HTML/CSS/JavaScript/تصاویر/فونت‌های محلی `.woff2`)، برنامه به‌صورت خودکار از موتور تراکنشی `IndexedDB` داخل `WebView` استفاده می‌کند و ۱۰۰٪ آفلاین کار می‌کند.
-
----
-
-## ۱. حالت الف (پشتیبانی‌شده در نسخهٔ فعلی Sketchware): بسته‌بندی استاتیک بدون نیاز به Bridge یا SQLite
-1. دستور زیر را اجرا کنید تا بستهٔ استاتیک با مسیرهای نسبی (`base: './'`) و فونت‌های محلی `Vazirmatn` (`.woff2`) ساخته شود:
-   ```bash
-   npm run build
-   ```
-2. تمام محتویات پوشهٔ `dist/` (شامل `index.html` و پوشهٔ `assets/` حاوی فایل‌های JS، CSS و فونت‌های محلی `.woff2`) را در مسیر `assets/kairos/` (یا `assets/www/`) پروژهٔ Sketchware قرار دهید.
-3. در `WebView` اندروید، تنظیمات استاندارد زیر را فعال کنید:
-   ```java
-   WebSettings settings = webView.getSettings();
-   settings.setJavaScriptEnabled(true);
-   settings.setDomStorageEnabled(true);
-   settings.setDatabaseEnabled(true);
-   settings.setAllowFileAccess(true);
-   ```
-
----
-
-## ۲. انتقال و همگام‌سازی خودکار تم روشن/تاریک گوشی در Android WebView (مهم)
-
-### چرا تنظیم میزبان اندروید اهمیت دارد؟
-در مرورگرهای استاندارد وب، مدیاکوئری `prefers-color-scheme: dark` مستقیماً از سیستم‌عامل خوانده می‌شود. اما در `WebView` اندروید (به‌ویژه در پروژه‌های Sketchware که معمولاً از تم پایهٔ `Theme.AppCompat.Light` بدون `DayNight` استفاده می‌کنند یا تنظیمات `WebSettingsCompat` روی آن‌ها اعمال نشده است)، `window.matchMedia('(prefers-color-scheme: dark)')` داخل `WebView` ممکن است همیشه مقدار `false` (روشن) برگرداند یا هنگام تغییر حالت Dark Mode گوشی از نوار اعلان، رویداد تغییر را به صفحهٔ وب منتقل نکند.
-
-برای تضمین ۱۰۰٪ هماهنگی خودکار تم کایروس با تم گوشی (از لحظهٔ بارگذاری اولیه و همچنین تغییر زنده هنگام باز بودن برنامه بدون `reload`):
-
-### گام ۱: بارگذاری اولیه بدون پرش رنگی (Zero-Flash Startup)
-هنگام فراخوانی `loadUrl` در `onCreate`، وضعیت فعلی تم گوشی (`UI_MODE_NIGHT_MASK`) را در پارامتر `hostTheme` پاس دهید تا اسکریپت همگام داخل `<head>` پیش از رندر شدن صفحه، تم درست را اعمال کند:
-```java
-boolean isNight = (getResources().getConfiguration().uiMode
-    & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-    == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-String hostTheme = isNight ? "dark" : "light";
-
-webView.loadUrl("file:///android_asset/kairos/index.html?hostTheme=" + hostTheme);
-```
-
-### گام ۲: تغییر زندهٔ تم هنگام باز بودن برنامه بدون Reload یا از دست رفتن وضعیت
-1. در فایل `AndroidManifest.xml` برای `Activity` میزبان، مقدار `uiMode` را به `android:configChanges` اضافه کنید تا با تغییر تم گوشی، `Activity` و `WebView` دوباره ساخته نشوند (و متن فرم‌ها یا تایمر در حال اجرا از دست نرود):
-   ```xml
-   android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
-   ```
-2. در متد `onConfigurationChanged` اکتیویتی (و همچنین در `onPageFinished` از `WebViewClient`)، متد آمادهٔ `KairosAndroidBridge.syncDeviceThemeToWebView(this, webView)` یا اسکریپت مستقیم زیر را صدا بزنید:
-   ```java
-   @Override
-   public void onConfigurationChanged(android.content.res.Configuration newConfig) {
-       super.onConfigurationChanged(newConfig);
-       boolean isNight = (newConfig.uiMode
-           & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-           == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-       String theme = isNight ? "dark" : "light";
-       webView.evaluateJavascript(
-           "if (window.__KAIROS_SET_HOST_THEME__) window.__KAIROS_SET_HOST_THEME__('" + theme + "');",
-           null
-       );
-   }
-   ```
-- تابع سراسری `window.__KAIROS_SET_HOST_THEME__('dark' | 'light' | null)` از همان ابتدای بارگذاری `index.html` و در طول اجرای React در دسترس است و تم را بلافاصله بدون بارگذاری مجدد صفحه تغییر می‌دهد.
-
----
-
-## ۳. حالت ب (اختیاری برای توسعهٔ آتی): تزریق پل بومی (`KairosAndroidBridge` + `SQLite`)
-اگر در نسخه‌های آینده تصمیم به اتصال دیتابیس بومی `SQLite` گرفته شود، اپلیکیشن وب در هنگام راه‌اندازی (`detectRuntimePlatform` در `src/app/PlatformContext.tsx`) وجود شیء `window.KairosAndroidBridge` را بررسی می‌کند:
+1. با `npm ci` و `npm run build:android` بسازید. **محتوای** `build/android/`، از جمله معرفی، فونت‌ها و `theme-init.js` را در همان پوشهٔ قدیمی `app/src/main/assets/www/` یا `app/src/main/assets/kairos/` بگذارید. برای نصب قبلی پوشه را عوض نکنید.
+2. فایل `handoff/android/KairosAndroidBridge.java` را به پکیج مناسب ببرید. در Gradle مخزن Google و وابستگی `androidx.webkit:webkit:1.12.1` را فعال کنید. همین نسخه API پیام‌های دارای نوع، AssetLoader و بررسی ویژگی WebView را دارد. با Gradle و compileSdk پروژه بسازید.
+3. روی یک WebView تازه، پیش از هر بارگذاری، کد زیر را از Activity اجرا کنید. شیء دیگری را با `addJavascriptInterface` ثبت نکنید. میزبان، ناوبری، پنجرهٔ جدید و پاسخ به درخواست‌های asset را خودش کنترل می‌کند. WebViewClient آن را جایگزین نکنید. برای واردکردن پشتیبان، WebChromeClient انتخابگر سند فعلی پروژه را به‌عنوان آرگومان پنجم start بدهید. تنها onShowFileChooser آن فراخوانی می‌شود. نتیجهٔ انتخاب سند را طبق مسیر قبلی Activity به همان callback برگردانید.
+4. `folder` باید همان نام نصب قبلی باشد. `nativeStorage` فقط برای نصب‌هایی که از قبل از SQLite بومی استفاده می‌کردند، یا نصب بومی تازه، برابر true است. برای نصب IndexedDB همان false بماند. جابه‌جایی بین دو موتور یک عملیات مهاجرت دادهٔ جداگانه است.
+5. با `uiMode` در `android:configChanges`، در `onConfigurationChanged` تابع همگام‌سازی را فراخوانی کنید. در `onDestroy` تابع بستن را فراخوانی کنید.
 
 ```java
-KairosAndroidBridge.attachToWebView(getApplicationContext(), webView);
-String hostTheme = KairosAndroidBridge.resolveAndroidDeviceTheme(this);
-webView.loadUrl("file:///android_asset/kairos/index.html?hostTheme=" + hostTheme);
+// Activity fields
+private Runnable closeKairos;
+// onCreate after binding webview1
+closeKairos = KairosAndroidBridge.start(this, webview1, "www", true);
+// onConfigurationChanged
+KairosAndroidBridge.syncDeviceThemeToWebView(this, webview1);
+// onDestroy
+if (closeKairos != null) closeKairos.run();
 ```
 
----
+**حفظ داده.** حالت بدون پل، همان نشانی file و IndexedDB قبلی را باز می‌کند. حالت بومی، پایگاه `kairos_native_v2.db` را در همان مسیر و نسخه نگه می‌دارد. نخستین بار، صفحهٔ قدیمی و سپس صفحهٔ HTTPS بسته‌شده با برنامه در حالت انتقال باز می‌شوند. تنها کلیدهای مشخص تم، وضعیت معرفی، صدا، نوار کناری، پیش‌نویس کار و تایمر کپی و دوباره خوانده می‌شوند. ثبت موفقیت بعد از تأیید مقدارها انجام می‌شود. خطا راه‌اندازی را متوقف می‌کند و امکان تلاش مجدد با دادهٔ مبدأ وجود دارد. کلید GitHub منتقل نمی‌شود.
 
-## ۴. فایل‌های آمادهٔ تحویل در مخزن (Ready-to-Use Handoff Files)
-- **کد کامل جاوای اندروید (هر دو حالت A و B + همگام‌سازی تم گوشی):** فایل `/handoff/android/KairosAndroidBridge.java` شامل متدهای `configureWebViewForModeA(webView)`، `resolveAndroidDeviceTheme(context)` و `syncDeviceThemeToWebView(context, webView)` است.
-- **ممیز خودکار بستهٔ آفلاین (`dist/`):** ماژول `/src/utils/offlineBundleVerifier.ts` و آزمون `/src/utils/offlineBundleVerifier.test.ts` به صورت خودکار بررسی می‌کنند که در `dist/index.html` هیچ مسیر مطلق `/assets/` یا لینک CDN خارجی وجود نداشته باشد و فونت‌های محلی `.woff2` باندل شده باشند.
+**مرز دسترسی.** فقط صفحهٔ اصلی مبدأ `https://appassets.androidplatform.net` می‌تواند عملیات SQLite مجاز را درخواست کند. فایل‌های این مبدأ باید از APK بارگذاری شوند. فایل‌های مفقود، مسیرهای خارج از بسته و درخواست‌های شبکه رد می‌شوند. فرمان داده از iframe حتی در همان مبدأ رد می‌شود. کلیک کاربر روی لینک وب یا ایمیل از صفحهٔ اصلی به برنامهٔ سیستم می‌رود. برای Kairos به دسترسی عمومی فایل، content URI، شبکه یا universal file access نیاز نیست. انتخاب پشتیبان با انتخابگر اسناد کاربر و مجوز همان سند انجام شود.
+
+**آزمون روی Android واقعی.** برای هر دو نوع نصب، چند کار، تایمر، پیش‌نویس، تم و برنامهٔ ۲۵→۶۰ بسازید. روی همان نصب ارتقا دهید. در حالت هواپیما معرفی، تم، فرم، جابه‌جایی برنامه، فایل قدیمی و جدید و بازکردن پس از force-stop را بررسی کنید. در حالت بومی قطع برنامه حین انتقال و تکرار را هم امتحان کنید. مطمئن شوید لینک بیرونی در مرورگر سیستم باز می‌شود، زیرقاب هیچ پاسخ بومی نمی‌گیرد و WebView قدیمیِ فاقد قابلیت پیام با خطای آشکار متوقف می‌شود. آزمون فایل در Chrome دسکتاپ فقط بخشی از این مسیر را می‌پوشاند.

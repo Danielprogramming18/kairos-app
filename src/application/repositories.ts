@@ -17,6 +17,7 @@ import {
   TaskEntity,
   UserSettingsEntity,
 } from '../domain/models';
+import type { PlanningState } from '../domain/planning';
 
 export interface SaveMutationOptions {
   expectedRevision?: number;
@@ -70,6 +71,11 @@ export interface SettingsRepository {
   saveSettings(settings: Partial<UserSettingsEntity>): Promise<UserSettingsEntity>;
 }
 
+export interface PlanningRepository {
+  getPlanning(): Promise<PlanningState>;
+  savePlanning(next: PlanningState, options: { expectedRevision: number; expectedTaskRevisions?:Record<string,number>; createTask?: TaskEntity }): Promise<PlanningState>;
+}
+
 export interface BackupValidationResult {
   valid: boolean;
   errors: string[];
@@ -112,6 +118,7 @@ export interface PlatformContainer {
   notes: NoteRepository;
   focus: FocusRepository;
   settings: SettingsRepository;
+  planning: PlanningRepository;
   backup: BackupService;
   notifications: NotificationService;
   lifecycle: AppLifecycleService;

@@ -1,3 +1,4 @@
+import { validatePlanning, validateTaskPlanning } from '../domain/planning';
 import {
   BackupEnvelopeV2,
   BackupPayloadV2,
@@ -84,8 +85,52 @@ export interface BackupPreviewSummary {
   };
 }
 
-export const MAX_BACKUP_BYTES = 10 * 1024 * 1024; // 10 MB safety limit
-export const PBKDF2_ITERATIONS = 100_000;
+export const MAX_BACKUP_BYTES = 32 * 1024 * 1024; // 32 MiB, measured after UTF-8 encoding
+// The v2 writer originally used 100,000. New exports use OWASP's SHA-256 work factor.
+const LEGACY_ITERATIONS = 100_000;
+export const PBKDF2_ITERATIONS = 600_000;
+export const PASSPHRASE_HINT = 'چند واژهٔ دور از حدس برای خودت انتخاب کن؛ عبارت باید حداقل ۱۵ نویسه داشته باشد.';
+const commonPhrases = new Set(['password12345678', 'passwordpassword', 'qwertyuiopasdfgh', 'letmeinletmein', 'iloveyouiloveyou', 'رمزعبوررمزعبور']);
+export function validExportPassphrase(password: string): boolean {
+  const value = password.trim().normalize('NFKC').toLowerCase();
+  const compact = value.replace(/[\s_-]/gu, '');
+  const letters = compact.replace(/[\p{Number}\p{Punctuation}\p{Symbol}]/gu, '');
+  return [...value].length >= 15 && new Set(compact).size >= 4 &&
+    letters.length > 0 && !/^(?:password|qwerty)+$/u.test(letters) &&
+    !commonPhrases.has(compact);
+}
+
+function withinBackupLimit(raw: string): boolean {
+  return typeof raw === 'string' && raw.length <= MAX_BACKUP_BYTES &&
+    new Blob([raw]).size <= MAX_BACKUP_BYTES;
+}
+
+// Validate canonical padded Base64 without allocating decoded ciphertext or using
+// a repeated regex group that can exhaust the regex engine on large inputs.
+function base64Length(value: unknown): number {
+  if (typeof value !== 'string' || !value.length || value.length > MAX_BACKUP_BYTES ||
+      value.length % 4 !== 0) return -1;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const data = value.slice(0, value.length - padding);
+  if (/[^A-Za-z0-9+/]/.test(data)) return -1;
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  if (padding && (alphabet.indexOf(data[data.length - 1]) & (padding === 2 ? 15 : 3))) return -1;
+  return value.length / 4 * 3 - padding;
+}
+
+function encryptedHeaderValid(value: unknown): value is KairosEncryptedBackupEnvelope {
+  if (!isPlainObject(value) || value.encrypted !== true || value.appId !== 'kairos' ||
+      value.app !== 'Kairos' || value.formatVersion !== 2 || value.schemaVersion !== 2 ||
+      !isValidIsoTimestamp(value.exportedAt) || !isPlainObject(value.kdf) || !isPlainObject(value.cipher)) return false;
+  const {kdf, cipher} = value;
+  return kdf.algorithm === 'PBKDF2' && kdf.hash === 'SHA-256' &&
+    typeof kdf.iterations === 'number' && Number.isInteger(kdf.iterations) &&
+    kdf.iterations >= LEGACY_ITERATIONS && kdf.iterations <= PBKDF2_ITERATIONS &&
+    cipher.algorithm === 'AES-GCM' && base64Length(kdf.saltBase64) === 16 &&
+    base64Length(cipher.ivBase64) === 12 && base64Length(cipher.ciphertextBase64) > 16;
+}
+
+let decryptInProgress = false;
 
 const VALID_HABIT_CATEGORIES = new Set<string>([
   'health',
@@ -178,6 +223,7 @@ export function computeBackupChecksum(payload: BackupPayloadV2): string {
     notes: Array.isArray(payload.notes) ? payload.notes : [],
     focusSessions: Array.isArray(payload.focusSessions) ? payload.focusSessions : [],
     settings: payload.settings ?? undefined,
+    planning: payload.planning ?? undefined,
   };
   const str = JSON.stringify(normalized);
   let hash = 2166136261;
@@ -215,6 +261,7 @@ function payloadToUiData(payload: BackupPayloadV2): {
       reminded: entity.reminded,
       dueAt: entity.dueAt ?? null,
       projectId: entity.projectId ?? null,
+      planning: entity.planning,
       sourceId: entity.sourceId ?? null,
       tags: Array.isArray(entity.tags) ? [...entity.tags] : [],
       subtasks: Array.isArray(entity.subtasks) ? entity.subtasks.map((s) => ({ ...s })) : [],
@@ -429,6 +476,7 @@ export function migrateLegacyBackupDataToV2Payload(
       reminderTime: typeof raw.reminderTime === 'string' ? raw.reminderTime : null,
       reminded: Boolean(raw.reminded),
       projectId: typeof raw.projectId === 'string' ? raw.projectId : null,
+      planning: raw.planning !== undefined ? validateTaskPlanning(raw.planning) : undefined,
       sourceId: typeof raw.sourceId === 'string' ? raw.sourceId : null,
       category: typeof raw.category === 'string' && raw.category.trim() ? raw.category : 'work',
       tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
@@ -888,6 +936,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
       reminderTime: typeof item.reminderTime === 'string' ? item.reminderTime : null,
       reminded: Boolean(item.reminded),
       projectId: typeof item.projectId === 'string' ? item.projectId : null,
+      planning: item.planning !== undefined ? validateTaskPlanning(item.planning) : undefined,
       sourceId: typeof item.sourceId === 'string' ? item.sourceId : null,
       category: typeof item.category === 'string' && item.category.trim() ? item.category : 'work',
       tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
@@ -1247,6 +1296,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
   }
 
   let settings: UserSettingsEntity | undefined;
+  const planning=rawPayload.planning!==undefined?validatePlanning(rawPayload.planning):undefined;
   if (rawPayload.settings !== undefined && rawPayload.settings !== null) {
     if (!isPlainObject(rawPayload.settings)) {
       errors.push('فیلد settings در فایل پشتیبان یک شیء معتبر نیست.');
@@ -1271,6 +1321,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
         errors.push('مقادیر تنظیمات تایمر پومودورو در settings نامعتبر هستند.');
       } else {
         settings = {
+          planning: s.planning !== undefined ? validatePlanning(s.planning) : undefined,
           id: 'default',
           theme,
           soundEnabled: typeof s.soundEnabled === 'boolean' ? s.soundEnabled : true,
@@ -1302,6 +1353,7 @@ function validateCanonicalV2Payload(rawPayload: Record<string, unknown>): {
       notes,
       focusSessions,
       settings,
+      planning,
     },
   };
 }
@@ -1344,6 +1396,7 @@ export function createPlainBackupEnvelope(
       notes: Array.isArray(payload.notes) ? payload.notes : [],
       focusSessions: Array.isArray(payload.focusSessions) ? payload.focusSessions : [],
       settings: payload.settings,
+      planning: payload.planning,
     };
     return {
       appId: 'kairos',
@@ -1391,8 +1444,8 @@ export async function createEncryptedBackupEnvelope(
   input: BackupEnvelopeV2 | BackupPayloadV2 | LegacyBackupDataInput,
   password: string
 ): Promise<KairosEncryptedBackupEnvelope> {
-  if (!password || password.trim().length < 4) {
-    throw new Error('گذرواژهٔ رمزگذاری باید حداقل ۴ کاراکتر باشد.');
+  if (!validExportPassphrase(password)) {
+    throw new Error(PASSPHRASE_HINT);
   }
 
   const plainEnvelope = createPlainBackupEnvelope(input);
@@ -1400,15 +1453,7 @@ export async function createEncryptedBackupEnvelope(
 
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveAesGcmKey(password, salt, PBKDF2_ITERATIONS);
-
-  const cipherBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv as BufferSource },
-    key,
-    plaintextBytes as BufferSource
-  );
-
-  return {
+  const envelope: KairosEncryptedBackupEnvelope = {
     appId: 'kairos',
     app: 'Kairos',
     formatVersion: 2,
@@ -1424,9 +1469,21 @@ export async function createEncryptedBackupEnvelope(
     cipher: {
       algorithm: 'AES-GCM',
       ivBase64: bytesToBase64(iv),
-      ciphertextBase64: bytesToBase64(new Uint8Array(cipherBuffer)),
+      ciphertextBase64: '',
     },
   };
+  // AES-GCM adds a 16-byte tag. Base64 encodes each three bytes in four ASCII bytes.
+  const encodedLength = 4 * Math.ceil((plaintextBytes.byteLength + 16) / 3);
+  const headerLength = new TextEncoder().encode(JSON.stringify(envelope)).byteLength;
+  if (headerLength + encodedLength > MAX_BACKUP_BYTES) {
+    throw new Error('حجم فایل رمزگذاری‌شده از ۳۲ میبی‌بایت بیشتر می‌شود. پشتیبان ساده بگیر.');
+  }
+  const key = await deriveAesGcmKey(password, salt, PBKDF2_ITERATIONS);
+  const cipherBuffer = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv as BufferSource }, key, plaintextBytes as BufferSource
+  );
+  envelope.cipher.ciphertextBase64 = bytesToBase64(new Uint8Array(cipherBuffer));
+  return envelope;
 }
 
 /**
@@ -1436,16 +1493,17 @@ export async function decryptBackupEnvelope(
   rawJson: string,
   password: string
 ): Promise<BackupPreviewSummary> {
+  const fail = (error: string, encrypted = false) => ({ valid: false, encrypted, error, errors: [error] });
+  if (!withinBackupLimit(rawJson)) return fail('حجم فایل از ۳۲ میبی‌بایت بیشتر است.');
+  if (decryptInProgress) return fail('رمزگشایی قبلی در حال انجام است.', true);
+  decryptInProgress = true;
   try {
-    const parsed = JSON.parse(rawJson) as KairosEncryptedBackupEnvelope;
-    if (!parsed || parsed.encrypted !== true || !parsed.kdf || !parsed.cipher) {
-      const msg = 'ساختار فایل پشتیبان رمزگذاری‌شده معتبر نیست.';
-      return { valid: false, encrypted: false, error: msg, errors: [msg] };
-    }
+    const parsed: unknown = JSON.parse(rawJson);
+    if (!encryptedHeaderValid(parsed)) return fail('ساختار فایل پشتیبان رمزگذاری‌شده معتبر نیست.');
     const salt = base64ToBytes(parsed.kdf.saltBase64);
     const iv = base64ToBytes(parsed.cipher.ivBase64);
     const ciphertext = base64ToBytes(parsed.cipher.ciphertextBase64);
-    const iterations = Number(parsed.kdf.iterations) || PBKDF2_ITERATIONS;
+    const iterations = parsed.kdf.iterations;
 
     const key = await deriveAesGcmKey(password, salt, iterations);
     const plainBuffer = await crypto.subtle.decrypt(
@@ -1454,7 +1512,7 @@ export async function decryptBackupEnvelope(
       ciphertext as BufferSource
     );
     const plainText = new TextDecoder().decode(plainBuffer);
-    return validateAndPreviewBackupPayload(plainText);
+    return validateAndPreviewBackupPayload(plainText, { verifyChecksum: true });
   } catch {
     const msg = 'گذرواژه اشتباه است یا فایل پشتیبان رمزگذاری‌شده دستکاری/آسیب دیده است.';
     return {
@@ -1463,6 +1521,8 @@ export async function decryptBackupEnvelope(
       error: msg,
       errors: [msg],
     };
+  } finally {
+    decryptInProgress = false;
   }
 }
 
@@ -1473,12 +1533,27 @@ export function validateBackupEnvelopeObject(
   parsed: unknown,
   options?: { verifyChecksum?: boolean }
 ): BackupPreviewSummary {
+  try { return validateBackupEnvelopeObjectUnchecked(parsed, options); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'اطلاعات پشتیبان نامعتبر است.';
+    return {valid:false, encrypted:false, error:message, errors:[message]};
+  }
+}
+
+function validateBackupEnvelopeObjectUnchecked(
+  parsed: unknown,
+  options?: { verifyChecksum?: boolean }
+): BackupPreviewSummary {
   if (!isPlainObject(parsed)) {
     const msg = 'ساختار ریشهٔ فایل پشتیبان نامعتبر است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }
 
   if (parsed.encrypted === true) {
+    if (!encryptedHeaderValid(parsed)) {
+      const error = 'ساختار فایل پشتیبان رمزگذاری‌شده معتبر نیست.';
+      return { valid: false, encrypted: false, error, errors: [error] };
+    }
     const msg = 'این فایل پشتیبان رمزگذاری شده است. لطفاً گذرواژهٔ آن را وارد کنید.';
     return {
       valid: false,
@@ -1557,6 +1632,11 @@ export function validateBackupEnvelopeObject(
     }
 
     validatedPayload = v2Result.payload;
+  } else if (Number(parsed.schemaVersion)===2 && Array.isArray(parsed.notes) && Array.isArray(parsed.tasks) && Array.isArray(parsed.habits)) {
+    // Early Android hosts exported the V2 collections at the root, without a payload wrapper.
+    const flat=validateCanonicalV2Payload(parsed);
+    if(!flat.valid||!flat.payload)return {valid:false,encrypted:false,error:flat.errors[0],errors:flat.errors};
+    validatedPayload=flat.payload;migratedFromLegacy=true;
   } else {
     // Path B: Legacy v1 (`data` object or root arrays)
     const legacyContainer = isPlainObject(parsed.data) ? parsed.data : parsed;
@@ -1637,12 +1717,12 @@ export function validateAndPreviewBackupPayload(
   rawJson: string,
   options?: { verifyChecksum?: boolean }
 ): BackupPreviewSummary {
-  if (!rawJson || typeof rawJson !== 'string' || !rawJson.trim()) {
+  if (!rawJson || typeof rawJson !== 'string') {
     const msg = 'فایل پشتیبان خالی است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }
-  if (rawJson.length > MAX_BACKUP_BYTES) {
-    const msg = 'حجم فایل پشتیبان بیش از حد مجاز (۱۰ مگابایت) است.';
+  if (!withinBackupLimit(rawJson)) {
+    const msg = 'حجم فایل پشتیبان بیش از حد مجاز (۳۲ میبی‌بایت) است.';
     return { valid: false, encrypted: false, error: msg, errors: [msg] };
   }
 

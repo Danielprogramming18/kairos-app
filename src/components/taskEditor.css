@@ -1,0 +1,29 @@
+.kte-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: center; padding: 12px; direction: rtl; }
+.kte-panel { display: flex; flex-direction: column; width: min(100%, 640px); max-height: calc(100dvh - 24px); min-height: 0; color: var(--text-primary); }
+.kte-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 20px; flex: none; border-bottom: 1px solid var(--border-subtle); }
+.kte-header h3 { font-size: 1.08rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.kte-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 18px 20px; }
+.kte-scroll fieldset { min-width: 0; padding: 0; border: 0; }
+.kte-field { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; font-size: .85rem; font-weight: 650; min-width: 0; }
+.kte-field input,.kte-field textarea { min-width: 0; width: 100%; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-surface-2); color: inherit; padding: 11px 12px; font-weight: 400; }
+.kte-panel input[aria-invalid=true] { border-color: #dc5454; }
+.kte-check { display: flex; align-items: center; gap: 7px; min-height: 42px; font-size: .85rem; }
+.kte-panel input[type=checkbox] { accent-color: var(--accent-primary,#6366f1); }
+.kte-panel button { border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-surface-2); color: inherit; min-height: 42px; padding: 8px 14px; cursor: pointer; }
+.kte-header button { padding: 7px; }
+.kte-panel button:disabled { opacity: .5; cursor: default; }
+.kte-panel :focus:not(:focus-visible) { outline: none; }
+.kte-panel :focus-visible { outline: 2px solid var(--accent-primary,#6366f1); outline-offset: 3px; }
+.kte-panel details { border: 1px solid var(--border-subtle); border-radius: 13px; margin: 12px 0; padding: 0 12px; }
+.kte-panel summary { cursor: pointer; font-size: .87rem; font-weight: 700; padding: 12px 0; }
+.kte-panel details .kp-card { margin: 4px 0 12px; padding: 9px; border: 0; background: transparent; }
+.kte-panel details .kp h4 { font-size: .85rem; }
+.kte-hint { font-size: .75rem; color: var(--text-secondary); }
+.kte-error { font-size: .8rem; color: #c63838; margin: 5px 0; overflow-wrap: anywhere; }
+.dark .kte-error { color: #fca5a5; }
+.kte-footer { flex: none; padding: 12px 20px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border-subtle); background: var(--bg-elevated); border-radius: 0 0 18px 18px; }
+.kte-footer > div { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.kte-footer .kte-save { background: #4f46e5; color: white; border-color: #4f46e5; min-width: 120px; font-weight: 750; }
+.kte-nlp { border: 1px solid var(--border-subtle); border-radius: 11px; padding: 11px; margin: 10px 0; background: var(--bg-surface-2); }
+.kte-nlp p { display: flex; align-items: center; gap: 5px; font-size: .8rem; margin-bottom: 6px; }
+@media (max-width: 480px) { .kte-header,.kte-scroll { padding: 14px; } .kte-footer { padding-inline: 14px; } .kte-footer > div > button { flex: 1; } }

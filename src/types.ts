@@ -1,3 +1,4 @@
+import type { TaskPlanning } from './domain/planning';
 export type HabitCategory = 'health' | 'learning' | 'work' | 'mindfulness' | 'finance';
 
 export interface Habit {
@@ -21,6 +22,7 @@ export interface Habit {
 export type TaskPriority = 1 | 2 | 3 | 4 | 5 | number;
 
 export interface Task {
+  planning?: TaskPlanning;
   id: string;
   title: string;
   description?: string;
@@ -109,6 +111,7 @@ export interface ChatMessage {
 }
 
 export type NavTabId =
+  | 'projects' | 'events' | 'tracking' | 'capacity' | 'customize' | 'more'
   | 'deep_focus'
   | 'dashboard'
   | 'calendar'
@@ -121,14 +124,6 @@ export type NavTabId =
   | 'analytics'
   | 'sync';
 
-export interface GitHubSyncConfig {
-  owner: string;
-  repo: string;
-  path: string; // default 'data.json'
-  branch: string; // default 'main'
-  token: string; // Fine-grained PAT stored ONLY in sessionStorage
-  autoSync: boolean;
-}
 
 export interface KairosDataFile {
   app: 'Kairos';

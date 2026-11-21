@@ -4,6 +4,9 @@
  */
 
 import Dexie, { type Table } from 'dexie';
+import { emptyPlanning, validatePlanning } from '../../domain/planning';
+import { createDexiePlanningRepository, migratePlanningRecords, replacePlanningFromBackup } from './planningDexieRepository';
+import { hasPlanningContent, joinPlanningRecords, type PlanningRecord } from '../planningRecords';
 import {
   ActiveTimerState,
   BackupEnvelopeV2,
@@ -32,6 +35,7 @@ import {
   NoteRepository,
   NotificationService,
   PlatformContainer,
+  PlanningRepository,
   SaveMutationOptions,
   SettingsRepository,
   TaskFilter,
@@ -39,6 +43,7 @@ import {
 } from '../../application/repositories';
 import {
   computeBackupChecksum,
+  MAX_BACKUP_BYTES,
   validateAndPreviewBackupPayload,
   validateBackupEnvelopeObject,
 } from '../../utils/backupCrypto';
@@ -75,6 +80,7 @@ export class KairosWebDatabase extends Dexie {
   focusSessions!: Table<FocusSessionEntity, string>;
   settings!: Table<UserSettingsEntity, string>;
   kvState!: Table<KeyValueRecord, string>;
+  planningRecords!: Table<PlanningRecord, string>;
 
   constructor(dbName = 'kairos_offline_db_v2') {
     super(dbName);
@@ -87,6 +93,7 @@ export class KairosWebDatabase extends Dexie {
       settings: 'id',
       kvState: 'key',
     });
+    this.version(2).stores({planningRecords:'key, collection, ownerId'});
   }
 }
 
@@ -733,6 +740,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
   public readonly notes: NoteRepository;
   public readonly focus: FocusRepository;
   public readonly settings: SettingsRepository;
+  public readonly planning: PlanningRepository;
   public readonly backup: BackupService;
   public readonly notifications: NotificationService;
   public readonly lifecycle: AppLifecycleService;
@@ -740,6 +748,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
 
   constructor(db?: KairosWebDatabase) {
     this.db = db ?? new KairosWebDatabase();
+    this.planning = createDexiePlanningRepository(this.db,()=>notifyCrossTabSync('planning.save'));
 
     this.tasks = {
       listTasks: async (filter?: TaskFilter): Promise<TaskEntity[]> => {
@@ -1152,34 +1161,38 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
 
     this.settings = {
       getSettings: async (): Promise<UserSettingsEntity> => {
-        const s = await this.db.settings.get('default');
-        if (s) return s;
-        const fallback: UserSettingsEntity = {
-          id: 'default',
-          theme: 'system',
-          soundEnabled: true,
-          pomodoroWorkMinutes: 45,
-          pomodoroShortBreakMinutes: 10,
-          pomodoroLongBreakMinutes: 20,
-          pomodoroCyclesBeforeLongBreak: 4,
-          calendarPreference: 'jalali',
-          updatedAt: nowIso(),
-        };
-        await this.db.settings.put(fallback);
-        return fallback;
+        // First-run defaults must share the same lock as saves: a second tab
+        // opening an empty database must never overwrite the first tab's save.
+        return this.db.transaction('rw', this.db.settings, async () => {
+          const s = await this.db.settings.get('default');
+          if (s) return s;
+          const fallback: UserSettingsEntity = {
+            id: 'default',
+            theme: 'system',
+            soundEnabled: true,
+            pomodoroWorkMinutes: 45,
+            pomodoroShortBreakMinutes: 10,
+            pomodoroLongBreakMinutes: 20,
+            pomodoroCyclesBeforeLongBreak: 4,
+            calendarPreference: 'jalali',
+            updatedAt: nowIso(),
+          };
+          await this.db.settings.put(fallback);
+          return fallback;
+        });
       },
 
       saveSettings: async (
         partial: Partial<UserSettingsEntity>
       ): Promise<UserSettingsEntity> => {
-        const current = await this.settings.getSettings();
-        const updated: UserSettingsEntity = {
-          ...current,
-          ...partial,
-          id: 'default',
-          updatedAt: nowIso(),
-        };
-        await this.db.settings.put(updated);
+        if(partial.planning!==undefined)throw Error('این نسخه برنامه‌ریزی را در مخزن مستقل ذخیره می‌کند؛ برنامه را تازه‌سازی کن.');
+        await this.settings.getSettings();
+        const updated = await this.db.transaction('rw', this.db.settings, async () => {
+          const current = (await this.db.settings.get('default'))!;
+          const next: UserSettingsEntity = { ...current, ...partial, id: 'default', updatedAt: nowIso() };
+          await this.db.settings.put(next);
+          return next;
+        });
         notifyCrossTabSync('settings.save');
         return updated;
       },
@@ -1187,6 +1200,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
 
     this.backup = {
       exportBackup: async (): Promise<BackupEnvelopeV2> => {
+        await migratePlanningRecords(this.db);
         // Consistent snapshot read inside a single read-only transaction
         const payload = await this.db.transaction(
           'r',
@@ -1197,6 +1211,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
             this.db.notes,
             this.db.focusSessions,
             this.db.settings,
+            this.db.planningRecords,
           ],
           async () => {
             const [tasks, habits, habitEntries, notes, focusSessions, settings] = await Promise.all(
@@ -1216,11 +1231,12 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
               notes,
               focusSessions,
               settings,
+              planning: joinPlanningRecords(await this.db.planningRecords.toArray()),
             };
           }
         );
 
-        return {
+        const envelope:BackupEnvelopeV2={
           appId: 'kairos',
           app: 'Kairos',
           formatVersion: 2,
@@ -1231,6 +1247,8 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
           checksum: computeBackupChecksum(payload),
           payload,
         };
+        if(new TextEncoder().encode(JSON.stringify(envelope)).byteLength>MAX_BACKUP_BYTES)throw Error('پشتیبان از محدودیت ۳۲ میبی‌بایت بیشتر است؛ فایل ناقص ساخته نشد.');
+        return envelope;
       },
 
       validateBackupJson: async (rawJson: string): Promise<BackupValidationResult> => {
@@ -1259,43 +1277,11 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
         }
 
         const validatedPayload = validation.envelope.payload;
-
-        // 2. Mandatory pre-restore snapshot creation & read-back verification
-        let preRestoreSnapshot: BackupEnvelopeV2;
-        try {
-          preRestoreSnapshot = await this.backup.exportBackup();
-          const snapNow = nowIso();
-          await this.db.kvState.put({
-            key: PRE_RESTORE_SNAPSHOT_KEY,
-            value: preRestoreSnapshot,
-            updatedAt: snapNow,
-          });
-          const verifiedRow = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
-          const verifiedEnvelope = verifiedRow?.value as BackupEnvelopeV2 | undefined;
-          if (
-            !verifiedEnvelope ||
-            verifiedEnvelope.checksum !== preRestoreSnapshot.checksum ||
-            !Array.isArray(verifiedEnvelope.payload?.tasks)
-          ) {
-            throw new Error('عدم تطابق اسنپ‌شات بازخوانی‌شده با داده‌های فعلی.');
-          }
-          if (typeof window !== 'undefined' && window.localStorage) {
-            try {
-              window.localStorage.setItem(
-                'kairos_pre_restore_snapshot_v1',
-                JSON.stringify(preRestoreSnapshot)
-              );
-            } catch {
-              // Secondary localStorage mirror is optional if quota is full; IndexedDB kvState is authoritative
-            }
-          }
-        } catch (err: any) {
-          throw new Error(
-            `خطا در ایجاد و تأیید اسنپ‌شات امنیتی پیش از بازیابی (${
-              err?.message || 'خطای ذخیره‌سازی'
-            })؛ عملیات بازیابی برای حفاظت از داده‌های فعلی متوقف شد.`
-          );
+        if (strategy === 'merge' && ((validatedPayload.planning&&hasPlanningContent(validatedPayload.planning)) || (validatedPayload.settings?.planning&&hasPlanningContent(validatedPayload.settings.planning)))) {
+          throw new Error('ادغام دو مجموعهٔ برنامه‌ریزی هنوز پشتیبانی نمی‌شود. پشتیبان بگیر و برای بازیابی کامل گزینهٔ جایگزینی را انتخاب کن.');
         }
+
+        let preRestoreSnapshot!: BackupEnvelopeV2;
 
         // 3. Atomic transactional restore ('replace' or 'merge') with post-write verification
         const finalCounts = await this.db.transaction(
@@ -1307,12 +1293,43 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
             this.db.notes,
             this.db.focusSessions,
             this.db.settings,
+            this.db.planningRecords,
+            this.db.kvState,
           ],
           async () => {
+            // Keep the rollback image and its replacement under the same IndexedDB write lock.
+            try {
+              preRestoreSnapshot = await this.backup.exportBackup();
+              const snapNow = nowIso();
+              await this.db.kvState.put({
+                key: PRE_RESTORE_SNAPSHOT_KEY,
+                value: preRestoreSnapshot,
+                updatedAt: snapNow,
+              });
+              const verifiedRow = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
+              const verifiedEnvelope = verifiedRow?.value as BackupEnvelopeV2 | undefined;
+              if (
+                !verifiedEnvelope ||
+                verifiedEnvelope.checksum !== preRestoreSnapshot.checksum ||
+                !Array.isArray(verifiedEnvelope.payload?.tasks)
+              ) {
+                throw new Error('عدم تطابق اسنپ‌شات بازخوانی‌شده با داده‌های فعلی.');
+              }
+            } catch (err: any) {
+              throw new Error(
+                `خطا در ایجاد و تأیید اسنپ‌شات امنیتی پیش از بازیابی (${
+                  err?.message || 'خطای ذخیره‌سازی'
+                })؛ عملیات بازیابی برای حفاظت از داده‌های فعلی متوقف شد.`
+              );
+            }
+            if (strategy === 'merge' && preRestoreSnapshot.payload.planning && hasPlanningContent(preRestoreSnapshot.payload.planning)) {
+              throw new Error('ادغام داده‌های برنامه‌ریزی پشتیبانی نمی‌شود؛ گزینهٔ جایگزینی را انتخاب کن.');
+            }
             const { tasks, habits, habitEntries, notes, focusSessions, settings } =
               validatedPayload;
 
             if (strategy === 'replace') {
+              await replacePlanningFromBackup(this.db, validatedPayload.planning ?? settings?.planning ?? emptyPlanning());
               await Promise.all([
                 this.db.tasks.clear(),
                 this.db.habits.clear(),
@@ -1326,7 +1343,11 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
               if (habitEntries.length > 0) await this.db.habitEntries.bulkPut(habitEntries);
               if (notes.length > 0) await this.db.notes.bulkPut(notes);
               if (focusSessions.length > 0) await this.db.focusSessions.bulkPut(focusSessions);
-              if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+              if (settings) { const clean={...settings,id:'default' as const};delete clean.planning;await this.db.settings.put(clean); }
+              else {
+                const current = await this.db.settings.get('default');
+                if (current?.planning) await this.db.settings.put({ ...current, planning: undefined });
+              }
 
               const [wTasks, wHabits, wEntries, wNotes, wFocus] = await Promise.all([
                 this.db.tasks.count(),
@@ -1421,7 +1442,11 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
               if (mergedEntries.length > 0) await this.db.habitEntries.bulkPut(mergedEntries);
               if (mergedNotes.length > 0) await this.db.notes.bulkPut(mergedNotes);
               if (mergedFocus.length > 0) await this.db.focusSessions.bulkPut(mergedFocus);
-              if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+              if (settings) {
+                const clean = { ...settings, id: 'default' as const };
+                delete clean.planning;
+                await this.db.settings.put(clean);
+              }
 
               return {
                 tasks: mergedTasks.length,
@@ -1434,6 +1459,16 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
           }
         );
 
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.setItem(
+              'kairos_pre_restore_snapshot_v1',
+              JSON.stringify(preRestoreSnapshot)
+            );
+          } catch {
+            // Secondary localStorage mirror is optional if quota is full; IndexedDB kvState is authoritative
+          }
+        }
         notifyCrossTabSync('backup.restore');
 
         return {
@@ -1449,23 +1484,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
       },
 
       rollbackLastRestore: async (): Promise<{ restoredCounts: Record<string, number> }> => {
-        const row = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
-        if (!row || !row.value) {
-          throw new Error('اسنپ‌شات پیش از بازیابی یافت نشد.');
-        }
-
-        const snapshotEnvelope = row.value as BackupEnvelopeV2;
-        const validation = validateBackupEnvelopeObject(snapshotEnvelope, {
-          verifyChecksum: true,
-        });
-        if (!validation.valid || !validation.envelope) {
-          throw new Error('اسنپ‌شات ذخیره شده نامعتبر یا آسیب‌دیده است.');
-        }
-
-        const { tasks, habits, habitEntries, notes, focusSessions, settings } =
-          validation.envelope.payload;
-
-        await this.db.transaction(
+        const restoredCounts = await this.db.transaction(
           'rw',
           [
             this.db.tasks,
@@ -1474,8 +1493,26 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
             this.db.notes,
             this.db.focusSessions,
             this.db.settings,
+            this.db.planningRecords,
+            this.db.kvState,
           ],
           async () => {
+            const row = await this.db.kvState.get(PRE_RESTORE_SNAPSHOT_KEY);
+            if (!row || !row.value) {
+              throw new Error('اسنپ‌شات پیش از بازیابی یافت نشد.');
+            }
+
+            const snapshotEnvelope = row.value as BackupEnvelopeV2;
+            const validation = validateBackupEnvelopeObject(snapshotEnvelope, {
+              verifyChecksum: true,
+            });
+            if (!validation.valid || !validation.envelope) {
+              throw new Error('اسنپ‌شات ذخیره شده نامعتبر یا آسیب‌دیده است.');
+            }
+
+            const { tasks, habits, habitEntries, notes, focusSessions, settings } =
+              validation.envelope.payload;
+            await replacePlanningFromBackup(this.db, validation.envelope.payload.planning ?? settings?.planning ?? emptyPlanning());
             await Promise.all([
               this.db.tasks.clear(),
               this.db.habits.clear(),
@@ -1489,21 +1526,24 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
             if (habitEntries.length > 0) await this.db.habitEntries.bulkPut(habitEntries);
             if (notes.length > 0) await this.db.notes.bulkPut(notes);
             if (focusSessions.length > 0) await this.db.focusSessions.bulkPut(focusSessions);
-            if (settings) await this.db.settings.put({ ...settings, id: 'default' });
+            if (settings) { const clean={...settings,id:'default' as const};delete clean.planning;await this.db.settings.put(clean); }
+            else {
+              const current = await this.db.settings.get('default');
+              if (current?.planning) await this.db.settings.put({ ...current, planning: undefined });
+            }
+            return {
+              tasks: tasks.length,
+              habits: habits.length,
+              habitEntries: habitEntries.length,
+              notes: notes.length,
+              focusSessions: focusSessions.length,
+            };
           }
         );
 
         notifyCrossTabSync('backup.rollback');
 
-        return {
-          restoredCounts: {
-            tasks: tasks.length,
-            habits: habits.length,
-            habitEntries: habitEntries.length,
-            notes: notes.length,
-            focusSessions: focusSessions.length,
-          },
-        };
+        return { restoredCounts };
       },
     };
 
@@ -1534,6 +1574,7 @@ export class WebDexiePlatformAdapter implements PlatformContainer {
 
   async initialize(): Promise<MigrationReport | null> {
     this.lastMigrationReport = await migrateLegacyLocalStorageToIndexedDB(this.db);
+    await migratePlanningRecords(this.db);
     return this.lastMigrationReport;
   }
 }

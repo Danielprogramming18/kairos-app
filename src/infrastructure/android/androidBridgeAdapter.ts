@@ -11,6 +11,7 @@ import {
   BridgeResponseEnvelope,
   createBridgeRequest,
   DEFAULT_BRIDGE_TIMEOUT_MS,
+  MAX_BRIDGE_PAYLOAD_BYTES,
 } from '../bridge/protocol';
 import {
   ActiveTimerState,
@@ -41,10 +42,15 @@ import {
 } from '../../application/repositories';
 import {
   validateAndPreviewBackupPayload,
+  computeBackupChecksum,
   validateBackupEnvelopeObject,
 } from '../../utils/backupCrypto';
+import { createPlanningBridgeRepository } from '../bridge/planningBridgeRepository';
+import { hasPlanningContent, upgradeLegacyPlanningLayout, splitPlanningRecords } from '../planningRecords';
+import type { PlanningRepository } from '../../application/repositories';
 
 export interface SketchwareAndroidJavascriptInterface {
+  onmessage?: ((event: MessageEvent<string>) => void) | null;
   postMessage(rawRequestJson: string): string | void;
 }
 
@@ -67,6 +73,9 @@ export class AndroidSketchwareBridgeTransport {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      if (window.KairosAndroidBridge) {
+        window.KairosAndroidBridge.onmessage = event => this.handleIncomingResponse(event.data);
+      }
       window.__onKairosNativeBridgeResponse = (rawResponseJson: string) => {
         this.handleIncomingResponse(rawResponseJson);
       };
@@ -82,6 +91,7 @@ export class AndroidSketchwareBridgeTransport {
   }
 
   private handleIncomingResponse(rawResponseJson: string) {
+    if (typeof rawResponseJson !== 'string' || rawResponseJson.length > MAX_BRIDGE_PAYLOAD_BYTES) return;
     let parsed: BridgeResponseEnvelope;
     try {
       parsed = JSON.parse(rawResponseJson);
@@ -93,6 +103,7 @@ export class AndroidSketchwareBridgeTransport {
     if (!entry) return;
     clearTimeout(entry.timer);
     this.pending.delete(parsed.requestId);
+    if(new TextEncoder().encode(rawResponseJson).byteLength>MAX_BRIDGE_PAYLOAD_BYTES){entry.reject(new BridgeProtocolError('PAYLOAD_TOO_LARGE','پاسخ میزبان از محدودیت ۵ میبی‌بایت بیشتر است؛ عملیات تأیید نشد.'));return;}
 
     if (parsed.version && parsed.version !== BRIDGE_CONTRACT_VERSION) {
       entry.reject(
@@ -170,12 +181,14 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
   public readonly notes: NoteRepository;
   public readonly focus: FocusRepository;
   public readonly settings: SettingsRepository;
+  public readonly planning: PlanningRepository;
   public readonly backup: BackupService;
   public readonly notifications: NotificationService;
   public readonly lifecycle: AppLifecycleService;
 
   constructor(transport = new AndroidSketchwareBridgeTransport()) {
     this.transport = transport;
+    this.planning = createPlanningBridgeRepository((operation,payload)=>this.transport.invoke(operation,payload));
 
     this.tasks = {
       listTasks: (filter?: TaskFilter) =>
@@ -280,8 +293,13 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
     };
 
     this.backup = {
-      exportBackup: () =>
-        this.transport.invoke<Record<string, never>, BackupEnvelopeV2>('backup.export', {}),
+      exportBackup: async () => {
+        const raw=await this.transport.invoke<Record<string, never>,any>('backup.export', {});
+        const payload=raw.payload??{tasks:raw.tasks??[],habits:raw.habits??[],habitEntries:raw.habitEntries??[],notes:raw.notes??[],focusSessions:raw.focusSessions??[],settings:raw.settings,planning:raw.planning};
+        if(payload.planning)payload.planning=upgradeLegacyPlanningLayout(payload.planning);
+        if(payload.settings?.planning)payload.settings={...payload.settings,planning:upgradeLegacyPlanningLayout(payload.settings.planning)};
+        return {...raw,appId:'kairos',app:'Kairos',formatVersion:2,schemaVersion:2,platform:'android_webview',encrypted:false,payload,checksum:computeBackupChecksum(payload)} as BackupEnvelopeV2;
+      },
       validateBackupJson: async (rawJson: string): Promise<BackupValidationResult> => {
         const preview = validateAndPreviewBackupPayload(rawJson, { verifyChecksum: true });
         return {
@@ -298,6 +316,10 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
           throw new Error(
             validation.errors.join(' | ') || 'فایل پشتیبان نامعتبر است و عملیات بازیابی لغو شد.'
           );
+        }
+        const importedPlanning=validation.envelope.payload.planning??validation.envelope.payload.settings?.planning;if(importedPlanning)splitPlanningRecords(importedPlanning);
+        if (strategy === 'merge' && ((validation.envelope.payload.planning&&hasPlanningContent(validation.envelope.payload.planning)) || (validation.envelope.payload.settings?.planning&&hasPlanningContent(validation.envelope.payload.settings.planning)) || hasPlanningContent(await this.planning.getPlanning()))) {
+          throw new Error('برای پشتیبان دارای برنامه‌ریزی، بازیابی کامل با جایگزینی را انتخاب کن؛ ادغام این اطلاعات پشتیبانی نمی‌شود.');
         }
         return this.transport.invoke<
           { envelope: BackupEnvelopeV2; strategy: 'replace' | 'merge' },

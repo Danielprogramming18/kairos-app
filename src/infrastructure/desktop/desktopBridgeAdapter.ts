@@ -11,6 +11,7 @@ import {
   BridgeResponseEnvelope,
   createBridgeRequest,
   DEFAULT_BRIDGE_TIMEOUT_MS,
+  MAX_BRIDGE_PAYLOAD_BYTES,
 } from '../bridge/protocol';
 import {
   ActiveTimerState,
@@ -44,6 +45,9 @@ import {
   validateAndPreviewBackupPayload,
   validateBackupEnvelopeObject,
 } from '../../utils/backupCrypto';
+import { createPlanningBridgeRepository } from '../bridge/planningBridgeRepository';
+import { hasPlanningContent, upgradeLegacyPlanningLayout, splitPlanningRecords } from '../planningRecords';
+import type { PlanningRepository } from '../../application/repositories';
 
 export interface WindowsDesktopBridgeHost {
   invoke(rawRequestJson: string): Promise<string>;
@@ -113,6 +117,7 @@ export class WindowsDesktopBridgeTransport {
     );
 
     const rawResponse = await Promise.race([responsePromise, timeoutPromise]);
+    if(new TextEncoder().encode(rawResponse).byteLength>MAX_BRIDGE_PAYLOAD_BYTES)throw new BridgeProtocolError('PAYLOAD_TOO_LARGE','پاسخ میزبان از محدودیت ۵ میبی‌بایت بیشتر است؛ عملیات تأیید نشد.');
     let parsed: BridgeResponseEnvelope<TResult>;
     try {
       parsed = JSON.parse(rawResponse);
@@ -148,12 +153,14 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
   public readonly notes: NoteRepository;
   public readonly focus: FocusRepository;
   public readonly settings: SettingsRepository;
+  public readonly planning: PlanningRepository;
   public readonly backup: BackupService;
   public readonly notifications: NotificationService;
   public readonly lifecycle: AppLifecycleService;
 
   constructor(transport = new WindowsDesktopBridgeTransport()) {
     this.transport = transport;
+    this.planning = createPlanningBridgeRepository((operation,payload)=>this.transport.invoke(operation,payload));
 
     this.tasks = {
       listTasks: (filter?: TaskFilter) =>
@@ -264,15 +271,17 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
           {}
         );
         if (env && env.payload) {
+          const payload={...env.payload,planning:env.payload.planning?upgradeLegacyPlanningLayout(env.payload.planning):undefined};
           return {
             ...env,
+            payload,
             appId: 'kairos',
             app: 'Kairos',
             formatVersion: 2,
             schemaVersion: 2,
             platform: 'windows_desktop',
             encrypted: false,
-            checksum: computeBackupChecksum(env.payload),
+            checksum: computeBackupChecksum(payload),
           };
         }
         return env;
@@ -294,6 +303,9 @@ export class WindowsDesktopPlatformAdapter implements PlatformContainer {
             validation.errors.join(' | ') || 'فایل پشتیبان نامعتبر است و عملیات بازیابی لغو شد.'
           );
         }
+        const importedPlanning=validation.envelope.payload.planning??validation.envelope.payload.settings?.planning;if(importedPlanning)splitPlanningRecords(importedPlanning);
+        if (strategy === 'merge' && ((validation.envelope.payload.planning&&hasPlanningContent(validation.envelope.payload.planning)) || (validation.envelope.payload.settings?.planning&&hasPlanningContent(validation.envelope.payload.settings.planning)) || hasPlanningContent(await this.planning.getPlanning())))
+          throw new Error('برای پشتیبان دارای برنامه‌ریزی، بازیابی کامل با جایگزینی را انتخاب کن؛ ادغام این اطلاعات پشتیبانی نمی‌شود.');
         return this.transport.invoke<
           { envelope: BackupEnvelopeV2; strategy: 'replace' | 'merge' },
           { restoredCounts: Record<string, number>; snapshotKey?: string }
