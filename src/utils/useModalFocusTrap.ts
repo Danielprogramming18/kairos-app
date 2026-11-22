@@ -6,6 +6,7 @@ const FOCUSABLE_SELECTOR = [
   'textarea:not([disabled])',
   'input:not([disabled]):not([type="hidden"])',
   'select:not([disabled])',
+  'summary',
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
@@ -31,9 +32,19 @@ export function computeNextFocusIndex(
 export function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
   if (!container) return [];
   const nodes = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-  return nodes.filter(
-    (el) => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true'
-  );
+  return nodes.filter((el) => {
+    if (el.matches(':disabled') || el.closest('[aria-hidden="true"], [inert]')) return false;
+    // Chromium can return a layout rectangle inside a closed details element.
+    // Only its first direct summary remains interactive, including in nested groups.
+    let closed = el.closest('details:not([open])');
+    while (closed) {
+      if (!closed.querySelector(':scope > summary')?.contains(el)) return false;
+      closed = closed.parentElement?.closest('details:not([open])') ?? null;
+    }
+    if (el.getClientRects().length === 0) return false;
+    if (typeof window !== 'undefined' && window.getComputedStyle(el).visibility === 'hidden') return false;
+    return true;
+  });
 }
 
 /**

@@ -622,7 +622,7 @@ export const UsefulInfoView: React.FC<UsefulInfoViewProps> = ({
                                 <a
                                   key={idx}
                                   href={part}
-                                  target="_blank"
+                                  target={window.KairosAndroidBridge || /Android/i.test(navigator.userAgent) ? '_self' : '_blank'}
                                   rel="noopener noreferrer"
                                   dir="ltr"
                                   className="text-indigo-600 dark:text-indigo-400 underline break-all font-mono"

@@ -22,6 +22,9 @@ import { useGlobalPomodoro } from './app/useGlobalPomodoro';
 import { formatTimerClockLatin, isFloatingTimerSessionActive } from './utils/pomodoroEngine';
 import { HabitModal } from './components/HabitModal';
 import { TaskModal } from './components/TaskModal';
+import { ProjectsView, EventsView, TrackingView, CapacityView } from './components/PlanningViews';
+import { CustomizeView, MoreFeaturesView } from './components/MoreFeaturesView';
+import { ScheduleBoard } from './components/ScheduleBoard';
 import { DeleteModal } from './components/DeleteModal';
 import {
   Habit,
@@ -69,6 +72,8 @@ import {
 } from './utils/themeManager';
 
 const HASH_TO_TAB: Record<string, NavTabId> = {
+  '#/more': 'more',
+  '#/projects': 'projects', '#/events': 'events', '#/tracking': 'tracking', '#/capacity': 'capacity', '#/customize': 'customize',
   '#/today': 'dashboard',
   '#/dashboard': 'dashboard',
   '#/tasks': 'workspace',
@@ -90,6 +95,8 @@ const HASH_TO_TAB: Record<string, NavTabId> = {
 };
 
 const TAB_TO_HASH: Record<NavTabId, string> = {
+  more: '#/more',
+  projects: '#/projects', events: '#/events', tracking: '#/tracking', capacity: '#/capacity', customize: '#/customize',
   dashboard: '#/today',
   workspace: '#/tasks',
   calendar: '#/calendar',
@@ -342,6 +349,7 @@ export default function App() {
     ].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
 
     setTasks(activeTasks);
+    window.dispatchEvent(new Event('kairos-planning-refresh'));
     setHabits(activeHabits);
     setIdeas(activeIdeas);
     setUsefulInfos(activeUsefulInfos);
@@ -911,6 +919,7 @@ export default function App() {
   };
 
   const handleSaveTask = async (taskData: {
+    planning?: Task['planning']; projectId?: string | null; dueAt?: string | null;
     id?: string;
     title: string;
     description?: string;
@@ -947,6 +956,7 @@ export default function App() {
       return res !== null;
     } else {
       return handleAddTask({
+        planning: taskData.planning, projectId: taskData.projectId, dueAt: taskData.dueAt,
         title: trimmedTitle,
         description: taskData.description,
         priority: taskData.priority,
@@ -1449,6 +1459,8 @@ export default function App() {
     deletedTrashItems.length === 0;
 
   const PAGE_TITLES: Record<NavTabId, string> = {
+    more: 'بیشتر',
+    projects: 'پروژه‌ها', events: 'رویدادها', tracking: 'پیگیری‌ها', capacity: 'قبل از قول‌دادن', customize: 'همهٔ ابزارها و چیدمان',
     dashboard: 'امروز',
     workspace: 'کارها',
     calendar: 'تقویم',
@@ -1637,6 +1649,16 @@ export default function App() {
           className="flex-1 min-w-0 w-full"
           data-storage-status={storageStatus}
         >
+          {activeTab === 'projects' && <ProjectsView tasks={tasks} onEdit={handleOpenTaskModal} onAdd={() => handleOpenTaskModal()} onToggle={handleToggleTask} onUpdateTask={async task=>{const saved=await executeStorageMutation('انتقال کار بین مرحله‌ها',()=>container.tasks.upsertTask(taskToDomainEntity(task),{expectedRevision:task.revision??taskRevisionsRef.current.get(task.id)}));return saved!==null;}} onSaveTasks={async newTasks => {
+            const saved = await executeStorageMutation('ساخت کار از قالب', () => container.tasks.upsertTasksBatch(newTasks.map(taskToDomainEntity)));
+            return saved !== null;
+          }} />}
+          {activeTab === 'events' && <EventsView />}
+          {activeTab === 'tracking' && <TrackingView />}
+          {activeTab === 'capacity' && <CapacityView timerMinutes={pomodoroController.timerState.selectedPresetMinutes} tasks={tasks} sessions={focusSessions} onReload={reloadAllFromRepository} />}
+          {activeTab === 'customize' && <CustomizeView onNavigate={setActiveTab} />}
+          {activeTab === 'more' && <MoreFeaturesView onNavigate={(tab,section)=>{setActiveTab(tab,section?TAB_TO_HASH[tab]+'?section='+encodeURIComponent(section):undefined);if(section==='templates')window.setTimeout(()=>document.getElementById('project-templates')?.scrollIntoView({block:'start'}),50);}} />}
+          {activeTab === 'dashboard' && <ScheduleBoard tasks={tasks} date="today" title="برنامهٔ تأییدشدهٔ امروز" onEdit={handleOpenTaskModal} />}
           {activeTab === 'dashboard' && (
             <DashboardView
               tasks={tasks}

@@ -1,4 +1,5 @@
 pub mod db;
+pub mod planning;
 
 use db::KairosSqliteDatabase;
 use serde::{Deserialize, Serialize};
@@ -92,14 +93,27 @@ pub fn execute_bridge_request(db: &KairosSqliteDatabase, raw_request: &str) -> S
             }
 
             match db.dispatch(&req.operation, &req.payload) {
-                Ok(data) => serde_json::to_string(&BridgeResponseEnvelope {
-                    request_id: req.request_id,
-                    version: BRIDGE_CONTRACT_VERSION.to_string(),
-                    ok: true,
-                    data: Some(data),
-                    error: None,
-                })
-                .unwrap_or_default(),
+                Ok(data) => {
+                    let mut response = BridgeResponseEnvelope {
+                        request_id: req.request_id,
+                        version: BRIDGE_CONTRACT_VERSION.to_string(),
+                        ok: true,
+                        data: Some(data),
+                        error: None,
+                    };
+                    let encoded = serde_json::to_string(&response).unwrap_or_default();
+                    if encoded.len() <= MAX_BRIDGE_PAYLOAD_BYTES {
+                        encoded
+                    } else {
+                        response.ok = false;
+                        response.data = None;
+                        response.error = Some(BridgeErrorObject {
+                            code: "PAYLOAD_TOO_LARGE".into(),
+                            message: "اندازهٔ پاسخ پل بومی بیشتر از ۵ میبی‌بایت است.".into(),
+                        });
+                        serde_json::to_string(&response).unwrap_or_default()
+                    }
+                }
                 Err(err) => serde_json::to_string(&BridgeResponseEnvelope {
                     request_id: req.request_id,
                     version: BRIDGE_CONTRACT_VERSION.to_string(),
@@ -134,7 +148,7 @@ fn kairos_bridge_invoke(state: tauri::State<'_, AppState>, raw_request: String) 
 
 const BRIDGE_INIT_SCRIPT: &str = r#"
 (function() {
-  if (!window.__KAIROS_DESKTOP_BRIDGE__) {
+  if (window === window.top && !window.__KAIROS_DESKTOP_BRIDGE__) {
     window.__KAIROS_DESKTOP_BRIDGE__ = {
       invoke: async function(rawRequestJson) {
         if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function') {
@@ -159,7 +173,6 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let app_local_data_dir = app.path().app_local_data_dir().map_err(|e| {
                 format!(
@@ -174,14 +187,26 @@ pub fn run() {
 
             app.manage(AppState { db });
 
-            if let Some(main_window) = app.get_webview_window("main") {
-                let _ = main_window.eval(BRIDGE_INIT_SCRIPT);
-            }
-
+            let config = &app.config().app.windows[0];
+            tauri::WebviewWindowBuilder::from_config(app, config)?
+                .on_navigation(|url| {
+                    let local = url.scheme() == "tauri" && url.host_str() == Some("localhost")
+                        || matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost");
+                    let dev = cfg!(debug_assertions) && url.scheme() == "http"
+                        && url.host_str() == Some("localhost") && url.port() == Some(3000);
+                    url.username().is_empty() && url.password().is_none()
+                        && (local && url.port().is_none() || dev)
+                })
+                .on_new_window(|url, _| {
+                    if matches!(url.scheme(), "http" | "https" | "mailto")
+                        && url.username().is_empty() && url.password().is_none() {
+                        let _ = open::that_detached(url.as_str());
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .initialization_script(BRIDGE_INIT_SCRIPT)
+                .build()?;
             Ok(())
-        })
-        .on_page_load(|webview, _payload| {
-            let _ = webview.eval(BRIDGE_INIT_SCRIPT);
         })
         .invoke_handler(tauri::generate_handler![kairos_bridge_invoke])
         .run(tauri::generate_context!())

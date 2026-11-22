@@ -1,53 +1,69 @@
-name: Deploy Kairos to GitHub Pages
-
+name: Publish Kairos to GitHub Pages
 on:
   push:
-    branches: ["main"]
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
 jobs:
-  build-and-deploy:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - name: Test commitment scenarios and mobile backups in Chrome
+        env:
+          KAIROS_QA_URL: http://127.0.0.1:4185/kairos-app/
+          KAIROS_CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4185 --strictPort --base /kairos-app/ &
+          trap 'kill $!' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 --fail --silent "$KAIROS_QA_URL" > /dev/null
+          node scripts/qa-commitments.cjs
+          node scripts/qa-schedule-duration.cjs
+      - name: Upload tested web build
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: dist
+  native-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci
+      - run: npm run build
+      - run: rustup toolchain install 1.100.0 --profile minimal
+      - run: cargo +1.100.0 test --locked --manifest-path src-tauri/Cargo.toml --lib
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+      url: ${{ steps.publish.outputs.page_url }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build static site for GitHub Pages
-        run: npm run build
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: "./dist"
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish tested commit
+        id: publish
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

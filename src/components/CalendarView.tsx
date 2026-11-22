@@ -14,6 +14,9 @@ import {
   Play,
 } from 'lucide-react';
 import { Task, Habit, NavTabId } from '../types';
+import {usePlanning} from '../app/PlanningContext';
+import {scheduleCountByDate} from '../utils/scheduleView';
+import {ScheduleBoard} from './ScheduleBoard';
 import {
   getFullPersianYearCalendar,
   getPersianParts,
@@ -44,6 +47,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onEnterDayInTab,
   onStartFocusOnTask,
 }) => {
+  const {state:planning}=usePlanning();
   const today = useMemo(() => new Date(), []);
   const currentPersian = useMemo(() => getPersianParts(today), [today]);
 
@@ -56,6 +60,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     () => getFullPersianYearCalendar(selectedJYear, today),
     [selectedJYear, today]
   );
+  const plannedCounts=useMemo(()=>scheduleCountByDate(planning.allocations,tasks,yearMonths.flatMap(m=>m.days.map(d=>d.key))),[planning.allocations,tasks,yearMonths]);
 
   // Map tasks by targetDate
   const tasksByDate = useMemo(() => {
@@ -346,6 +351,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
                       {/* Task & Habit Indicators */}
                       <div className="flex flex-wrap items-center gap-1 mt-auto tabular-nums">
+                        {!!plannedCounts[day.key]&&<span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-300">{toPersianNum(plannedCounts[day.key])} بازه</span>}
                         {pendingCount > 0 && (
                           <span
                             className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
@@ -419,7 +425,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       <div key={idx} className="h-7" />
                     ))}
                     {month.days.map((day) => {
-                      const hasTasks = (tasksByDate[day.key]?.length || 0) > 0;
+                      const hasTasks = (tasksByDate[day.key]?.length || 0) > 0 || !!plannedCounts[day.key];
                       const isSelected = day.key === selectedDateKey;
                       return (
                         <button
@@ -491,6 +497,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </div>
           </div>
 
+          <ScheduleBoard tasks={tasks} date={selectedDateKey} title="برنامهٔ تأییدشدهٔ روز انتخابی"/>
           {/* Tasks Scheduled for Selected Day */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">

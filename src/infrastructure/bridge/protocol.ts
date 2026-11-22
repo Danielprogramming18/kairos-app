@@ -40,6 +40,9 @@ export type BridgeOperation =
   | 'focus.saveActiveTimer'
   | 'settings.get'
   | 'settings.save'
+  | 'planning.get'
+  | 'planning.save'
+  | 'planning.createTaskAndSave'
   | 'backup.export'
   | 'backup.restore'
   | 'backup.hasPreRestoreSnapshot'
@@ -77,6 +80,9 @@ export const ALLOWED_BRIDGE_OPERATIONS = new Set<BridgeOperation>([
   'focus.saveActiveTimer',
   'settings.get',
   'settings.save',
+  'planning.get',
+  'planning.save',
+  'planning.createTaskAndSave',
   'backup.export',
   'backup.restore',
   'backup.hasPreRestoreSnapshot',
@@ -95,7 +101,8 @@ export type BridgeErrorCode =
   | 'UNKNOWN_OPERATION'
   | 'VALIDATION_ERROR'
   | 'TIMEOUT'
-  | 'STORAGE_ERROR';
+  | 'STORAGE_ERROR'
+  | 'CONFLICT_STALE_REVISION';
 
 export interface BridgeRequestEnvelope<TPayload = unknown> {
   requestId: string;
@@ -144,7 +151,7 @@ export function validateBridgeRequest(
   }
 
   const serialized = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {});
-  if (serialized.length > MAX_BRIDGE_PAYLOAD_BYTES) {
+  if (new TextEncoder().encode(serialized).byteLength > MAX_BRIDGE_PAYLOAD_BYTES) {
     throw new BridgeProtocolError(
       'PAYLOAD_TOO_LARGE',
       `حجم پیام پل ارتباطی بیش از حد مجاز (${MAX_BRIDGE_PAYLOAD_BYTES} بایت) است.`
