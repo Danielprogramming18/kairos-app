@@ -9,7 +9,8 @@
     if (!['light', 'dark'].includes(theme)) return;
     document.getElementById('kairos-intro-root').dataset.theme = theme;
   };
-  setTheme(new URLSearchParams(location.search).get('theme'));
+  // A fragment preserves the precached HTML URL when the app opens offline.
+  setTheme(new URLSearchParams(location.hash.slice(1)).get('theme') ?? new URLSearchParams(location.search).get('theme'));
   window.addEventListener('message', event => {
     if (event.source === window.parent && event.data?.channel === channel) setTheme(event.data.theme);
   });

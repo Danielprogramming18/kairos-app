@@ -5,7 +5,7 @@ const SEEN_KEY = 'kairos_onboarding_seen_version';
 const VERSION = '1';
 const ids = ['welcome', 'planning', 'focus', 'habits', 'offline'];
 function alreadySeen() {
-  if (import.meta.env.DEV && new URLSearchParams(location.search).get('intro') === '1') return false;
+  if (new URLSearchParams(location.search).get('intro') === '1') return false;
   try { return localStorage.getItem(SEEN_KEY) === VERSION; } catch { return false; }
 }
 
@@ -43,7 +43,7 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   }, [done]);
   if (done) return children;
   return <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: initialTheme.current === 'dark' ? '#10162c' : '#f6f7fc' }}>
-    <iframe ref={iframe} title="معرفی کایروس" src={`${import.meta.env.BASE_URL}kairos-intro/kairos-intro.html?theme=${initialTheme.current}`}
+    <iframe ref={iframe} title="معرفی کایروس" src={`${import.meta.env.BASE_URL}kairos-intro/kairos-intro.html#theme=${initialTheme.current}`}
       style={{ display: 'block', width: '100%', height: '100%', border: 0 }} onError={() => setFailed(true)} />
     {failed && <div role="alert" dir="rtl" style={{ position: 'absolute', bottom: 16, left: 16, right: 16, padding: 16, background: '#fff', color: '#242849', borderRadius: 12 }}>
       معرفی بارگذاری نشد. <button onClick={() => setDone(true)}>ورود به برنامه</button>

@@ -78,6 +78,8 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          // The introduction is a separate HTML document, even inside the app iframe.
+          navigateFallbackDenylist: [/\/kairos-intro\//],
         },
         devOptions: {
           enabled: false,
