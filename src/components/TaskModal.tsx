@@ -6,15 +6,18 @@ import { getTodayKey } from '../utils/persianDate';
 import { parseNaturalTaskInput } from '../utils/nlpTaskParser';
 import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 import { restoreTaskEditorDraft, taskEditorDraft, validateTaskEditor, type TaskEditorDraft, type TaskEditorSave } from '../utils/taskEditor';
+import {taskReminderTiming} from '../domain/reminders';
+import {ReminderFields} from './ReminderFields';
 import './taskEditor.css';
 
 interface TaskModalProps {
   isOpen: boolean; taskToEdit: Task | null; defaultDateKey?: string; sessions?: FocusSession[];
+  reminderNotice?:string; canRequestReminder?:boolean; requestReminder?:()=>void;
   onClose: () => void; onSave: (taskData: TaskEditorSave) => Promise<boolean> | boolean | void;
 }
 const DRAFT_KEY = 'kairos_unsaved_task_draft_v1';
 
-export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaultDateKey, sessions = [], onClose, onSave }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaultDateKey, sessions = [], onClose, onSave, reminderNotice, canRequestReminder, requestReminder }) => {
   const today = getTodayKey();
   const [draft, setDraft] = useState<TaskEditorDraft>(() => taskEditorDraft(null, defaultDateKey || today));
   const [loaded, setLoaded] = useState(false);
@@ -99,6 +102,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaul
           <label className="kte-field" htmlFor="task-editor-date"><span>تاریخ انجام (اختیاری؛ پیش‌فرض امروز)</span><input id="task-editor-date" type="date" value={draft.targetDate} onChange={event => field('targetDate', event.target.value)} aria-invalid={Boolean(errors.date)} aria-describedby={errors.date ? 'task-error-date' : undefined} /></label>{errorText('date')}
           <label className="kte-check"><input type="checkbox" checked={priorityVisible} onChange={event => setPriorityVisible(event.target.checked)} /> اولویت مشخص کنم</label>
           {priorityVisible && <><label className="kte-field" htmlFor="task-editor-priority"><span>شمارهٔ اولویت</span><input id="task-editor-priority" inputMode="numeric" value={draft.priority} onChange={event => field('priority', event.target.value)} aria-invalid={Boolean(errors.priority)} aria-describedby={errors.priority ? 'task-error-priority' : undefined} /></label>{errorText('priority')}</>}
+          <ReminderFields task value={draft.planning.reminder} timing={taskReminderTiming(draft.targetDate,draft.dueAt)}
+            onChange={reminder=>setDraft(current=>({...current,planning:{...current.planning,reminder},
+              reminderTime:reminder || current.planning.reminder ? '' : current.reminderTime}))}
+            notice={reminderNotice} canRequest={canRequestReminder} request={requestReminder}/>
+          {errorText('nativeReminder')}
           <details open={expanded.project} onToggle={event => { const open = event.currentTarget.open; setExpanded(current => ({ ...current, project: open })); }}><summary>پروژه و مرحله{draft.projectId ? ' · انتخاب شده' : ''}</summary><TaskPlanningFields {...planningProps} section="project" /></details>
           <details open={expanded.time} onToggle={event => { const open = event.currentTarget.open; setExpanded(current => ({ ...current, time: open })); }}><summary>زمان‌بندی و تخمین</summary><label className="kte-field" htmlFor="task-editor-duration"><span>مدت کار / تایمر (دقیقه)</span><input id="task-editor-duration" inputMode="numeric" value={draft.duration} onChange={event => { const value = event.target.value; setDraft(current => ({ ...current, duration: value, durationExplicit: true })); }} aria-invalid={Boolean(errors.duration)} aria-describedby="task-duration-hint" /></label><p id="task-duration-hint" className="kte-hint">برای ثبت سریع، تنظیم این بخش لازم نیست. مقدار اولیهٔ تایمر ۴۵ دقیقه است.</p>{errorText('duration')}<TaskPlanningFields {...planningProps} section="time" />{errorText('due')}{errorText('planning')}</details>
           <details open={expanded.advanced} onToggle={event => { const open = event.currentTarget.open; setExpanded(current => ({ ...current, advanced: open })); }}><summary>جزئیات پیشرفته</summary><label className="kte-field" htmlFor="task-editor-description"><span>توضیحات و جزئیات (اختیاری)</span><textarea id="task-editor-description" rows={3} value={draft.description} onChange={event => field('description', event.target.value)} /></label><label className="kte-field" htmlFor="task-editor-reminder"><span>ساعت یادآور داخل برنامه</span><input id="task-editor-reminder" type="time" value={draft.reminderTime} onChange={event => field('reminderTime', event.target.value)} aria-invalid={Boolean(errors.reminder)} /></label>{errorText('reminder')}<TaskPlanningFields {...planningProps} section="advanced" /></details>

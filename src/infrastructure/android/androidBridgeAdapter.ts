@@ -35,6 +35,7 @@ import {
   HabitRepository,
   NoteRepository,
   NotificationService,
+  ReminderHost,
   PlatformContainer,
   SettingsRepository,
   TaskFilter,
@@ -184,6 +185,7 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
   public readonly planning: PlanningRepository;
   public readonly backup: BackupService;
   public readonly notifications: NotificationService;
+  public readonly reminders: ReminderHost;
   public readonly lifecycle: AppLifecycleService;
 
   constructor(transport = new AndroidSketchwareBridgeTransport()) {
@@ -357,6 +359,16 @@ export class AndroidBridgePlatformAdapter implements PlatformContainer {
         this.transport.invoke<{ taskId: EntityId }, void>('notifications.cancelReminder', {
           taskId,
         }),
+    };
+
+    this.reminders = {
+      permission: this.notifications.getPermissionStatus,
+      requestPermission: this.notifications.requestPermission,
+      list: () => this.transport.invoke('notifications.listReminders', {}),
+      schedule: reminder => this.transport.invoke('notifications.scheduleReminder', {reminder}),
+      cancel: id => this.transport.invoke('notifications.cancelReminder', {id}),
+      openTarget: () => this.transport.invoke('notifications.getOpenTarget', {}),
+      acknowledge: token => this.transport.invoke('notifications.ackOpenTarget', {token}),
     };
 
     this.lifecycle = {

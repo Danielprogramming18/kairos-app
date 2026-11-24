@@ -22,6 +22,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebView;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Arrays;
@@ -78,11 +79,41 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
         "notifications.getPermission",
         "notifications.requestPermission",
         "notifications.scheduleReminder",
-        "notifications.cancelReminder"
+        "notifications.cancelReminder",
+        "notifications.listReminders",
+        "notifications.getOpenTarget",
+        "notifications.ackOpenTarget"
     ));
 
+    /** Sketchware supplies the scheduler and durable notification-open inbox. */
+    public interface ReminderBackend {
+        String permission();
+        String requestPermission() throws ReminderFailure;
+        JSONArray scheduledIds() throws Exception;
+        void schedule(JSONObject reminder) throws Exception;
+        void cancel(String id) throws Exception;
+        JSONObject openTarget() throws Exception;
+        void acknowledge(String token) throws Exception;
+    }
+
+    public static final class ReminderFailure extends Exception {
+        private static final long serialVersionUID = 1L;
+        private final String code;
+        public ReminderFailure(String code) {
+            super(code);
+            this.code = code;
+        }
+    }
+
+    private final ReminderBackend reminders;
+
     public KairosAndroidBridge(Context context) {
+        this(context, null);
+    }
+
+    private KairosAndroidBridge(Context context, ReminderBackend reminders) {
         super(context, DB_NAME, null, DB_VERSION);
+        this.reminders = reminders;
     }
 
     /**
@@ -160,6 +191,29 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
     }
 
     public static Runnable start(Context context, WebView view, String folder, boolean nativeStorage, WebChromeClient picker) {
+        return start(context, view, folder, nativeStorage, picker, null);
+    }
+
+    public static void notifyReminderOpen(WebView view) {
+        signalReminder(view, "kairos-reminder-open");
+    }
+
+    public static void notifyReminderPermissionChanged(WebView view) {
+        signalReminder(view, "kairos-reminder-permission");
+    }
+
+    private static void signalReminder(WebView view, String eventName) {
+        if (view == null) return;
+        view.post(() -> {
+            String current = view.getUrl();
+            if (current != null && appOrigin(Uri.parse(current))) {
+                view.evaluateJavascript("window.dispatchEvent(new Event(" + JSONObject.quote(eventName) + "))", null);
+            }
+        });
+    }
+
+    public static Runnable start(Context context, WebView view, String folder, boolean nativeStorage,
+                                 WebChromeClient picker, ReminderBackend reminders) {
         if (!"www".equals(folder) && !"kairos".equals(folder))
             throw new IllegalArgumentException("Expected the original packaged asset directory");
         if (Build.VERSION.SDK_INT < 24 || nativeStorage &&
@@ -178,7 +232,7 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(app)).build();
         final java.util.concurrent.ExecutorService database =
             java.util.concurrent.Executors.newSingleThreadExecutor();
-        final KairosAndroidBridge bridge = nativeStorage ? new KairosAndroidBridge(app) : null;
+        final KairosAndroidBridge bridge = nativeStorage ? new KairosAndroidBridge(app, reminders) : null;
         final java.util.concurrent.atomic.AtomicLong pendingBytes = new java.util.concurrent.atomic.AtomicLong();
         if (bridge != null) {
             WebViewCompat.addWebMessageListener(view, "KairosAndroidBridge", Collections.singleton(ORIGIN),
@@ -628,17 +682,66 @@ public class KairosAndroidBridge extends SQLiteOpenHelper {
                 }
             }
 
-            // Notifications
             case "notifications.getPermission":
             case "notifications.requestPermission":
-                return "granted";
             case "notifications.scheduleReminder":
             case "notifications.cancelReminder":
-                return JSONObject.NULL;
+            case "notifications.listReminders":
+            case "notifications.getOpenTarget":
+            case "notifications.ackOpenTarget":
+                return handleReminder(op, payload);
 
             default:
                 throw new BridgeExecutionException("UNKNOWN_OPERATION", "Unsupported BridgeOperation: " + op);
         }
+    }
+
+    private Object handleReminder(String op, JSONObject payload) throws Exception {
+        if (reminders == null) {
+            if ("notifications.getPermission".equals(op) || "notifications.requestPermission".equals(op)) return "unsupported";
+            throw new BridgeExecutionException("REMINDER_UNAVAILABLE", "Reminder scheduler is not connected");
+        }
+        try {
+            switch (op) {
+                case "notifications.getPermission": return reminders.permission();
+                case "notifications.requestPermission": return reminders.requestPermission();
+                case "notifications.listReminders": return new JSONObject().put("ids", reminders.scheduledIds());
+                case "notifications.scheduleReminder": {
+                    JSONObject reminder = payload.getJSONObject("reminder");
+                    String id = validateReminderId(reminder.getString("id"));
+                    long at = reminder.getLong("triggerAtMs");
+                    if (at <= System.currentTimeMillis())
+                        throw new BridgeExecutionException("VALIDATION_ERROR", "Reminder must be in the future");
+                    if (!"granted".equals(reminders.permission()))
+                        throw new BridgeExecutionException("NOTIFICATION_PERMISSION_DENIED", "Notification permission is off");
+                    reminders.schedule(reminder);
+                    return new JSONObject().put("status", "scheduled").put("id", id);
+                }
+                case "notifications.cancelReminder": {
+                    String id = validateReminderId(payload.getString("id"));
+                    reminders.cancel(id);
+                    return new JSONObject().put("status", "cancelled").put("id", id);
+                }
+                case "notifications.getOpenTarget": {
+                    JSONObject pending = reminders.openTarget();
+                    return pending == null ? JSONObject.NULL : pending;
+                }
+                case "notifications.ackOpenTarget":
+                    reminders.acknowledge(payload.getString("token"));
+                    return JSONObject.NULL;
+                default: throw new BridgeExecutionException("UNKNOWN_OPERATION", "Unsupported reminder operation");
+            }
+        } catch (ReminderFailure error) {
+            throw new BridgeExecutionException(error.code, "Android reminder operation failed");
+        } catch (JSONException error) {
+            throw new BridgeExecutionException("VALIDATION_ERROR", "Invalid reminder payload");
+        }
+    }
+
+    private static String validateReminderId(String id) throws BridgeExecutionException {
+        if (id.length() > 240 || !id.matches("kairos:(task|event):[^\\p{Cntrl}]+"))
+            throw new BridgeExecutionException("VALIDATION_ERROR", "Invalid reminder ID");
+        return id;
     }
 
     private static final int PLANNING_RECORD_BYTES=256*1024;

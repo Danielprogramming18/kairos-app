@@ -50,7 +50,10 @@ export type BridgeOperation =
   | 'notifications.getPermission'
   | 'notifications.requestPermission'
   | 'notifications.scheduleReminder'
-  | 'notifications.cancelReminder';
+  | 'notifications.cancelReminder'
+  | 'notifications.listReminders'
+  | 'notifications.getOpenTarget'
+  | 'notifications.ackOpenTarget';
 
 export const ALLOWED_BRIDGE_OPERATIONS = new Set<BridgeOperation>([
   'bridge.handshake',
@@ -91,6 +94,9 @@ export const ALLOWED_BRIDGE_OPERATIONS = new Set<BridgeOperation>([
   'notifications.requestPermission',
   'notifications.scheduleReminder',
   'notifications.cancelReminder',
+  'notifications.listReminders',
+  'notifications.getOpenTarget',
+  'notifications.ackOpenTarget',
 ]);
 
 export type BridgeErrorCode =
@@ -100,6 +106,8 @@ export type BridgeErrorCode =
   | 'PAYLOAD_TOO_LARGE'
   | 'UNKNOWN_OPERATION'
   | 'VALIDATION_ERROR'
+  | 'NOTIFICATION_PERMISSION_DENIED'
+  | 'REMINDER_UNAVAILABLE'
   | 'TIMEOUT'
   | 'STORAGE_ERROR'
   | 'CONFLICT_STALE_REVISION';

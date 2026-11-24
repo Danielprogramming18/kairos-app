@@ -1,3 +1,4 @@
+import type {NativeReminder, ReminderTarget} from '../domain/reminders';
 /**
  * Application Layer — Repository & Platform Service Contracts
  * All UI and Use-Case code talks exclusively to these interfaces.
@@ -102,6 +103,16 @@ export interface NotificationService {
   cancelTaskReminder(taskId: EntityId): Promise<void>;
 }
 
+export interface ReminderHost {
+  permission(): Promise<'granted' | 'denied' | 'default' | 'unsupported'>;
+  requestPermission(): Promise<'granted' | 'denied' | 'default' | 'unsupported'>;
+  list(): Promise<{ids: string[]}>;
+  schedule(reminder: NativeReminder): Promise<{status: 'scheduled'; id: string}>;
+  cancel(id: string): Promise<{status: 'cancelled'; id: string}>;
+  openTarget(): Promise<{token: string; target: ReminderTarget} | null>;
+  acknowledge(token: string): Promise<unknown>;
+}
+
 export interface AppLifecycleService {
   getPlatformKind(): 'web' | 'android_webview' | 'windows_desktop';
   getStorageHealth(): Promise<{
@@ -121,6 +132,7 @@ export interface PlatformContainer {
   planning: PlanningRepository;
   backup: BackupService;
   notifications: NotificationService;
+  reminders?: ReminderHost;
   lifecycle: AppLifecycleService;
   initialize(): Promise<MigrationReport | null>;
 }

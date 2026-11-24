@@ -1,9 +1,12 @@
-import React,{useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {usePlanning} from '../app/PlanningContext';
 import {createEntityId} from '../domain/models';
 import {localDate,Metric,parseNumber,PlanningEvent} from '../domain/planning';
 import {eventCountdown,metricSummary} from '../utils/planningEngine';
 import {Field,PlanningShell,useClock} from './PlanningShared';
+import {ReminderFields} from './ReminderFields';
+import {eventNames, reminderId, reminderProblem, resolveReminder, type EventKind, type RepeatFrequency} from '../domain/reminders';
+import type {useReminders} from '../app/useReminders';
 import './planning.css';
 export {Field,PlanningShell} from './PlanningShared';
 export {ProjectsView} from './ProjectsView';
@@ -13,43 +16,79 @@ const uid=()=>createEntityId('plan');
 const today=()=>localDate(new Date());
 const formatDate=(s:string)=>new Date(s+'T12:00:00').toLocaleDateString('fa-IR');
 const blankEvent=():PlanningEvent=>({id:uid(),title:'',date:today(),time:''});
-export function EventsView() {
-  const {
-    state,
-    change
-  } = usePlanning();
-  const [draft, setDraft] = useState(blankEvent);
-  const [remove, setRemove] = useState('');
+const repeatLabels: Record<RepeatFrequency,string> = {daily:'هر روز',weekly:'هر هفته',monthly:'هر ماه'};
+export function EventsView({openId,onOpenHandled,reminders}: {
+  openId?:string; onOpenHandled:()=>void; reminders:ReturnType<typeof useReminders>;
+}) {
+  const {state,change,ready} = usePlanning();
+  const [draft,setDraft] = useState(blankEvent);
+  const [remove,setRemove] = useState('');
+  const [error,setError] = useState('');
+  const form = useRef<HTMLFormElement>(null);
   const now = useClock();
-  return <PlanningShell title="رویدادها و امتحان‌ها"><p>شمارش معکوس داخل برنامه؛ تاریخ ورودی میلادی است و در فهرست شمسی نمایش داده می‌شود.</p><form className="kp-card" onSubmit={async e => {
-      e.preventDefault();
-      if (await change(s => {
-        s.events = s.events.filter(x => x.id !== draft.id);
-        s.events.push({
-          ...draft,
-          title: draft.title.trim()
-        });
-      })) setDraft(blankEvent());
-    }}><div className="kp-grid"><Field label="عنوان رویداد"><input required value={draft.title} onChange={e => setDraft({
-            ...draft,
-            title: e.target.value
-          })} /></Field><Field label="تاریخ"><input required type="date" value={draft.date} onChange={e => setDraft({
-            ...draft,
-            date: e.target.value
-          })} /></Field><Field label="ساعت اختیاری"><input type="time" value={draft.time ?? ''} onChange={e => setDraft({
-            ...draft,
-            time: e.target.value
-          })} /></Field><Field label="پروژهٔ مرتبط"><select value={draft.projectId ?? ''} onChange={e => setDraft({
-            ...draft,
-            projectId: e.target.value || undefined
-          })}><option value="">بدون پروژه</option>{state.projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></Field></div><div className="kp-actions"><button>ذخیرهٔ رویداد</button><button type="button" onClick={() => setDraft(blankEvent())}>فرم جدید</button></div></form>
-    {!state.events.length && <p>اولین امتحان یا قرار خودت را ثبت کن.</p>}{[...state.events].sort((a, b) => (a.date + (a.time ?? '')).localeCompare(b.date + (b.time ?? ''))).map(e => <article className="kp-card" key={e.id}><h3>{e.title}</h3><p>{formatDate(e.date)} {e.time} — <strong>{eventCountdown(e, now)}</strong></p><div className="kp-actions"><button onClick={() => setDraft({
-          ...e
-        })}>ویرایش</button><button onClick={() => setRemove(e.id)}>حذف</button>{remove === e.id && <><span>این رویداد حذف شود؟</span><button onClick={async () => {
-            if (await change(s => {
-              s.events = s.events.filter(x => x.id !== e.id);
-            })) setRemove('');
-          }}>تأیید حذف رویداد</button><button onClick={() => setRemove('')}>انصراف</button></>}</div></article>)}</PlanningShell>;
+  const update = (patch:Partial<PlanningEvent>) => {setDraft(current=>({...current,...patch}));setError('');};
+  const edit = (event:PlanningEvent) => {
+    setDraft({...event});setError('');
+    form.current?.scrollIntoView({block:'start'});form.current?.focus({preventScroll:true});
+  };
+  useEffect(()=>{
+    if (!ready || !openId) return;
+    const event=state.events.find(e=>e.id===openId);
+    if(event) edit(event);
+    onOpenHandled();
+  },[ready,openId,state.events,onOpenHandled]);
+  const save = async (e:React.FormEvent) => {
+    e.preventDefault();
+    const existing=state.events.find(event=>event.id===draft.id);
+    const inputs = (event?:PlanningEvent) => event && [event.date,event.time,event.repeat,event.reminder];
+    const problem=JSON.stringify(inputs(existing))!==JSON.stringify(inputs(draft))
+      && reminderProblem(draft.reminder,draft,Date.now());
+    if (problem) {setError(problem);return;}
+    if (await change(s=>{
+      const entry={...draft,title:draft.title.trim()};
+      const index=s.events.findIndex(event=>event.id===entry.id);
+      if (index===-1) s.events.push(entry);else s.events[index]=entry;
+    })) {setDraft(blankEvent());setError('');}
+  };
+  return <PlanningShell title="رویدادها و امتحان‌ها">
+    <p>تاریخ ورودی میلادی است و در فهرست شمسی نمایش داده می‌شود.</p>
+    <form ref={form} tabIndex={-1} className="kp-card" onSubmit={save}>
+      <div className="kp-grid">
+        <Field label="عنوان رویداد"><input required value={draft.title} onChange={e=>update({title:e.target.value})}/></Field>
+        <Field label="نوع رویداد"><select value={draft.kind??'event'} onChange={e=>update({kind:e.target.value as EventKind})}>
+          {Object.entries(eventNames).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></Field>
+        <Field label="تاریخ"><input required type="date" value={draft.date} onChange={e=>update({date:e.target.value})}/></Field>
+        <Field label="ساعت اختیاری"><input type="time" value={draft.time??''} onChange={e=>update({time:e.target.value})}/></Field>
+        <Field label="پروژهٔ مرتبط"><select value={draft.projectId??''} onChange={e=>update({projectId:e.target.value||undefined})}>
+          <option value="">بدون پروژه</option>{state.projects.map(p=><option key={p.id} value={p.id}>{p.title}</option>)}</select></Field>
+        <Field label="تکرار"><select value={draft.repeat??''} onChange={e=>{
+          const repeat=(e.target.value||undefined) as RepeatFrequency|undefined;
+          const rule=draft.reminder;
+          update({repeat,reminder:repeat && rule?.mode==='custom'?{mode:'day',days:0,time:rule.time}:rule});
+        }}><option value="">یک‌بار</option>{Object.entries(repeatLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></Field>
+      </div>
+      <ReminderFields value={draft.reminder} timing={draft} onChange={reminder=>update({reminder})}
+        notice={reminders.notice(reminderId('event',draft.id))} canRequest={reminders.status(reminderId('event',draft.id))==='permission'}
+        request={()=>void reminders.request()}/>
+      {error && <p role="alert">{error}</p>}
+      <div className="kp-actions"><button>ذخیرهٔ رویداد</button><button type="button" onClick={()=>{setDraft(blankEvent());setError('');}}>فرم جدید</button></div>
+    </form>
+    {!state.events.length && <p>اولین امتحان یا قرار خودت را ثبت کن.</p>}
+    {[...state.events].sort((a,b)=>(a.date+(a.time??'')).localeCompare(b.date+(b.time??''))).map(event=>{
+      const next=event.repeat && resolveReminder({mode:'before',minutes:0},{...event,time:event.time||'23:59'},+now);
+      const occurrence=next ? {...event,date:localDate(new Date(next))} : event;
+      return <article className="kp-card" key={event.id}><h3>{event.title}</h3>
+        <p>{eventNames[event.kind??'event']} · {event.repeat && repeatLabels[event.repeat]+' · '}{formatDate(occurrence.date)} {event.time} — <strong>{eventCountdown(occurrence,now)}</strong></p>
+        {event.reminder && <p>{reminders.notice(reminderId('event',event.id)) || 'تنظیم یادآوری ذخیره شده است.'}</p>}
+        <div className="kp-actions"><button onClick={()=>edit(event)}>ویرایش</button>
+          <button onClick={()=>setRemove(event.id)}>حذف</button>{remove===event.id && <><span>این رویداد حذف شود؟</span><button onClick={async()=>{
+            if (await change(s=>{s.events=s.events.filter(x=>x.id!==event.id);})) {
+              setRemove('');if(draft.id===event.id) setDraft(blankEvent());
+            }
+          }}>تأیید حذف رویداد</button><button onClick={()=>setRemove('')}>انصراف</button></>}</div>
+      </article>;
+    })}
+  </PlanningShell>;
 }
 const newMetric = (): Metric => ({
   id: uid(),

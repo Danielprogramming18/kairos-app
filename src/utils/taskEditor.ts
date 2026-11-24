@@ -1,6 +1,8 @@
 import type { Task } from '../types';
 import { parseNumber, validDate, validateTaskPlanning, type TaskPlanning } from '../domain/planning';
 
+import {reminderProblem, taskReminderTiming} from '../domain/reminders';
+
 export interface TaskEditorDraft {
   title: string; description: string; priority: string; duration: string; targetDate: string; reminderTime: string;
   planning: TaskPlanning; projectId: string; dueAt: string; dueAtOriginal?: string | null; dueEdited: boolean; durationExplicit: boolean;
@@ -58,6 +60,12 @@ export function validateTaskEditor(draft: TaskEditorDraft, today: string, existi
   }
   let planning: TaskPlanning = {};
   try { planning = validateTaskPlanning(draft.planning); } catch (error) { errors.planning = (error as Error).message; }
+  if (planning.reminder && !existing?.completed && existing?.status !== 'archived' &&
+      (JSON.stringify(planning.reminder) !== JSON.stringify(existing?.planning?.reminder) ||
+        dueAt !== (existing?.dueAt ?? null) || date !== existing?.targetDate)) {
+    const problem = reminderProblem(planning.reminder, taskReminderTiming(date, dueAt), Date.now());
+    if (problem) errors.nativeReminder = problem;
+  }
   if (Object.keys(errors).length) return { errors };
   if (draft.durationExplicit && planning.initialEstimate === undefined) planning.initialEstimate = duration!;
   return { errors, data: { id: existing?.id, title: draft.title.trim(), description: draft.description.trim() || undefined, priority: priority!, duration: duration!, targetDate: date, reminderTime: draft.reminderTime || undefined, projectId: draft.projectId || null, dueAt, planning, category: existing?.category || 'work' } };

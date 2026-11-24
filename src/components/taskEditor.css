@@ -5,7 +5,7 @@
 .kte-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 18px 20px; }
 .kte-scroll fieldset { min-width: 0; padding: 0; border: 0; }
 .kte-field { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; font-size: .85rem; font-weight: 650; min-width: 0; }
-.kte-field input,.kte-field textarea { min-width: 0; width: 100%; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-surface-2); color: inherit; padding: 11px 12px; font-weight: 400; }
+.kte-field select, .kte-field input,.kte-field textarea { min-width: 0; width: 100%; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-surface-2); color: inherit; padding: 11px 12px; font-weight: 400; }
 .kte-panel input[aria-invalid=true] { border-color: #dc5454; }
 .kte-check { display: flex; align-items: center; gap: 7px; min-height: 42px; font-size: .85rem; }
 .kte-panel input[type=checkbox] { accent-color: var(--accent-primary,#6366f1); }

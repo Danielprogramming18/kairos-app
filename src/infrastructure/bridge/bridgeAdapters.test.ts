@@ -263,7 +263,7 @@ test('FIX-20: Native handoff files (KairosAndroidBridge.java, main.rs, tauri.con
     );
   }
 
-  // 4. Windows Tauri v2 project at /src-tauri/ and /handoff/windows/ match package.json version, protocol, and all 35 operations
+  // 4. Windows Tauri v2 project at /src-tauri/ and /handoff/windows/ match package.json version, protocol, and shared bridge operations
   const pkgJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
   const tauriConf = JSON.parse(
     fs.readFileSync(path.join(rootDir, 'src-tauri/tauri.conf.json'), 'utf8')
@@ -294,7 +294,9 @@ test('FIX-20: Native handoff files (KairosAndroidBridge.java, main.rs, tauri.con
   assert.ok(rustDbSource.includes('CONFLICT_STALE_REVISION'));
   assert.ok(rustDbSource.includes('PRAGMA journal_mode = WAL'));
 
+  const androidOnly = new Set(["notifications.listReminders", "notifications.getOpenTarget", "notifications.ackOpenTarget"]);
   for (const op of ALLOWED_BRIDGE_OPERATIONS) {
+    if (androidOnly.has(op)) continue;
     assert.ok(
       rustDbSource.includes(`"${op}"`),
       `src-tauri/src/db.rs must implement operation "${op}"`

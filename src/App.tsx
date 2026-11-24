@@ -1,3 +1,6 @@
+import {usePlanning} from './app/PlanningContext';
+import {useReminders} from './app/useReminders';
+import {reminderId, type ReminderTarget} from './domain/reminders';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -549,7 +552,26 @@ export default function App() {
 
   const [activeFocusTaskId, setActiveFocusTaskId] = useState<string | undefined>(undefined);
 
-  // Background Task Reminder Checker
+  const {state: planning, ready: planningReady} = usePlanning();
+  const [openReminderEvent, setOpenReminderEvent] = useState<string>();
+  const reminders = useReminders(container.reminders, isHydrated && planningReady && (storageStatus==='ready' || storageStatus==='saved') && !bridgeError, tasks, planning.events, (target: ReminderTarget) => {
+    if (target.kind === 'task' || target.kind === 'projectTask') {
+      const task = tasks.find(t => t.id === target.itemId && !t.deletedAt);
+      setWorkspaceDateFilter(null);
+      setActiveTab((task ? task.projectId : target.kind === 'projectTask') ? 'projects' : 'workspace');
+      if (task) {
+        setTaskToEdit(task);
+        setTaskModalDefaultDateKey(task.targetDate);
+        setIsTaskModalOpen(true);
+      } else setIsTaskModalOpen(false);
+    } else {
+      setIsTaskModalOpen(false);
+      setOpenReminderEvent(target.itemId);
+      setActiveTab('events');
+    }
+  });
+
+  // Legacy foreground-only reminder, retained for existing saved tasks.
   useEffect(() => {
     if (!isHydrated) return;
     const checkReminders = () => {
@@ -569,6 +591,7 @@ export default function App() {
 
         if (
           !task.completed &&
+          !task.planning?.reminder &&
           !task.reminded &&
           (isDueToday || isDueFromBefore)
         ) {
@@ -1653,7 +1676,8 @@ export default function App() {
             const saved = await executeStorageMutation('ساخت کار از قالب', () => container.tasks.upsertTasksBatch(newTasks.map(taskToDomainEntity)));
             return saved !== null;
           }} />}
-          {activeTab === 'events' && <EventsView />}
+          {reminders.summary && <p className="mb-3 text-sm" role="status">{reminders.summary}</p>}
+          {activeTab === 'events' && <EventsView openId={openReminderEvent} onOpenHandled={() => setOpenReminderEvent(undefined)} reminders={reminders} />}
           {activeTab === 'tracking' && <TrackingView />}
           {activeTab === 'capacity' && <CapacityView timerMinutes={pomodoroController.timerState.selectedPresetMinutes} tasks={tasks} sessions={focusSessions} onReload={reloadAllFromRepository} />}
           {activeTab === 'customize' && <CustomizeView onNavigate={setActiveTab} />}
@@ -1847,6 +1871,9 @@ export default function App() {
         defaultDateKey={taskModalDefaultDateKey}
         onClose={() => setIsTaskModalOpen(false)}
         onSave={handleSaveTask}
+        reminderNotice={taskToEdit && reminders.notice(reminderId('task',taskToEdit.id)) || undefined}
+        canRequestReminder={!!taskToEdit && reminders.status(reminderId('task',taskToEdit.id)) === 'permission'}
+        requestReminder={() => void reminders.request()}
       />
 
       <DeleteModal

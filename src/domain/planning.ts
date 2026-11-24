@@ -1,5 +1,7 @@
 import type { Task } from '../types';
+import {validateReminder, type ReminderRule, type EventKind, type RepeatFrequency} from './reminders';
 export interface TaskPlanning {
+  reminder?: ReminderRule;
   stageId?: string;
   resume?: string;
   templateId?: string;
@@ -36,6 +38,9 @@ export interface TaskTemplate {
   tasks: (Pick<Task, 'title' | 'description' | 'duration' | 'priority' | 'category' | 'subtasks'> & { id?: string; workType?: string; units?: number; unitName?: string })[];
 }
 export interface PlanningEvent {
+  kind?: EventKind;
+  repeat?: RepeatFrequency;
+  reminder?: ReminderRule;
   id: string;
   title: string;
   date: string;
@@ -182,6 +187,7 @@ function collection(v: unknown, name: string): any[] {
 }
 export function validateTaskPlanning(value: unknown): TaskPlanning {
   requireValid(obj(value), 'اطلاعات تکمیلی کار نامعتبر است.');
+  if (value.reminder !== undefined) validateReminder(value.reminder);
   requireValid(value.durationSource === undefined || ['history','timer'].includes(value.durationSource), 'منشأ مدت کار نامعتبر است.');
   for (const k of ['stageId', 'resume', 'templateId', 'templateItemId', 'workType', 'unitName', 'timerCoverageFingerprint']) if (value[k] !== undefined) requireValid(str(value[k]), `فیلد ${k} نامعتبر است.`);
   for (const k of ['units', 'initialEstimate', 'remainingMinutes', 'actualMinutes', 'minimumChunk']) if (value[k] !== undefined) requireValid(number(value[k]) && value[k] >= 0 && value[k] <= 10000000, `مقدار ${k} نامعتبر است.`);
@@ -199,7 +205,15 @@ export function validatePlanning(value: unknown): PlanningState {
     for (const stage of collection(p.stages, 'مراحل')) requireValid(str(stage.title) && !!stage.title.trim(), 'مرحله نامعتبر است.');
   }
   const projectIds = new Set(value.projects.map((p: Project) => p.id));
-  for (const e of collection(value.events, 'رویدادها')) requireValid(str(e.title) && !!e.title.trim() && validDate(e.date) && (!e.time || validTime(e.time)) && (!e.projectId || projectIds.has(e.projectId)), 'رویداد نامعتبر است.');
+  for (const e of collection(value.events, 'رویدادها')) {
+    requireValid(str(e.title) && !!e.title.trim() && validDate(e.date) && (!e.time || validTime(e.time)) && (!e.projectId || projectIds.has(e.projectId)), 'رویداد نامعتبر است.');
+    requireValid(e.kind === undefined || ['event','exam','appointment'].includes(e.kind), 'نوع رویداد نامعتبر است.');
+    requireValid(e.repeat === undefined || ['daily','weekly','monthly'].includes(e.repeat), 'الگوی تکرار نامعتبر است.');
+    if (e.reminder !== undefined) {
+      validateReminder(e.reminder);
+      requireValid(!e.repeat || e.reminder.mode !== 'custom', 'یادآوری رویداد تکراری باید بر پایهٔ هر نوبت باشد.');
+    }
+  }
   for (const m of collection(value.metrics, 'شاخص‌ها')) {
     requireValid(str(m.title) && !!m.title.trim() && str(m.unit) && str(m.description) && ['sum', 'mean', 'last'].includes(m.aggregate) && ['up', 'down', 'neutral'].includes(m.direction) && (!m.projectId || projectIds.has(m.projectId)), 'شاخص نامعتبر است.');
     requireValid((m.min === undefined || number(m.min)) && (m.max === undefined || number(m.max)) && !(m.min !== undefined && m.max !== undefined && m.min > m.max), 'حدود شاخص نامعتبر است.');
