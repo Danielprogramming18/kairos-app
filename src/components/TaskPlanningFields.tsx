@@ -114,6 +114,12 @@ export function TaskPlanningFields({
   const [feedback, setFeedback] = useState('');
   const [actionId, setActionId] = useState('');
   const project = state.projects.find(p => p.id === projectId);
+  const rootProjectId = project?.parentProjectId ?? project?.id ?? '';
+  const subprojects = rootProjectId ? state.projects.filter(p => p.parentProjectId === rootProjectId) : [];
+  const selectProject = (id: string) => {
+    onProject(id);
+    onChange({ ...planning, stageId: undefined });
+  };
   const coverage = useMemo(() => {
     const timeVisible = !section || section === 'time';
     return analyzeTimerCoverage(taskId ?? '', timeVisible ? sessions : [], Date.now(), completedAt);
@@ -163,7 +169,35 @@ export function TaskPlanningFields({
     })) setFeedback('بازخورد ذخیره شد.');
   };
   return <div className="kp">
-    {(!section || section === 'project') && <><div className="kp-grid"><Field label="پروژه"><select value={projectId} onChange={e=>{onProject(e.target.value);onChange({...planning,stageId:undefined});}}><option value="">بدون پروژه</option>{state.projects.map(p=><option key={p.id} value={p.id}>{p.title}{p.archived?' (بایگانی)':''}</option>)}</select></Field>{project&&<Field label="مرحله"><select value={planning.stageId??''} onChange={e=>onChange({...planning,stageId:e.target.value||undefined})}><option value="">بدون مرحله</option>{project.stages.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></Field>}</div><Field label="از اینجا ادامه بده"><textarea value={planning.resume??''} onChange={e=>onChange({...planning,resume:e.target.value})}/></Field></>}
+    {(!section || section === 'project') && <>
+      <div className="kp-grid">
+        <Field label="پروژه">
+          <select value={rootProjectId} onChange={event => selectProject(event.target.value)}>
+            <option value="">بدون پروژه</option>
+            {state.projects.filter(p => !p.parentProjectId).map(p => (
+              <option key={p.id} value={p.id}>{p.title}{p.archived ? ' (بایگانی)' : ''}</option>
+            ))}
+          </select>
+        </Field>
+        {subprojects.length > 0 && <Field label="زیرپروژه (اختیاری)">
+          <select value={project?.parentProjectId ? project.id : ''} onChange={event => selectProject(event.target.value || rootProjectId)}>
+            <option value="">بدون زیرپروژه</option>
+            {subprojects.map(p => (
+              <option key={p.id} value={p.id}>{p.title}{p.archived ? ' (بایگانی)' : ''}</option>
+            ))}
+          </select>
+        </Field>}
+        {project && <Field label="مرحله">
+          <select value={planning.stageId ?? ''} onChange={event => onChange({ ...planning, stageId: event.target.value || undefined })}>
+            <option value="">بدون مرحله</option>
+            {project.stages.map(stage => <option key={stage.id} value={stage.id}>{stage.title}</option>)}
+          </select>
+        </Field>}
+      </div>
+      <Field label="از اینجا ادامه بده">
+        <textarea value={planning.resume ?? ''} onChange={event => onChange({ ...planning, resume: event.target.value })} />
+      </Field>
+    </>}
     {(!section || section === 'time') && <><Field label="موعد تحویل (تاریخ و ساعت محلی، اختیاری)"><input type="datetime-local" value={dueAt} onChange={e=>onDue(e.target.value)}/></Field><Field label="نوع مشخص کار"><input placeholder="مثلاً طراحی رابط وب؛ اختیاری" value={planning.workType??''} onChange={e=>onChange({...planning,workType:e.target.value})}/></Field><small>برای تخمین شخصی، نوع مشخص کار یا همان آیتم قالب مقایسه می‌شود؛ دستهٔ عمومی کافی نیست.</small><div className="kp-grid"><Field label="مدت باقی‌مانده (دقیقه)"><input type="number" min="0" step="any" value={planning.remainingMinutes??''} onChange={e=>onChange({...planning,remainingMinutes:e.target.value===''?undefined:Number(e.target.value)})}/></Field><Field label="کل زمان واقعی انجام کار (دقیقه)"><input type="number" min="1" step="any" value={planning.actualMinutes??''} onChange={e=>onChange({...planning,actualMinutes:e.target.value===''?undefined:Number(e.target.value),actualConfirmed:false})}/></Field><Field label="حجم کار (مثلاً تعداد سؤال)"><input type="number" min="0.001" step="any" value={planning.units??''} onChange={e=>onChange({...planning,units:e.target.value===''?undefined:Number(e.target.value)})}/></Field>{(planning.units!==undefined||planning.unitName)&&<Field label="واحد حجم کار"><input value={planning.unitName??''} onChange={e=>onChange({...planning,unitName:e.target.value})}/></Field>}</div><label className="kp-check"><input type="checkbox" disabled={!(planning.actualMinutes!>0)} checked={!!planning.actualConfirmed} onChange={e=>onChange({...planning,actualConfirmed:e.target.checked})}/> این مقدار، کل زمان واقعی انجام کار است و آن را تأیید می‌کنم.</label>
     {taskId&&<div className="kp-card"><h4>زمان ثبت‌شده با تایمر</h4><p>{coverage.minutes.toLocaleString('fa-IR')} دقیقه در {coverage.sessionIds.length.toLocaleString('fa-IR')} جلسه ثبت شده است.</p><p>این مقدار خودکار کل زمان کار فرض نمی‌شود. پاسخ‌دادن اختیاری است و جلوی تکمیل کار را نمی‌گیرد.</p>{coverage.reasons.map(reason=><p key={reason} role="status">{reason}</p>)}<label className="kp-check"><input type="checkbox" disabled={!coverage.valid||!coverage.sessionIds.length} checked={coverageConfirmed} onChange={e=>onChange({...planning,timerCoverageConfirmed:e.target.checked,timerCoverageFingerprint:e.target.checked?coverage.fingerprint:undefined})}/> همهٔ زمان انجام این کار در همین جلسه‌های تایمر ثبت شده است.</label>{planning.timerCoverageConfirmed&&!coverageConfirmed&&<small>جلسه‌ها تغییر کرده‌اند؛ برای تخمین کل زمان، دوباره پوشش کامل را بررسی کن.</small>}</div>}
     <label className="kp-check"><input type="checkbox" checked={!!planning.splittable} onChange={e=>onChange({...planning,splittable:e.target.checked})}/> کار قابل تقسیم به چند جلسه است</label>{planning.splittable&&<Field label="حداقل طول جلسه (دقیقه)"><input type="number" min="1" value={planning.minimumChunk??15} onChange={e=>onChange({...planning,minimumChunk:Number(e.target.value)})}/></Field>}</>}

@@ -110,19 +110,16 @@ const TAB_TO_HASH: Record<NavTabId, string> = {
   sync: '#/settings',
 };
 
-function parseHashRoute(rawHash: string): { tab: NavTabId; dateParam: string | null } {
-  if (!rawHash) return { tab: 'dashboard', dateParam: null };
+function parseHashRoute(rawHash: string): { tab: NavTabId; dateParam: string | null; projectId: string } {
   const [baseHash, queryPart] = rawHash.split('?');
   const mapped = HASH_TO_TAB[baseHash] || 'dashboard';
-  let dateParam: string | null = null;
-  if (queryPart) {
-    const params = new URLSearchParams(queryPart);
-    const d = params.get('date');
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      dateParam = d;
-    }
-  }
-  return { tab: mapped, dateParam };
+  const params = new URLSearchParams(queryPart);
+  const date = params.get('date');
+  return {
+    tab: mapped,
+    dateParam: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    projectId: mapped === 'projects' ? params.get('project') ?? '' : '',
+  };
 }
 
 export type StorageLifecycleStatus = 'initializing' | 'ready' | 'saving' | 'saved' | 'error';
@@ -145,10 +142,15 @@ export default function App() {
     return null;
   });
 
+  const [selectedProjectId, setSelectedProjectId] = useState(() =>
+    typeof window === 'undefined' ? '' : parseHashRoute(window.location.hash).projectId
+  );
+
   const setActiveTab = useCallback((tab: NavTabId, customHash?: string) => {
     setActiveTabState(tab);
     if (typeof window !== 'undefined') {
       const targetHash = customHash || TAB_TO_HASH[tab] || '#/today';
+      setSelectedProjectId(parseHashRoute(targetHash).projectId);
       if (window.location.hash !== targetHash) {
         window.history.pushState(null, '', targetHash);
       }
@@ -159,6 +161,7 @@ export default function App() {
     const onHashChange = () => {
       const parsed = parseHashRoute(window.location.hash);
       setActiveTabState(parsed.tab);
+      setSelectedProjectId(parsed.projectId);
       if (parsed.dateParam) {
         setWorkspaceDateFilter(parsed.dateParam);
       }
@@ -534,6 +537,7 @@ export default function App() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<Task | null>(null);
   const [taskModalDefaultDateKey, setTaskModalDefaultDateKey] = useState<string>(() => getTodayKey());
+  const [taskModalProjectId, setTaskModalProjectId] = useState('');
 
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
@@ -623,6 +627,7 @@ export default function App() {
         e.preventDefault();
         setTaskToEdit(null);
         setTaskModalDefaultDateKey(getTodayKey());
+        setTaskModalProjectId('');
         setIsTaskModalOpen(true);
       } else if (key === 'h') {
         e.preventDefault();
@@ -903,7 +908,8 @@ export default function App() {
     );
   };
 
-  const handleOpenTaskModal = (taskId?: string, explicitDateKey?: string) => {
+  const handleOpenTaskModal = (taskId?: string, explicitDateKey?: string, projectId = '') => {
+    setTaskModalProjectId(projectId);
     if (taskId) {
       const t = tasks.find((item) => item.id === taskId);
       setTaskToEdit(t || null);
@@ -1649,7 +1655,13 @@ export default function App() {
           className="flex-1 min-w-0 w-full"
           data-storage-status={storageStatus}
         >
-          {activeTab === 'projects' && <ProjectsView tasks={tasks} onEdit={handleOpenTaskModal} onAdd={() => handleOpenTaskModal()} onToggle={handleToggleTask} onUpdateTask={async task=>{const saved=await executeStorageMutation('انتقال کار بین مرحله‌ها',()=>container.tasks.upsertTask(taskToDomainEntity(task),{expectedRevision:task.revision??taskRevisionsRef.current.get(task.id)}));return saved!==null;}} onSaveTasks={async newTasks => {
+          {activeTab === 'projects' && <ProjectsView
+            tasks={tasks}
+            selectedProjectId={selectedProjectId}
+            onSelectProject={id => setActiveTab('projects', id ? '#/projects?project=' + encodeURIComponent(id) : undefined)}
+            onEdit={handleOpenTaskModal}
+            onAdd={id => handleOpenTaskModal(undefined, getTodayKey(), id)}
+            onToggle={handleToggleTask} onUpdateTask={async task=>{const saved=await executeStorageMutation('انتقال کار بین مرحله‌ها',()=>container.tasks.upsertTask(taskToDomainEntity(task),{expectedRevision:task.revision??taskRevisionsRef.current.get(task.id)}));return saved!==null;}} onSaveTasks={async newTasks => {
             const saved = await executeStorageMutation('ساخت کار از قالب', () => container.tasks.upsertTasksBatch(newTasks.map(taskToDomainEntity)));
             return saved !== null;
           }} />}
@@ -1845,6 +1857,7 @@ export default function App() {
         isOpen={isTaskModalOpen}
         taskToEdit={taskToEdit}
         defaultDateKey={taskModalDefaultDateKey}
+        defaultProjectId={taskModalProjectId}
         onClose={() => setIsTaskModalOpen(false)}
         onSave={handleSaveTask}
       />

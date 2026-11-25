@@ -9,12 +9,13 @@ import { restoreTaskEditorDraft, taskEditorDraft, validateTaskEditor, type TaskE
 import './taskEditor.css';
 
 interface TaskModalProps {
-  isOpen: boolean; taskToEdit: Task | null; defaultDateKey?: string; sessions?: FocusSession[];
+  isOpen: boolean; taskToEdit: Task | null; defaultDateKey?: string; defaultProjectId?: string; sessions?: FocusSession[];
   onClose: () => void; onSave: (taskData: TaskEditorSave) => Promise<boolean> | boolean | void;
 }
 const DRAFT_KEY = 'kairos_unsaved_task_draft_v1';
 
-export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaultDateKey, sessions = [], onClose, onSave }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaultDateKey, defaultProjectId = '', sessions = [], onClose, onSave }) => {
+  const draftKey = defaultProjectId ? DRAFT_KEY + ':' + defaultProjectId : DRAFT_KEY;
   const today = getTodayKey();
   const [draft, setDraft] = useState<TaskEditorDraft>(() => taskEditorDraft(null, defaultDateKey || today));
   const [loaded, setLoaded] = useState(false);
@@ -31,12 +32,13 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaul
     if (!isOpen) { setLoaded(false); setExpanded({ project: false, time: false, advanced: false }); return; }
     let next = taskEditorDraft(taskToEdit, defaultDateKey || getTodayKey());
     if (!taskToEdit) {
-      try { const saved = localStorage.getItem(DRAFT_KEY); next = saved ? restoreTaskEditorDraft(JSON.parse(saved), defaultDateKey || getTodayKey()) || next : next; } catch { /* Keep the usable empty form. */ }
+      next.projectId = defaultProjectId;
+      try { const saved = localStorage.getItem(draftKey); next = saved ? restoreTaskEditorDraft(JSON.parse(saved), defaultDateKey || getTodayKey()) || next : next; } catch { /* Keep the usable empty form. */ }
     }
     setDraft(next); baseline.current = JSON.stringify(next); setLoaded(true); setSaving(false); setErrors({});
     setPriorityVisible(Boolean(taskToEdit && taskToEdit.priority !== 1));
     setExpanded({ project: false, time: false, advanced: false });
-  }, [isOpen, taskToEdit?.id, defaultDateKey]);
+  }, [isOpen, taskToEdit?.id, defaultDateKey, defaultProjectId, draftKey]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -50,13 +52,13 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaul
     if (!isOpen || !loaded) return;
     const dirty = JSON.stringify(draft) !== baseline.current;
     if (!taskToEdit) {
-      try { if (dirty || draft.title || draft.description) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* Saving the task still remains available. */ }
+      try { if (dirty || draft.title || draft.description) localStorage.setItem(draftKey, JSON.stringify(draft)); } catch { /* Saving the task still remains available. */ }
     }
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [isOpen, loaded, draft, taskToEdit]);
+  }, [isOpen, loaded, draft, taskToEdit, draftKey]);
 
   const nlp = useMemo(() => draft.title.trim() ? parseNaturalTaskInput(draft.title) : null, [draft.title]);
   const applyNlp = () => {
@@ -82,7 +84,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, taskToEdit, defaul
     try {
       const saved = await onSave(result.data);
       if (saved === false) { setErrors({ save: 'ذخیره انجام نشد؛ پیام خطا را بررسی کن و دوباره تلاش کن.' }); return; }
-      if (!taskToEdit) { try { localStorage.removeItem(DRAFT_KEY); } catch { /* The canonical task has already saved. */ } }
+      if (!taskToEdit) { try { localStorage.removeItem(draftKey); } catch { /* The canonical task has already saved. */ } }
       closeEditor();
     } catch (error) { setErrors({ save: (error as Error).message || 'ذخیره انجام نشد.' }); }
     finally { setSaving(false); }

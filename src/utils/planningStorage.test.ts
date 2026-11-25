@@ -42,6 +42,39 @@ function refreshChecksum(envelope: BackupEnvelopeV2) {
   return envelope;
 }
 
+test('subprojects and their task links survive storage and backup; only one level is valid', async () => {
+  const { db, adapter } = setup();
+  const planning = examplePlanning();
+  const child = {
+    id: 'css',
+    parentProjectId: 'project1',
+    title: 'یادگیری CSS',
+    description: '',
+    archived: false,
+    stages: [{ id: 'stage1', title: 'مبانی' }],
+  };
+  planning.projects.push(child);
+  try {
+    await adapter.planning.savePlanning(planning, { expectedRevision: 0 });
+    await adapter.tasks.upsertTask({ ...exampleTask(), projectId: child.id });
+    assert.deepEqual((await adapter.planning.getPlanning()).projects, planning.projects);
+    const backup = await adapter.backup.exportBackup();
+    const validated = validateBackupEnvelopeObject(JSON.parse(JSON.stringify(backup)), { verifyChecksum: true });
+    assert.equal(validated.valid, true, validated.errors.join(' | '));
+    assert.deepEqual(validated.envelope!.payload.planning!.projects, planning.projects);
+    assert.equal(validated.envelope!.payload.tasks[0].projectId, child.id);
+
+    for (const parentProjectId of ['missing', child.id]) {
+      const invalid = { ...planning, projects: [...planning.projects, { ...child, id: 'invalid', parentProjectId }] };
+      assert.throws(() => validatePlanning(invalid), /زیرپروژه/);
+    }
+    const cycle = { ...planning, projects: [{ ...planning.projects[0], parentProjectId: child.id }, child] };
+    assert.throws(() => validatePlanning(cycle), /زیرپروژه/);
+  } finally {
+    db.close();
+  }
+});
+
 test('planning and task extras survive canonical mappings, encrypted backup, replace and rollback', async () => {
   const { db, adapter } = setup();
   const planning = examplePlanning();

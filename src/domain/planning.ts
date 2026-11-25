@@ -21,6 +21,7 @@ export interface TaskPlanning {
 }
 export interface Project {
   id: string;
+  parentProjectId?: string;
   title: string;
   description: string;
   archived: boolean;
@@ -193,15 +194,20 @@ export function validatePlanning(value: unknown): PlanningState {
   requireValid(obj(value) && value.schemaVersion === 1, 'نسخهٔ اطلاعات برنامه‌ریزی پشتیبانی نمی‌شود.');
   requireValid(Number.isSafeInteger(value.revision) && value.revision >= 0, 'نسخهٔ ویرایش نامعتبر است.');
   requireValid(new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_PLANNING_STATE_BYTES, 'اطلاعات برنامه‌ریزی از سقف ۱۶ میبی‌بایت بیشتر است.');
-  for (const p of collection(value.projects, 'پروژه‌ها')) {
+  const projects = collection(value.projects, 'پروژه‌ها') as Project[];
+  const projectsById = new Map(projects.map(project => [project.id, project]));
+  for (const p of projects) {
     requireValid(str(p.title) && !!p.title.trim() && str(p.description) && typeof p.archived === 'boolean', 'پروژه نامعتبر است.');
     requireValid(p.nextTaskId === undefined || str(p.nextTaskId), 'قدم بعدی پروژه نامعتبر است.');
+    if (p.parentProjectId !== undefined) {
+      const parent = projectsById.get(p.parentProjectId);
+      requireValid(parent !== undefined && parent.id !== p.id && parent.parentProjectId === undefined, 'زیرپروژه باید به یک پروژهٔ اصلی وابسته باشد.');
+    }
     for (const stage of collection(p.stages, 'مراحل')) requireValid(str(stage.title) && !!stage.title.trim(), 'مرحله نامعتبر است.');
   }
-  const projectIds = new Set(value.projects.map((p: Project) => p.id));
-  for (const e of collection(value.events, 'رویدادها')) requireValid(str(e.title) && !!e.title.trim() && validDate(e.date) && (!e.time || validTime(e.time)) && (!e.projectId || projectIds.has(e.projectId)), 'رویداد نامعتبر است.');
+  for (const e of collection(value.events, 'رویدادها')) requireValid(str(e.title) && !!e.title.trim() && validDate(e.date) && (!e.time || validTime(e.time)) && (!e.projectId || projectsById.has(e.projectId)), 'رویداد نامعتبر است.');
   for (const m of collection(value.metrics, 'شاخص‌ها')) {
-    requireValid(str(m.title) && !!m.title.trim() && str(m.unit) && str(m.description) && ['sum', 'mean', 'last'].includes(m.aggregate) && ['up', 'down', 'neutral'].includes(m.direction) && (!m.projectId || projectIds.has(m.projectId)), 'شاخص نامعتبر است.');
+    requireValid(str(m.title) && !!m.title.trim() && str(m.unit) && str(m.description) && ['sum', 'mean', 'last'].includes(m.aggregate) && ['up', 'down', 'neutral'].includes(m.direction) && (!m.projectId || projectsById.has(m.projectId)), 'شاخص نامعتبر است.');
     requireValid((m.min === undefined || number(m.min)) && (m.max === undefined || number(m.max)) && !(m.min !== undefined && m.max !== undefined && m.min > m.max), 'حدود شاخص نامعتبر است.');
     for (const e of collection(m.entries, 'اندازه‌گیری‌ها')) requireValid(validDate(e.date) && number(e.value) && str(e.note), 'اندازه‌گیری نامعتبر است.');
   }
