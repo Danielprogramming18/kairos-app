@@ -1,4 +1,4 @@
-import React,{useEffect,useMemo,useState} from 'react';
+import React,{useEffect,useId,useMemo,useState} from 'react';
 import type {Task} from '../types';
 import type {Project,TaskTemplate} from '../domain/planning';
 import {localDate,normalizeText} from '../domain/planning';
@@ -42,10 +42,14 @@ export function ProjectsView({
  const [template,setTemplate]=useState<TaskTemplate|null>(null),[templateDate,setTemplateDate]=useState(()=>localDate(new Date())),[templateName,setTemplateName]=useState(''),[removeTemplate,setRemoveTemplate]=useState('');
  const [saving,setSaving]=useState(false),[message,setMessage]=useState('');
  const [addingSubproject, setAddingSubproject] = useState(false);
+ const [subprojectParentId, setSubprojectParentId] = useState('');
  const [subprojectTitle, setSubprojectTitle] = useState('');
+ const subprojectFormId = useId();
  const project = state.projects.find(p => p.id === selectedProjectId);
  const selected = project?.id ?? '';
  const parent = state.projects.find(p => p.id === project?.parentProjectId);
+ const eligibleParents = state.projects.filter(p => !p.parentProjectId && !p.archived);
+ const subprojectParent = eligibleParents.find(p => p.id === subprojectParentId);
  const subprojects = project ? state.projects.filter(p => p.parentProjectId === project.id) : [];
  const tasksByProject = useMemo(() => {
    const grouped = new Map<string, Task[]>();
@@ -74,12 +78,16 @@ export function ProjectsView({
  const createSubproject = async (event: React.FormEvent) => {
    event.preventDefault();
    const childTitle = subprojectTitle.trim();
-   if (!project || project.parentProjectId || project.archived || !childTitle) return;
+   if (!subprojectParent || !childTitle) return;
    const id = uid();
-   const parentProjectId = project.id;
+   const parentProjectId = subprojectParent.id;
    if (await change(draft => {
      draft.projects.push({ id, parentProjectId, title: childTitle, description: '', archived: false, stages: [] });
-   })) onSelectProject(id);
+   })) {
+     setAddingSubproject(false);
+     setSubprojectTitle('');
+     onSelectProject(id);
+   }
  };
  const create=async(e:React.FormEvent)=>{e.preventDefault();if(!title.trim())return;const id=project?.id??uid();if(await change(s=>{if(project){const p=s.projects.find(x=>x.id===id)!;p.title=title.trim();p.description=description;}else s.projects.push({id,title:title.trim(),description,archived:false,stages:[]});}))onSelectProject(id);};
  const removeStage = async (stageId: string, destination: string) => {
@@ -125,6 +133,34 @@ export function ProjectsView({
  const renderTask=(t:Task)=><article className="kp-card" key={t.id}><div className="kp-actions"><input aria-label={`انجام ${t.title}`} type="checkbox" checked={t.completed} onChange={()=>onToggle(t.id)}/><button className="kp-link" onClick={()=>onEdit(t.id)}>{t.title}</button><small>{state.projects.find(p=>p.id===t.projectId)?.title}</small><button disabled={saving||!templateDate} onClick={()=>void copy(t)}>کپی برای تاریخ انتخابی</button></div>{t.planning?.resume&&<p>از اینجا ادامه بده: {t.planning.resume}</p>}{project&&<Field label={`مرحلهٔ کار ${t.title}`}><select disabled={saving} value={knownStages.has(t.planning?.stageId??'')?t.planning?.stageId:''} onChange={async e=>{const stageId=e.target.value;setSaving(true);try{await onUpdateTask({...t,planning:{...t.planning,stageId:stageId||undefined}});}finally{setSaving(false);}}}><option value="">بدون مرحله</option>{project.stages.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></Field>}<small>{t.planning?.waiting?'در انتظار · ':''}{t.duration.toLocaleString('fa-IR')} دقیقه</small></article>;
  const groups=project?projectStageGroups(project,filtered):null;
  return <PlanningShell title="پروژه‌ها و جست‌وجو"><p>کارها را براساس پروژه و مرحله دنبال کن.</p><div className="kp-grid"><Field label="پروژه"><select value={selected} onChange={e=>onSelectProject(e.target.value)}><option value="">همهٔ کارها / پروژهٔ جدید</option>{state.projects.filter(p=>includeArchived||!p.archived||p.id===selected).map(p=><option key={p.id} value={p.id}>{projectLabel(p)}</option>)}</select></Field><label><input type="checkbox" checked={includeArchived} onChange={e=>setIncludeArchived(e.target.checked)}/> نمایش بایگانی</label></div>
+ {!parent && !project?.archived && <div className="kp-actions">
+   <button type="button" aria-expanded={addingSubproject} aria-controls={addingSubproject ? subprojectFormId : undefined}
+     onClick={() => {
+       setSubprojectParentId(project?.id ?? (eligibleParents.length === 1 ? eligibleParents[0].id : ''));
+       setAddingSubproject(open => !open);
+     }}>
+     افزودن زیرپروژه
+   </button>
+ </div>}
+ {addingSubproject && !parent && !project?.archived && (
+   eligibleParents.length ? <form id={subprojectFormId} className="kp-card" onSubmit={createSubproject}>
+     <div className="kp-grid">
+       <Field label="پروژهٔ مادر">
+         <select required value={subprojectParent?.id ?? ''} onChange={event => setSubprojectParentId(event.target.value)}>
+           <option value="">پروژهٔ مادر را انتخاب کن</option>
+           {eligibleParents.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+         </select>
+       </Field>
+       <Field label="نام زیرپروژه">
+         <input required value={subprojectTitle} onChange={event => setSubprojectTitle(event.target.value)} />
+       </Field>
+     </div>
+     <div className="kp-actions">
+       <button disabled={!subprojectParent || !subprojectTitle.trim()}>ساخت زیرپروژه</button>
+       <button type="button" onClick={() => setAddingSubproject(false)}>انصراف</button>
+     </div>
+   </form> : <p id={subprojectFormId} role="status">اول از فرم پایین یک پروژهٔ اصلی بساز، بعد برایش زیرپروژه اضافه کن.</p>
+ )}
  {parent && <div className="kp-actions">
    <button type="button" onClick={() => onSelectProject(parent.id)}>بازگشت به پروژهٔ مادر</button>
    <span>{parent.title}</span>
@@ -142,15 +178,6 @@ export function ProjectsView({
      </div>
    ))}
    {!subprojects.length && <p>هنوز زیرپروژه‌ای برای این پروژه ثبت نشده است.</p>}
-   {!project.archived && (addingSubproject ? (
-     <form className="kp-actions" onSubmit={createSubproject}>
-       <Field label="نام زیرپروژه">
-         <input required value={subprojectTitle} onChange={event => setSubprojectTitle(event.target.value)} />
-       </Field>
-       <button disabled={!subprojectTitle.trim()}>ساخت زیرپروژه</button>
-       <button type="button" onClick={() => setAddingSubproject(false)}>انصراف</button>
-     </form>
-   ) : <button type="button" onClick={() => setAddingSubproject(true)}>افزودن زیرپروژه</button>)}
  </section>}
  <div className="kp-grid"><Field label="جست‌وجوی کار یا پروژه"><input type="search" value={query} onChange={e=>setQuery(e.target.value)}/></Field><Field label="وضعیت"><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">همه</option><option value="open">انجام‌نشده</option><option value="done">انجام‌شده</option><option value="archived">بایگانی</option></select></Field>{project&&<Field label="فیلتر مرحله"><select value={stageFilter} onChange={e=>setStageFilter(e.target.value)}><option value="all">همهٔ مرحله‌ها</option><option value="__none">بدون مرحله</option>{project.stages.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></Field>}<Field label="موعد تا تاریخ (میلادی)"><input type="date" value={due} onChange={e=>setDue(e.target.value)}/></Field></div><button onClick={() => onAdd(selected)}>کار جدید</button>{!filtered.length&&<p>کاری با این فیلتر پیدا نشد.</p>}{groups?groups.filter(g=>stageFilter==='all'||g.id===stageFilter).map(g=><section key={g.id} aria-label={`کارهای مرحله ${g.title}`}><h3>{g.title}</h3><Progress tasks={own.filter(t=>g.id==='__none'?!t.planning?.stageId||!knownStages.has(t.planning.stageId):t.planning?.stageId===g.id)}/>{g.tasks.map(renderTask)}</section>):filtered.map(renderTask)}
  <section className="kp-card" id="project-templates"><h3>قالب‌ها و کپی کار</h3><Field label="تاریخ کارهای جدید (میلادی)"><input type="date" required value={templateDate} onChange={e=>setTemplateDate(e.target.value)}/></Field><div className="kp-actions">{[...builtins,...state.templates].map(t=><button key={t.id} onClick={()=>setTemplate({...structuredClone(t),tasks:t.tasks.map((x,i)=>({...x,id:x.id??`${t.id}:item:${i}`}))})}>{t.title}</button>)}</div><form className="kp-actions" onSubmit={async e=>{e.preventDefault();if(templateName.trim()&&filtered.length&&await change(s=>{s.templates.push({id:uid(),title:templateName.trim(),tasks:filtered.map(t=>({id:uid(),title:t.title,description:t.description,duration:t.duration,priority:t.priority,category:t.category,workType:t.planning?.workType,units:t.planning?.units,unitName:t.planning?.unitName,subtasks:t.subtasks?.map(x=>({...x,completed:false}))}))});}))setTemplateName('');}}><Field label="نام قالب از کارهای فهرست فعلی"><input required value={templateName} onChange={e=>setTemplateName(e.target.value)}/></Field><button disabled={!filtered.length}>ذخیرهٔ قالب</button></form>
